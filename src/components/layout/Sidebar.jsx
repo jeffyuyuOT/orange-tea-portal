@@ -1,0 +1,55 @@
+import { NavLink } from 'react-router-dom'
+import { SECTIONS, canAccessSection, canAccessPage } from '../../lib/permissions'
+import { useAuth } from '../../lib/AuthContext'
+
+export default function Sidebar() {
+  const { effectivePages } = useAuth()
+
+  return (
+    <aside className="hidden w-64 shrink-0 border-r border-brand-100 bg-brand-50/40 md:flex md:flex-col">
+      <div className="flex items-center gap-2 px-5 py-4">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">
+          OT
+        </div>
+        <div>
+          <div className="text-sm font-semibold text-brand-900">Orange Tea AU</div>
+          <div className="text-xs text-brand-500">Staff Portal</div>
+        </div>
+      </div>
+
+      <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
+        {Object.entries(SECTIONS).map(([sectionKey, section]) => {
+          if (!canAccessSection(effectivePages, sectionKey)) return null
+          return (
+            <div key={sectionKey}>
+              <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-brand-400">
+                {section.label}
+              </div>
+              <div className="space-y-0.5">
+                {Object.entries(section.pages).map(([pageKey, pageLabel]) => {
+                  const fullKey = `${sectionKey}.${pageKey}`
+                  if (!canAccessPage(effectivePages, fullKey)) return null
+                  return (
+                    <NavLink
+                      key={fullKey}
+                      to={`/${sectionKey.replace(/_/g, '-')}/${pageKey.replace(/_/g, '-')}`}
+                      className={({ isActive }) =>
+                        `block rounded-lg px-3 py-1.5 text-sm ${
+                          isActive
+                            ? 'bg-brand-500 text-white font-medium'
+                            : 'text-gray-600 hover:bg-brand-100 hover:text-brand-800'
+                        }`
+                      }
+                    >
+                      {pageLabel}
+                    </NavLink>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </nav>
+    </aside>
+  )
+}
