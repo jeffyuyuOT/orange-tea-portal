@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { addDays, format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
-import { exportRosterWorkbook } from '../../../lib/excelRoster'
+import { exportRosterGrid, timeToDecimal } from '../../../lib/excelRoster'
 import MultiStoreExportModal from './MultiStoreExportModal'
 
 export default function RosterHistoryPage() {
   const { currentStoreId, profile, accessibleStores } = useAuth()
+  const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
   const [periods, setPeriods] = useState([])
   const [loading, setLoading] = useState(true)
   const [showMultiExport, setShowMultiExport] = useState(false)
@@ -30,18 +32,20 @@ export default function RosterHistoryPage() {
   }, [currentStoreId])
 
   async function exportPeriod(period) {
-    const { data: rows } = await supabase
-      .from('roster_entries')
-      .select('*, profiles(email)')
-      .eq('roster_period_id', period.id)
+    const [{ data: rows }, { data: staffList }] = await Promise.all([
+      supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
+      supabase.from('profiles').select('id, first_name, last_name').eq('primary_store_id', currentStoreId).eq('is_active', true),
+    ])
+    const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(period.week_start_date), i), 'yyyy-MM-dd'))
     const entries = (rows ?? []).map((r) => ({
-      staffEmail: r.profiles?.email ?? r.staff_name_raw ?? '',
+      profileId: r.profile_id ?? '',
+      staffName: r.profiles ? `${r.profiles.first_name ?? ''} ${r.profiles.last_name ?? ''}`.trim() : r.staff_name_raw ?? '',
       date: r.work_date,
-      startTime: r.start_time?.slice(0, 5) ?? '',
-      endTime: r.end_time?.slice(0, 5) ?? '',
-      notes: r.notes ?? '',
+      startTime: timeToDecimal(r.start_time),
+      endTime: timeToDecimal(r.end_time),
+      breakHours: r.break_half_hours ?? '',
     }))
-    exportRosterWorkbook(entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
+    exportRosterGrid(storeName, staffList ?? [], weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
   }
 
   return (

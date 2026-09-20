@@ -80,6 +80,7 @@ function DrinkCategories({ onSelect, onTips }) {
       .select('*')
       .eq('group_key', 'drink')
       .order('sort_order')
+      .order('id')
       .then(({ data }) => {
         if (active) {
           setCategories(data ?? [])
@@ -123,7 +124,7 @@ function ItemList({ groupKey, categoryId, storeId, onBack, backLabel, onOpenItem
     async function load() {
       let query = supabase.from('formula_items').select('*').eq('group_key', groupKey).eq('is_active', true)
       query = categoryId ? query.eq('category_id', categoryId) : query.is('category_id', null)
-      const { data: itemRows } = await query.order('sort_order')
+      const { data: itemRows } = await query.order('sort_order').order('id')
       const ids = (itemRows ?? []).map((i) => i.id)
       let restrictionRows = []
       if (ids.length) {

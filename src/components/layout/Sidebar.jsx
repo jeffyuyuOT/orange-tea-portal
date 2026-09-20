@@ -8,9 +8,7 @@ export default function Sidebar() {
   return (
     <aside className="hidden w-64 shrink-0 border-r border-brand-100 bg-brand-50/40 md:flex md:flex-col">
       <div className="flex items-center gap-2 px-5 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">
-          OT
-        </div>
+        <img src="/logo-icon.png" alt="Orange Tea AU" className="h-9 w-9 shrink-0 object-contain" />
         <div>
           <div className="text-sm font-semibold text-brand-900">Orange Tea AU</div>
           <div className="text-xs text-brand-500">Staff Portal</div>

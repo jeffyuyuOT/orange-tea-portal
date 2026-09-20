@@ -1,9 +1,10 @@
 import { useState } from 'react'
+import { addDays, format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
-import { exportMultiStoreWorkbook } from '../../../lib/excelRoster'
+import { exportMultiStoreWorkbook, timeToDecimal } from '../../../lib/excelRoster'
 import { thisWeekStart } from '../shared/rosterWeeks'
 
 export default function MultiStoreExportModal({ onClose }) {
@@ -18,32 +19,37 @@ export default function MultiStoreExportModal({ onClose }) {
 
   async function doExport() {
     setBusy(true)
+    const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(weekStart), i), 'yyyy-MM-dd'))
     const storeSheets = []
     for (const storeId of selected) {
       const store = accessibleStores.find((s) => s.id === storeId)
-      const { data: period } = await supabase
-        .from('roster_periods')
-        .select('*')
-        .eq('store_id', storeId)
-        .eq('week_start_date', weekStart)
-        .order('submitted_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+      const [{ data: period }, { data: staffList }] = await Promise.all([
+        supabase
+          .from('roster_periods')
+          .select('*')
+          .eq('store_id', storeId)
+          .eq('week_start_date', weekStart)
+          .order('submitted_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase.from('profiles').select('id, first_name, last_name').eq('primary_store_id', storeId).eq('is_active', true),
+      ])
       let entries = []
       if (period) {
         const { data: rows } = await supabase
           .from('roster_entries')
-          .select('*, profiles(email)')
+          .select('*, profiles(first_name, last_name)')
           .eq('roster_period_id', period.id)
         entries = (rows ?? []).map((r) => ({
-          staffEmail: r.profiles?.email ?? r.staff_name_raw ?? '',
+          profileId: r.profile_id ?? '',
+          staffName: r.profiles ? `${r.profiles.first_name ?? ''} ${r.profiles.last_name ?? ''}`.trim() : r.staff_name_raw ?? '',
           date: r.work_date,
-          startTime: r.start_time?.slice(0, 5) ?? '',
-          endTime: r.end_time?.slice(0, 5) ?? '',
-          notes: r.notes ?? '',
+          startTime: timeToDecimal(r.start_time),
+          endTime: timeToDecimal(r.end_time),
+          breakHours: r.break_half_hours ?? '',
         }))
       }
-      storeSheets.push({ storeName: store?.name ?? storeId, entries })
+      storeSheets.push({ storeName: store?.name ?? storeId, staff: staffList ?? [], weekDates, entries })
     }
     exportMultiStoreWorkbook(storeSheets, `roster-${weekStart}-all-stores.xlsx`)
     setBusy(false)

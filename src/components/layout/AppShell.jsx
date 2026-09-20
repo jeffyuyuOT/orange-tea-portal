@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
 import { useAuth } from '../../lib/AuthContext'
@@ -6,13 +6,23 @@ import { ROLE_LABELS } from '../../lib/permissions'
 
 export default function AppShell() {
   const { profile, signOut } = useAuth()
+  const location = useLocation()
+  // Admin Center pages (Formula Database, Store Management, User Management,
+  // ...) manage every store's data at once — there's nothing to "switch"
+  // into, so the per-store picker is hidden there instead of implying a
+  // scope that doesn't apply.
+  const isAdminCenter = location.pathname.startsWith('/admin-center')
 
   return (
     <div className="flex h-screen w-full bg-white">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-brand-100 px-6 py-3">
-          <StoreSwitcher />
+          {isAdminCenter ? (
+            <span className="text-sm font-medium text-brand-700">All Stores</span>
+          ) : (
+            <StoreSwitcher />
+          )}
           <div className="flex items-center gap-3">
             <div className="text-right leading-tight">
               <div className="text-sm font-medium text-gray-800">

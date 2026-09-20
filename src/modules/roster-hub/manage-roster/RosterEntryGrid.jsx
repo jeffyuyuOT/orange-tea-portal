@@ -1,75 +1,253 @@
-import Button from '../../../components/ui/Button'
+import { Fragment, useMemo, useState } from 'react'
+import { dayHours } from '../../../lib/excelRoster'
 
-export default function RosterEntryGrid({ entries, setEntries, staff }) {
-  function updateRow(idx, patch) {
-    setEntries((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function round2(n) {
+  return Math.round(n * 100) / 100
+}
+
+function staffFullName(s) {
+  return `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim()
+}
+
+// The same Name × day-of-week grid the manager already builds in Excel:
+// each staff member gets a Shift row (Start/End per day) and, right below
+// it, a Break row (hours of unpaid break that day) — Total hr and WKD hr
+// (Sat+Sun) are computed live from those as you type, same as the
+// exported workbook.
+//
+// `entries` stays a flat array (one record per person + date, matching a
+// roster_entries row) — this component only pivots it into a grid for
+// editing; ManageRosterPage still saves/loads the flat shape.
+export default function RosterEntryGrid({ staff, weekDates, entries, setEntries }) {
+  // "+ Add row" placeholders for a casual/one-off name not in Staff
+  // Information yet. Keyed by a stable id (not by the typed name) so
+  // typing into the Name field doesn't remount the row on every keystroke.
+  const [manualRows, setManualRows] = useState([])
+
+  const importedNames = useMemo(
+    () => Array.from(new Set(entries.filter((e) => !e.profileId && e.staffName).map((e) => e.staffName))),
+    [entries]
+  )
+
+  const rows = useMemo(() => {
+    const staffRows = staff.map((s) => ({ key: s.id, profileId: s.id, name: staffFullName(s) }))
+    const staffNamesLower = new Set(staffRows.map((r) => r.name.toLowerCase()))
+    // Stable per-index key (not per-name) — see comment above.
+    const importedRows = importedNames
+      .filter((name) => !staffNamesLower.has(name.toLowerCase()))
+      .map((name, i) => ({ key: `imported:${i}`, profileId: '', name }))
+    const manual = manualRows.map((m) => ({ key: m.key, profileId: '', name: m.name }))
+    return [...staffRows, ...importedRows, ...manual]
+  }, [staff, importedNames, manualRows])
+
+  function matches(row, e) {
+    return row.profileId ? e.profileId === row.profileId : e.staffName === row.name
   }
-  function removeRow(idx) {
-    setEntries((prev) => prev.filter((_, i) => i !== idx))
+
+  function findEntry(row, date) {
+    return entries.find((e) => matches(row, e) && e.date === date)
   }
+
+  function updateCell(row, date, patch) {
+    if (!row.name.trim()) return // ad-hoc row needs a name before it can take hours
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => matches(row, e) && e.date === date)
+      if (idx === -1) {
+        return [
+          ...prev,
+          { profileId: row.profileId, staffName: row.name, date, startTime: '', endTime: '', breakHours: '', notes: '', ...patch },
+        ]
+      }
+      const merged = { ...prev[idx], ...patch }
+      const next = [...prev]
+      if (merged.startTime === '' && merged.endTime === '' && (merged.breakHours === '' || merged.breakHours == null)) {
+        next.splice(idx, 1)
+        return next
+      }
+      next[idx] = merged
+      return next
+    })
+  }
+
+  function renameRow(row, newName) {
+    setEntries((prev) => prev.map((e) => (matches(row, e) ? { ...e, staffName: newName } : e)))
+    setManualRows((prev) => prev.map((m) => (m.key === row.key ? { ...m, name: newName } : m)))
+  }
+
   function addRow() {
-    setEntries((prev) => [...prev, { profileId: '', staffEmail: '', date: '', startTime: '', endTime: '', notes: '' }])
+    setManualRows((prev) => [...prev, { key: `manual:${Date.now()}:${prev.length}`, name: '' }])
   }
+
+  function removeRow(row) {
+    setEntries((prev) => prev.filter((e) => !matches(row, e)))
+    setManualRows((prev) => prev.filter((m) => m.key !== row.key))
+  }
+
+  function rowTotals(row) {
+    let total = 0
+    let wkd = 0
+    weekDates.forEach((date, i) => {
+      const h = dayHours(findEntry(row, date))
+      total += h
+      if (i === 5 || i === 6) wkd += h
+    })
+    return { total: round2(total), wkd: round2(wkd) }
+  }
+
+  const grandTotal = round2(rows.reduce((sum, row) => sum + rowTotals(row).total, 0))
 
   return (
     <div className="overflow-x-auto rounded-xl border border-brand-100">
-      <table className="min-w-full divide-y divide-brand-100 text-sm">
+      <table className="min-w-full border-collapse text-sm">
         <thead className="bg-brand-50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium text-brand-700">Staff</th>
-            <th className="px-3 py-2 text-left font-medium text-brand-700">Date</th>
-            <th className="px-3 py-2 text-left font-medium text-brand-700">Start</th>
-            <th className="px-3 py-2 text-left font-medium text-brand-700">End</th>
-            <th className="px-3 py-2 text-left font-medium text-brand-700">Notes</th>
-            <th></th>
+            <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-left font-medium text-brand-700">
+              Name
+            </th>
+            {weekDates.map((d, i) => (
+              <th key={d} colSpan={2} className="border border-brand-100 px-2 py-1 text-center font-medium text-brand-700">
+                {DAY_LABELS[i]} {d.slice(5)}
+              </th>
+            ))}
+            <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
+              Total hr
+            </th>
+            <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
+              WKD hr
+            </th>
+            <th rowSpan={2} className="border border-brand-100"></th>
+          </tr>
+          <tr>
+            {weekDates.map((d) => (
+              <Fragment key={d}>
+                <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">S</th>
+                <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">E</th>
+              </Fragment>
+            ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-brand-50">
-          {entries.map((row, idx) => (
-            <tr key={idx}>
-              <td className="px-2 py-1.5">
-                <select
-                  className="input"
-                  value={row.profileId}
-                  onChange={(e) => {
-                    const p = staff.find((s) => s.id === e.target.value)
-                    updateRow(idx, { profileId: e.target.value, staffEmail: p?.email ?? row.staffEmail })
-                  }}
-                >
-                  <option value="">{row.staffEmail || 'Select staff'}</option>
-                  {staff.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.first_name} {s.last_name}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="px-2 py-1.5">
-                <input type="date" className="input" value={row.date} onChange={(e) => updateRow(idx, { date: e.target.value })} />
-              </td>
-              <td className="px-2 py-1.5">
-                <input type="time" className="input" value={row.startTime} onChange={(e) => updateRow(idx, { startTime: e.target.value })} />
-              </td>
-              <td className="px-2 py-1.5">
-                <input type="time" className="input" value={row.endTime} onChange={(e) => updateRow(idx, { endTime: e.target.value })} />
-              </td>
-              <td className="px-2 py-1.5">
-                <input className="input" value={row.notes} onChange={(e) => updateRow(idx, { notes: e.target.value })} />
-              </td>
-              <td className="px-2 py-1.5">
-                <button onClick={() => removeRow(idx)} className="text-gray-400 hover:text-red-500">
-                  ✕
-                </button>
-              </td>
-            </tr>
-          ))}
+        <tbody>
+          {rows.map((row) => {
+            const { total, wkd } = rowTotals(row)
+            return (
+              <StaffRowPair
+                key={row.key}
+                row={row}
+                weekDates={weekDates}
+                findEntry={findEntry}
+                updateCell={updateCell}
+                renameRow={renameRow}
+                removeRow={removeRow}
+                total={total}
+                wkd={wkd}
+              />
+            )
+          })}
         </tbody>
+        <tfoot>
+          <tr className="bg-brand-50 font-medium text-brand-800">
+            <td className="border border-brand-100 px-2 py-1.5" colSpan={15}>
+              Total
+            </td>
+            <td className="border border-brand-100 px-2 py-1.5 text-center">{grandTotal || ''}</td>
+            <td className="border border-brand-100"></td>
+            <td className="border border-brand-100"></td>
+          </tr>
+        </tfoot>
       </table>
-      <div className="border-t border-brand-100 p-2">
-        <Button variant="secondary" onClick={addRow}>
-          + Add shift
-        </Button>
+      <div className="border-t border-brand-100 p-2 text-sm">
+        <button onClick={addRow} className="rounded-lg border border-brand-300 px-3 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
+          + Add row
+        </button>
+        <span className="ml-2 text-xs text-gray-400">
+          For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
+        </span>
       </div>
     </div>
+  )
+}
+
+function HourInput({ value, onChange, disabled, className = '', title }) {
+  return (
+    <input
+      type="number"
+      step="any"
+      inputMode="decimal"
+      disabled={disabled}
+      title={title}
+      className={`input !py-1 text-center ${className}`}
+      value={value === '' || value == null ? '' : value}
+      onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+    />
+  )
+}
+
+function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd }) {
+  const nameEmpty = !row.name.trim()
+  return (
+    <>
+      <tr>
+        <td className="border border-brand-100 px-2 py-1.5 font-medium text-gray-800">
+          {row.profileId ? (
+            row.name || <span className="text-gray-400">Unnamed</span>
+          ) : (
+            <input
+              className="input !py-1"
+              placeholder="Name"
+              value={row.name}
+              onChange={(e) => renameRow(row, e.target.value)}
+            />
+          )}
+        </td>
+        {weekDates.map((date) => {
+          const entry = findEntry(row, date)
+          return (
+            <Fragment key={date}>
+              <td className="border border-brand-100 px-1 py-1">
+                <HourInput value={entry?.startTime} disabled={nameEmpty} onChange={(v) => updateCell(row, date, { startTime: v })} />
+              </td>
+              <td className="border border-brand-100 px-1 py-1">
+                <HourInput value={entry?.endTime} disabled={nameEmpty} onChange={(v) => updateCell(row, date, { endTime: v })} />
+              </td>
+            </Fragment>
+          )
+        })}
+        <td rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-gray-700">
+          {total || ''}
+        </td>
+        <td rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center text-gray-500">
+          {wkd || ''}
+        </td>
+        <td rowSpan={2} className="border border-brand-100 px-1 text-center">
+          <button onClick={() => removeRow(row)} className="text-gray-300 hover:text-red-500" title="Clear this row's hours">
+            ✕
+          </button>
+        </td>
+      </tr>
+      <tr className="bg-gray-50/70">
+        <td className="border border-brand-100 px-2 py-1 text-xs italic text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
+          Break (½h)
+        </td>
+        {weekDates.map((date) => {
+          const entry = findEntry(row, date)
+          return (
+            <Fragment key={date}>
+              <td className="border border-brand-100 px-1 py-1">
+                <HourInput
+                  value={entry?.breakHours}
+                  disabled={nameEmpty}
+                  onChange={(v) => updateCell(row, date, { breakHours: v })}
+                  className="text-xs text-red-600"
+                  title="Half-hour units — 1 = 30 min, 2 = 1 hr"
+                />
+              </td>
+              <td className="border border-brand-100"></td>
+            </Fragment>
+          )
+        })}
+      </tr>
+    </>
   )
 }

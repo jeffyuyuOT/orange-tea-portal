@@ -47,6 +47,7 @@ export const SECTIONS = {
       shop_training_database: 'Shop Training Database',
       file_repository: 'File Repository',
       user_management: 'User Management',
+      store_management: 'Store Management',
       system_setting: 'System Setting',
     },
   },
@@ -68,6 +69,7 @@ const ROLE_DEFAULTS = {
         'admin_center.formula_database',
         'admin_center.file_repository',
         'admin_center.user_management',
+        'admin_center.store_management',
         'admin_center.system_setting',
       ].includes(key)
   ),

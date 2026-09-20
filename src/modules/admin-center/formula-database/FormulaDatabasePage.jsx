@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import IngredientInventoryTab from './IngredientInventoryTab'
-import FormatRuleTab from './FormatRuleTab'
 import IngredientMasterTab from './IngredientMasterTab'
+import DrinkSizeManager from './DrinkSizeManager'
 
+// Format Rule used to be its own tab here — it's now folded into Ingredient
+// Master's Edit window (abbreviation/colors/bold/italic alongside name and
+// unit), so there's one place to set up an ingredient instead of two.
 const TABS = [
   { key: 'inventory', label: 'Ingredient Inventory' },
-  { key: 'format', label: 'Format Rule' },
   { key: 'master', label: 'Ingredient Master' },
+  { key: 'sizes', label: 'Drink Sizes' },
 ]
 
 export default function FormulaDatabasePage() {
@@ -30,8 +33,8 @@ export default function FormulaDatabasePage() {
       </div>
 
       {tab === 'inventory' && <IngredientInventoryTab />}
-      {tab === 'format' && <FormatRuleTab />}
       {tab === 'master' && <IngredientMasterTab />}
+      {tab === 'sizes' && <DrinkSizeManager />}
     </div>
   )
 }

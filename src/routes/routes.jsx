@@ -26,6 +26,7 @@ import QuizBankPage from '../modules/admin-center/quiz-bank/QuizBankPage'
 import ShopTrainingDatabasePage from '../modules/admin-center/shop-training-database/ShopTrainingDatabasePage'
 import FileRepositoryPage from '../modules/admin-center/file-repository/FileRepositoryPage'
 import UserManagementPage from '../modules/admin-center/user-management/UserManagementPage'
+import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
 import SystemSettingPage from '../modules/admin-center/system-setting/SystemSettingPage'
 
 function guarded(pageKey, element) {
@@ -69,6 +70,7 @@ export default function AppRoutes() {
         <Route path="/admin-center/shop-training-database" element={guarded('admin_center.shop_training_database', <ShopTrainingDatabasePage />)} />
         <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
         <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
+        <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />
         <Route path="/admin-center/system-setting" element={guarded('admin_center.system_setting', <SystemSettingPage />)} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

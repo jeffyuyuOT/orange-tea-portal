@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
 // Searchable dropdown pulling from Ingredient Master (typing filters the list).
-export default function IngredientPicker({ value, onChange }) {
+export default function IngredientPicker({ value, onChange, className = 'w-48' }) {
   const [all, setAll] = useState([])
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -15,7 +15,7 @@ export default function IngredientPicker({ value, onChange }) {
   const filtered = all.filter((i) => i.name.toLowerCase().includes(query.toLowerCase()))
 
   return (
-    <div className="relative w-48">
+    <div className={`relative ${className}`}>
       <input
         className="input"
         placeholder="Search ingredient…"

@@ -6,8 +6,10 @@ import { supabase } from './supabaseClient'
 // without touching people's accounts or schedules.
 const BACKUP_TABLES = [
   'stores',
+  'drink_sizes',
   'formula_categories',
   'formula_items',
+  'formula_item_sizes',
   'formula_item_ingredients',
   'formula_item_steps',
   'formula_item_stores',
@@ -27,11 +29,37 @@ export async function exportBackup() {
     if (error) throw new Error(`Failed exporting ${table}: ${error.message}`)
     payload.tables[table] = data
   }
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const json = JSON.stringify(payload, null, 2)
+  const filename = `orange-tea-portal-backup-${new Date().toISOString().slice(0, 10)}.json`
+
+  // Chromium browsers (Chrome / Edge) support the File System Access API,
+  // which opens a real "Save As" dialog so the person can pick the folder.
+  // Other browsers (Firefox, Safari) don't implement it, so we fall back to
+  // a normal browser download in that case.
+  if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: 'JSON backup', accept: { 'application/json': ['.json'] } }],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(json)
+      await writable.close()
+      return
+    } catch (err) {
+      // Person closed the folder picker without choosing a location —
+      // treat it as "cancelled", not an error, and don't fall through to a
+      // surprise download they didn't ask for.
+      if (err?.name === 'AbortError') return
+      throw err
+    }
+  }
+
+  const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `orange-tea-portal-backup-${new Date().toISOString().slice(0, 10)}.json`
+  a.download = filename
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -44,6 +72,7 @@ const CONFLICT_KEYS = {
   quiz_settings: 'store_id',
   ingredient_format_rules: 'ingredient_id',
   formula_item_stores: 'formula_item_id,store_id',
+  formula_item_sizes: 'formula_item_id,size_id',
   quiz_question_stores: 'question_id,store_id',
 }
 

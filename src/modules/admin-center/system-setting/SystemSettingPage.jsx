@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import Button from '../../../components/ui/Button'
 import { exportBackup, restoreBackup } from '../../../lib/backup'
-import { downloadFormulaTemplate, importFormulaFile, downloadStaffTemplate, importStaffFile } from '../../../lib/importTemplates'
+import ImportFilePanel from './ImportFilePanel'
+import MenuExportPanel from './MenuExportPanel'
 
 export default function SystemSettingPage() {
   const [busy, setBusy] = useState(false)
@@ -45,55 +46,12 @@ export default function SystemSettingPage() {
             />
           </label>
         </div>
+        {log && <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">{log}</pre>}
       </section>
 
-      <section className="rounded-xl border border-brand-100 bg-white p-4">
-        <h2 className="mb-1 text-sm font-semibold text-brand-700">Formula Import</h2>
-        <p className="mb-3 text-sm text-gray-500">
-          Bulk-create formula items (name + group + category). Ingredients and steps are then filled in per item in
-          Admin Center &gt; Formula Database.
-        </p>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={downloadFormulaTemplate}>
-            Download template
-          </Button>
-          <label className="cursor-pointer rounded-lg border border-brand-300 px-3.5 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50">
-            Upload & import
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              disabled={busy}
-              onChange={(e) => e.target.files[0] && run(() => importFormulaFile(e.target.files[0]))}
-            />
-          </label>
-        </div>
-      </section>
+      <MenuExportPanel />
 
-      <section className="rounded-xl border border-brand-100 bg-white p-4">
-        <h2 className="mb-1 text-sm font-semibold text-brand-700">Staff Import</h2>
-        <p className="mb-3 text-sm text-gray-500">
-          Bulk-update existing staff profiles (name, phone, DOB, store, role) matched by email. New logins must
-          first be invited via Supabase Auth (Dashboard &gt; Authentication &gt; Users &gt; Invite) — see README.
-        </p>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={downloadStaffTemplate}>
-            Download template
-          </Button>
-          <label className="cursor-pointer rounded-lg border border-brand-300 px-3.5 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50">
-            Upload & import
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              disabled={busy}
-              onChange={(e) => e.target.files[0] && run(() => importStaffFile(e.target.files[0]))}
-            />
-          </label>
-        </div>
-      </section>
-
-      {log && <pre className="max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">{log}</pre>}
+      <ImportFilePanel />
     </div>
   )
 }

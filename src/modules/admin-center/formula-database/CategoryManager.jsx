@@ -4,6 +4,7 @@ import Button from '../../../components/ui/Button'
 import Modal from '../../../components/ui/Modal'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { useDragReorder, DragHandle } from '../../../lib/useDragReorder'
 
 // Drink-group sub-categories (Fruit Tea, Milk Tea, ...): add / edit / sort /
 // delete, each with its own Tips rich-text content shown in Operations &
@@ -13,21 +14,23 @@ export default function CategoryManager({ onSelect }) {
   const [editing, setEditing] = useState(null) // null=closed, {}=new, row=edit
 
   async function load() {
-    const { data } = await supabase.from('formula_categories').select('*').eq('group_key', 'drink').order('sort_order')
+    const { data } = await supabase
+      .from('formula_categories')
+      .select('*')
+      .eq('group_key', 'drink')
+      .order('sort_order')
+      .order('id')
     setCategories(data ?? [])
   }
   useEffect(() => {
     load()
   }, [])
 
-  async function move(cat, dir) {
-    const idx = categories.findIndex((c) => c.id === cat.id)
-    const swapWith = categories[idx + dir]
-    if (!swapWith) return
-    await supabase.from('formula_categories').update({ sort_order: swapWith.sort_order }).eq('id', cat.id)
-    await supabase.from('formula_categories').update({ sort_order: cat.sort_order }).eq('id', swapWith.id)
-    load()
+  async function persistOrder(next) {
+    setCategories(next)
+    await Promise.all(next.map((c, idx) => supabase.from('formula_categories').update({ sort_order: idx }).eq('id', c.id)))
   }
+  const { handleProps, rowProps } = useDragReorder(categories, persistOrder)
 
   async function remove(id) {
     if (!confirm('Delete this category? Items inside it will be uncategorized.')) return
@@ -44,27 +47,31 @@ export default function CategoryManager({ onSelect }) {
         <EmptyState label="No drink categories yet." />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {categories.map((c, idx) => (
-            <div key={c.id} className="flex items-center justify-between px-4 py-2.5">
-              <button onClick={() => onSelect(c)} className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600">
-                {c.name}
-              </button>
-              <div className="flex items-center gap-1">
-                <button disabled={idx === 0} onClick={() => move(c, -1)} className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30">
-                  ↑
+          {categories.map((c) => {
+            const { isDragging, isDropTarget, ...dragRowProps } = rowProps(c.id)
+            return (
+              <div
+                key={c.id}
+                {...dragRowProps}
+                className={`flex items-center justify-between px-2 py-2.5 transition-colors ${
+                  isDragging ? 'opacity-40' : ''
+                } ${isDropTarget ? 'bg-brand-50' : ''}`}
+              >
+                <DragHandle {...handleProps(c.id)} />
+                <button onClick={() => onSelect(c)} className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600">
+                  {c.name}
                 </button>
-                <button disabled={idx === categories.length - 1} onClick={() => move(c, 1)} className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30">
-                  ↓
-                </button>
-                <Button variant="secondary" onClick={() => setEditing(c)}>
-                  Edit
-                </Button>
-                <Button variant="danger" onClick={() => remove(c.id)}>
-                  Delete
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button variant="secondary" onClick={() => setEditing(c)}>
+                    Edit
+                  </Button>
+                  <Button variant="danger" onClick={() => remove(c.id)}>
+                    Delete
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
