@@ -5,6 +5,7 @@ import RichTextViewer from '../../../components/ui/RichTextViewer'
 import PronounceButton from '../../../components/ui/PronounceButton'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import FormulaIngredientsView from './FormulaIngredientsView'
+import { isVideoPath } from '../../../lib/mediaType'
 
 function stripHtml(html) {
   return (html || '').replace(/<[^>]*>/g, '').trim()
@@ -113,9 +114,16 @@ export default function FormulaItemDetail({ item, onClose }) {
                     </span>
                     <div className="flex-1">
                       <RichTextViewer html={s.instruction_html} />
-                      {s.image_path && (
-                        <img src={s.image_path} alt={`Step ${s.step_number}`} className="mt-1 max-w-xs rounded-lg border border-gray-200" />
-                      )}
+                      {s.image_path &&
+                        (isVideoPath(s.image_path) ? (
+                          <video src={s.image_path} controls className="mt-1 max-w-xs rounded-lg border border-gray-200" />
+                        ) : (
+                          <img
+                            src={s.image_path}
+                            alt={`Step ${s.step_number}`}
+                            className="mt-1 max-w-xs rounded-lg border border-gray-200"
+                          />
+                        ))}
                     </div>
                   </li>
                 ))}

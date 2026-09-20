@@ -21,6 +21,7 @@ export default function ManageRosterPage() {
   const [entries, setEntries] = useState([])
   const [notes, setNotes] = useState('')
   const [staff, setStaff] = useState([])
+  const [pendingStaff, setPendingStaff] = useState([])
   const [rules, setRules] = useState([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -47,6 +48,17 @@ export default function ManageRosterPage() {
       .eq('primary_store_id', currentStoreId)
       .eq('is_active', true)
       .then(({ data }) => setStaff(data ?? []))
+    // Placeholder staff created in User Management (no login yet) — they
+    // show up as pre-named rows in the grid below, same as a casual/one-off
+    // name typed in by hand, until they're linked to a real account.
+    supabase
+      .from('pending_staff')
+      .select('id, first_name, last_name')
+      .eq('primary_store_id', currentStoreId)
+      .is('linked_profile_id', null)
+      .then(({ data }) =>
+        setPendingStaff((data ?? []).map((p) => ({ id: p.id, name: `${p.first_name} ${p.last_name ?? ''}`.trim() })))
+      )
     supabase
       .from('roster_staffing_rules')
       .select('*')
@@ -159,7 +171,7 @@ export default function ManageRosterPage() {
         </Button>
       </div>
 
-      <RosterEntryGrid staff={staff} weekDates={weekDates} entries={entries} setEntries={setEntries} />
+      <RosterEntryGrid staff={staff} pendingStaff={pendingStaff} weekDates={weekDates} entries={entries} setEntries={setEntries} />
       <UnderstaffedWarnings entries={entries} rules={rules} />
 
       <label className="mt-4 block">

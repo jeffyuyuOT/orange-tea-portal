@@ -1,4 +1,5 @@
 import RichTextViewer from '../../../components/ui/RichTextViewer'
+import { isVideoPath } from '../../../lib/mediaType'
 
 const GROUP_BORDER = '#f97316' // brand orange — distinct from the table's own thin gray gridlines
 
@@ -75,7 +76,12 @@ export default function FormulaIngredientsView({
       )}
 
       {notesHtml && <RichTextViewer html={notesHtml} className="mt-2" />}
-      {notesImagePath && <img src={notesImagePath} alt="" className="mt-2 max-w-sm rounded-lg border border-gray-200" />}
+      {notesImagePath &&
+        (isVideoPath(notesImagePath) ? (
+          <video src={notesImagePath} controls className="mt-2 max-w-sm rounded-lg border border-gray-200" />
+        ) : (
+          <img src={notesImagePath} alt="" className="mt-2 max-w-sm rounded-lg border border-gray-200" />
+        ))}
     </div>
   )
 }
@@ -127,18 +133,39 @@ function GroupedChips({ ingredients }) {
 // around their header + every size's cells, same idea as the chip grouping
 // above but spanning the whole column instead of one chip.
 function IngredientMatrix({ ingredients, sizes }) {
+  // The same ingredient can legitimately appear more than once for one
+  // size (e.g. sugar added at two different points in the recipe), so
+  // columns can't just be keyed by ingredient_id — that collapsed every
+  // repeat down to a single column and silently dropped the second one.
+  // Instead each column is keyed by (ingredient_id, occurrence-within-that
+  // -size): a size's 1st "Sugar" row lines up under the same column as
+  // every other size's 1st "Sugar" row, its 2nd goes in its own column,
+  // and so on — so a size with only one occurrence just leaves that later
+  // column's cell blank rather than losing the row entirely.
+  const sizeOccurrenceCounts = new Map() // size_id -> Map(ingredientKey -> next occurrence #)
+  const withOccurrence = ingredients.map((ing) => {
+    const ingredientKey = ing.ingredient_id ?? ing.id
+    let counts = sizeOccurrenceCounts.get(ing.size_id)
+    if (!counts) {
+      counts = new Map()
+      sizeOccurrenceCounts.set(ing.size_id, counts)
+    }
+    const occurrence = counts.get(ingredientKey) || 0
+    counts.set(ingredientKey, occurrence + 1)
+    return { ing, colKey: `${ingredientKey}|${occurrence}` }
+  })
+
   const columns = []
   const seen = new Set()
-  for (const ing of ingredients) {
-    const key = ing.ingredient_id ?? ing.id
-    if (!seen.has(key)) {
-      seen.add(key)
-      columns.push(ing)
+  for (const entry of withOccurrence) {
+    if (!seen.has(entry.colKey)) {
+      seen.add(entry.colKey)
+      columns.push(entry)
     }
   }
 
   function cellFor(sizeId, colKey) {
-    return ingredients.find((ing) => (ing.ingredient_id ?? ing.id) === colKey && ing.size_id === sizeId)
+    return withOccurrence.find((entry) => entry.colKey === colKey && entry.ing.size_id === sizeId)?.ing
   }
 
   // Same Format Rule styling for a column's header AND its quantity cells,
@@ -153,17 +180,17 @@ function IngredientMatrix({ ingredients, sizes }) {
   }
 
   function groupBorderStyle(idx) {
-    const col = columns[idx]
+    const col = columns[idx].ing
     if (!col.group_label) return {}
-    const isStart = idx === 0 || columns[idx - 1].group_label !== col.group_label
-    const isEnd = idx === columns.length - 1 || columns[idx + 1].group_label !== col.group_label
+    const isStart = idx === 0 || columns[idx - 1].ing.group_label !== col.group_label
+    const isEnd = idx === columns.length - 1 || columns[idx + 1].ing.group_label !== col.group_label
     return {
       borderLeft: isStart ? `2px solid ${GROUP_BORDER}` : undefined,
       borderRight: isEnd ? `2px solid ${GROUP_BORDER}` : undefined,
     }
   }
 
-  const hasGroups = columns.some((c) => c.group_label)
+  const hasGroups = columns.some((c) => c.ing.group_label)
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200">
@@ -172,13 +199,12 @@ function IngredientMatrix({ ingredients, sizes }) {
           <thead>
             <tr>
               <th className="border-b border-r border-gray-200" />
-              {columns.map((col, idx) => {
-                const colKey = col.ingredient_id ?? col.id
-                const isStart = idx === 0 || columns[idx - 1].group_label !== col.group_label
+              {columns.map(({ ing: col, colKey }, idx) => {
+                const isStart = idx === 0 || columns[idx - 1].ing.group_label !== col.group_label
                 if (col.group_label && !isStart) return null
                 let span = 1
                 if (col.group_label) {
-                  while (columns[idx + span] && columns[idx + span].group_label === col.group_label) span += 1
+                  while (columns[idx + span] && columns[idx + span].ing.group_label === col.group_label) span += 1
                 }
                 return (
                   <th
@@ -203,9 +229,8 @@ function IngredientMatrix({ ingredients, sizes }) {
             <th className="border-b border-r border-gray-200 bg-gray-50 px-2.5 py-1.5 text-left text-xs font-semibold text-gray-500">
               Size
             </th>
-            {columns.map((col, idx) => {
+            {columns.map(({ ing: col, colKey }, idx) => {
               const rule = col.ingredient_master?.ingredient_format_rules
-              const colKey = col.ingredient_id ?? col.id
               return (
                 <th
                   key={colKey}
@@ -222,8 +247,7 @@ function IngredientMatrix({ ingredients, sizes }) {
           {sizes.map((size, rowIdx) => (
             <tr key={size.id}>
               <td className="border-r border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold text-gray-600">{size.name}</td>
-              {columns.map((col, idx) => {
-                const colKey = col.ingredient_id ?? col.id
+              {columns.map(({ ing: col, colKey }, idx) => {
                 const cell = cellFor(size.id, colKey)
                 const rule = col.ingredient_master?.ingredient_format_rules
                 const unit = col.ingredient_master?.unit

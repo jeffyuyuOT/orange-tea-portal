@@ -20,7 +20,7 @@ function staffFullName(s) {
 // `entries` stays a flat array (one record per person + date, matching a
 // roster_entries row) — this component only pivots it into a grid for
 // editing; ManageRosterPage still saves/loads the flat shape.
-export default function RosterEntryGrid({ staff, weekDates, entries, setEntries }) {
+export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, entries, setEntries }) {
   // "+ Add row" placeholders for a casual/one-off name not in Staff
   // Information yet. Keyed by a stable id (not by the typed name) so
   // typing into the Name field doesn't remount the row on every keystroke.
@@ -34,13 +34,20 @@ export default function RosterEntryGrid({ staff, weekDates, entries, setEntries 
   const rows = useMemo(() => {
     const staffRows = staff.map((s) => ({ key: s.id, profileId: s.id, name: staffFullName(s) }))
     const staffNamesLower = new Set(staffRows.map((r) => r.name.toLowerCase()))
+    // Pending-staff placeholders (User Management > Pending Staff) — no
+    // login/profile yet, so like the imported/manual rows below they're
+    // matched by name text, not an id.
+    const pendingRows = pendingStaff
+      .filter((p) => p.name && !staffNamesLower.has(p.name.toLowerCase()))
+      .map((p) => ({ key: `pending:${p.id}`, profileId: '', name: p.name }))
+    const pendingNamesLower = new Set(pendingRows.map((r) => r.name.toLowerCase()))
     // Stable per-index key (not per-name) — see comment above.
     const importedRows = importedNames
-      .filter((name) => !staffNamesLower.has(name.toLowerCase()))
+      .filter((name) => !staffNamesLower.has(name.toLowerCase()) && !pendingNamesLower.has(name.toLowerCase()))
       .map((name, i) => ({ key: `imported:${i}`, profileId: '', name }))
     const manual = manualRows.map((m) => ({ key: m.key, profileId: '', name: m.name }))
-    return [...staffRows, ...importedRows, ...manual]
-  }, [staff, importedNames, manualRows])
+    return [...staffRows, ...pendingRows, ...importedRows, ...manual]
+  }, [staff, pendingStaff, importedNames, manualRows])
 
   function matches(row, e) {
     return row.profileId ? e.profileId === row.profileId : e.staffName === row.name
@@ -163,6 +170,7 @@ export default function RosterEntryGrid({ staff, weekDates, entries, setEntries 
         </button>
         <span className="ml-2 text-xs text-gray-400">
           For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
+          Pending Staff (Admin Center &gt; User Management) show up here automatically.
         </span>
       </div>
     </div>

@@ -32,6 +32,7 @@ export default function IngredientMasterTab() {
   const [rules, setRules] = useState({}) // ingredient_id -> format rule row
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null) // null=closed, {}=new, row=edit
+  const [deleteTarget, setDeleteTarget] = useState(null) // ingredient row being confirmed for delete
 
   async function load() {
     const { data: ing } = await supabase.from('ingredient_master').select('*').order('name')
@@ -44,12 +45,6 @@ export default function IngredientMasterTab() {
   useEffect(() => {
     load()
   }, [])
-
-  async function remove(id) {
-    if (!confirm('Delete this ingredient? Formulas referencing it will lose the reference.')) return
-    await supabase.from('ingredient_master').delete().eq('id', id)
-    load()
-  }
 
   const filtered = search.trim()
     ? ingredients.filter((i) => i.name.toLowerCase().includes(search.trim().toLowerCase()))
@@ -104,7 +99,7 @@ export default function IngredientMasterTab() {
                   <Button variant="secondary" onClick={() => setEditing(i)}>
                     Edit
                   </Button>
-                  <button onClick={() => remove(i.id)} className="text-gray-400 hover:text-red-500">
+                  <button onClick={() => setDeleteTarget(i)} className="text-gray-400 hover:text-red-500">
                     ✕
                   </button>
                 </div>
@@ -125,7 +120,94 @@ export default function IngredientMasterTab() {
           }}
         />
       )}
+
+      {deleteTarget && (
+        <DeleteIngredientModal
+          ingredient={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null)
+            load()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+// Shows which drinks/items use this ingredient before deleting it, so an
+// admin isn't guessing. Deleting still goes through (the ingredient row
+// just disappears from any formula that used it — see migration
+// 0015_ingredient_delete_set_null.sql for why that's now a clean removal
+// rather than a blocked foreign-key error).
+function DeleteIngredientModal({ ingredient, onClose, onDeleted }) {
+  const [loading, setLoading] = useState(true)
+  const [items, setItems] = useState([]) // distinct formula items using this ingredient
+  const [deleting, setDeleting] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    supabase
+      .from('formula_item_ingredients')
+      .select('formula_item_id, formula_items(name_en, name_zh)')
+      .eq('ingredient_id', ingredient.id)
+      .then(({ data }) => {
+        if (!active) return
+        const seen = new Map()
+        ;(data ?? []).forEach((r) => {
+          if (r.formula_items && !seen.has(r.formula_item_id)) seen.set(r.formula_item_id, r.formula_items)
+        })
+        setItems([...seen.values()])
+        setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [ingredient.id])
+
+  async function confirmDelete() {
+    setDeleting(true)
+    const { error } = await supabase.from('ingredient_master').delete().eq('id', ingredient.id)
+    setDeleting(false)
+    if (error) {
+      alert(error.message)
+      return
+    }
+    onDeleted()
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Delete "${ingredient.name}"?`}
+      footer={
+        <Button variant="danger" onClick={confirmDelete} disabled={loading || deleting}>
+          {deleting ? 'Deleting…' : 'Delete'}
+        </Button>
+      }
+    >
+      {loading ? (
+        <p className="text-sm text-gray-400">Checking which formulas use this ingredient…</p>
+      ) : !items.length ? (
+        <p className="text-sm text-gray-600">Not used in any formula. Safe to delete.</p>
+      ) : (
+        <div>
+          <p className="mb-2 text-sm text-gray-600">
+            Used in {items.length} formula item{items.length === 1 ? '' : 's'}. Deleting will remove it from these —
+            the rest of each formula is unaffected:
+          </p>
+          <ul className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-5 text-sm text-gray-700">
+            {items.map((it, i) => (
+              <li key={i}>
+                {it.name_en}
+                {it.name_zh && <span className="font-zh text-brand-600"> · {it.name_zh}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Modal>
   )
 }
 

@@ -6,12 +6,24 @@ import Button from '../../../components/ui/Button'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import IngredientPicker from './IngredientPicker'
 import FormulaIngredientsView from '../../operations-training/formula/FormulaIngredientsView'
+import { isVideoPath } from '../../../lib/mediaType'
 
 async function uploadImage(file, pathPrefix) {
   const path = `${pathPrefix}/${Date.now()}-${file.name}`
   const { error } = await supabase.storage.from('formula-images').upload(path, file, { upsert: true })
   if (error) throw error
   return supabase.storage.from('formula-images').getPublicUrl(path).data.publicUrl
+}
+
+// A handful of save() steps (delete-then-reinsert for ingredients,
+// annotations, steps, stores, sizes) used to fire without checking the
+// response — a failed insert (e.g. a table missing its RLS policy) would
+// silently no-op instead of surfacing through the catch/alert below, so a
+// save could report success while actually dropping data. Every one of
+// those calls now goes through this so a real Postgres error always throws.
+async function run(promise) {
+  const { error } = await promise
+  if (error) throw error
 }
 
 // A step added via "+ Add step" but never actually typed into (or given an
@@ -169,7 +181,73 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
     ])
   }
   function updateIngredient(key, patch) {
-    setIngredients((prev) => prev.map((r) => ((r._key ?? r.id) === key ? { ...r, ...patch } : r)))
+    setIngredients((prev) => {
+      let next = prev.map((r) => ((r._key ?? r.id) === key ? { ...r, ...patch } : r))
+      const row = next.find((r) => (r._key ?? r.id) === key)
+      if (!usesSizes || !row?.size_id || !row.ingredient_id) return next
+
+      // Which occurrence this row is among same-ingredient rows in its OWN
+      // size — 1st Sugar, 2nd Sugar, etc. Both kinds of mirroring below
+      // target this same occurrence# in every other size, so adding the
+      // same ingredient a second time (e.g. sugar added twice) mirrors its
+      // own 2nd row too, instead of matching/skipping against the 1st.
+      const sameSizeMatches = next.filter(
+        (r) => r.size_id === row.size_id && r.ingredient_id === row.ingredient_id && !!r.is_hot === !!row.is_hot
+      )
+      const occurrenceIndex = sameSizeMatches.findIndex((r) => (r._key ?? r.id) === key)
+
+      // Picking an ingredient for one size mirrors it into every other size
+      // this item offers — M/L/XL almost always use the same ingredient
+      // list and only the quantity differs, so this saves re-adding every
+      // ingredient per size by hand. The mirrored row starts with a blank
+      // quantity and can be freely retyped or removed afterward; a size is
+      // only skipped once it already has a row at this same occurrence, so
+      // it doesn't pile up duplicates every time an existing row is edited.
+      if (patch.ingredient_id) {
+        const missingSizeIds = selectedSizeIds.filter((sid) => {
+          if (sid === row.size_id) return false
+          const targetMatches = next.filter(
+            (r) => r.size_id === sid && r.ingredient_id === row.ingredient_id && !!r.is_hot === !!row.is_hot
+          )
+          return targetMatches.length <= occurrenceIndex
+        })
+        if (missingSizeIds.length) {
+          next = [
+            ...next,
+            ...missingSizeIds.map((sid) => ({
+              _key: Math.random(),
+              ingredient_id: row.ingredient_id,
+              quantity_text: '',
+              size_id: sid,
+              is_hot: row.is_hot,
+              group_label: row.group_label,
+              sort_order: next.length,
+            })),
+          ]
+        }
+      }
+
+      // The Group box (boxes ingredients together on the Formula page)
+      // should match across sizes too, same as the ingredient itself —
+      // only the quantity is meant to be typed per size. This updates
+      // whichever sibling row already lines up at the same occurrence,
+      // wherever one already exists; it never creates a row by itself.
+      if (patch.group_label !== undefined) {
+        const otherSizeIds = selectedSizeIds.filter((sid) => sid !== row.size_id)
+        next = next.map((r) => {
+          if (!otherSizeIds.includes(r.size_id) || r.ingredient_id !== row.ingredient_id || !!r.is_hot !== !!row.is_hot) {
+            return r
+          }
+          const matches = next.filter(
+            (x) => x.size_id === r.size_id && x.ingredient_id === row.ingredient_id && !!x.is_hot === !!row.is_hot
+          )
+          const idx = matches.findIndex((x) => (x._key ?? x.id) === (r._key ?? r.id))
+          return idx === occurrenceIndex ? { ...r, group_label: patch.group_label } : r
+        })
+      }
+
+      return next
+    })
   }
   function removeIngredient(key) {
     setIngredients((prev) => prev.filter((r) => (r._key ?? r.id) !== key))
@@ -263,11 +341,11 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
       } else {
         const { error } = await supabase.from('formula_items').update(base).eq('id', itemId)
         if (error) throw error
-        await supabase.from('formula_item_ingredients').delete().eq('formula_item_id', itemId)
-        await supabase.from('formula_item_annotations').delete().eq('formula_item_id', itemId)
-        await supabase.from('formula_item_steps').delete().eq('formula_item_id', itemId)
-        await supabase.from('formula_item_stores').delete().eq('formula_item_id', itemId)
-        if (isDrink) await supabase.from('formula_item_sizes').delete().eq('formula_item_id', itemId)
+        await run(supabase.from('formula_item_ingredients').delete().eq('formula_item_id', itemId))
+        await run(supabase.from('formula_item_annotations').delete().eq('formula_item_id', itemId))
+        await run(supabase.from('formula_item_steps').delete().eq('formula_item_id', itemId))
+        await run(supabase.from('formula_item_stores').delete().eq('formula_item_id', itemId))
+        if (isDrink) await run(supabase.from('formula_item_sizes').delete().eq('formula_item_id', itemId))
       }
 
       // Skip rows where "+ Add ingredient" was clicked but no ingredient was
@@ -275,47 +353,57 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
       // staff-facing Formula page as an empty "Ingredient" column.
       const nonEmptyIngredients = ingredients.filter((ing) => ing.ingredient_id)
       if (nonEmptyIngredients.length) {
-        await supabase.from('formula_item_ingredients').insert(
-          nonEmptyIngredients.map((ing, idx) => ({
-            formula_item_id: itemId,
-            ingredient_id: ing.ingredient_id,
-            quantity_text: ing.quantity_text,
-            size_id: ing.size_id || null,
-            is_hot: !!ing.is_hot,
-            group_label: ing.group_label || null,
-            sort_order: idx,
-          }))
+        await run(
+          supabase.from('formula_item_ingredients').insert(
+            nonEmptyIngredients.map((ing, idx) => ({
+              formula_item_id: itemId,
+              ingredient_id: ing.ingredient_id,
+              quantity_text: ing.quantity_text,
+              size_id: ing.size_id || null,
+              is_hot: !!ing.is_hot,
+              group_label: ing.group_label || null,
+              sort_order: idx,
+            }))
+          )
         )
       }
       const nonEmptyAnnotations = annotations.filter((a) => a.text.trim())
       if (nonEmptyAnnotations.length) {
         const aboveRows = nonEmptyAnnotations.filter((a) => a.position === 'above')
         const belowRows = nonEmptyAnnotations.filter((a) => a.position !== 'above')
-        await supabase.from('formula_item_annotations').insert(
-          [...aboveRows, ...belowRows].map((a, idx) => ({
-            formula_item_id: itemId,
-            position: a.position === 'above' ? 'above' : 'below',
-            text: a.text.trim(),
-            sort_order: idx,
-          }))
+        await run(
+          supabase.from('formula_item_annotations').insert(
+            [...aboveRows, ...belowRows].map((a, idx) => ({
+              formula_item_id: itemId,
+              position: a.position === 'above' ? 'above' : 'below',
+              text: a.text.trim(),
+              sort_order: idx,
+            }))
+          )
         )
       }
       const nonEmptySteps = steps.filter(stepHasContent)
       if (nonEmptySteps.length) {
-        await supabase.from('formula_item_steps').insert(
-          nonEmptySteps.map((s, idx) => ({
-            formula_item_id: itemId,
-            step_number: idx + 1,
-            instruction_html: s.instruction_html,
-            image_path: s.image_path || null,
-          }))
+        await run(
+          supabase.from('formula_item_steps').insert(
+            nonEmptySteps.map((s, idx) => ({
+              formula_item_id: itemId,
+              step_number: idx + 1,
+              instruction_html: s.instruction_html,
+              image_path: s.image_path || null,
+            }))
+          )
         )
       }
       if (visibleStoreIds && visibleStoreIds.length) {
-        await supabase.from('formula_item_stores').insert(visibleStoreIds.map((storeId) => ({ formula_item_id: itemId, store_id: storeId })))
+        await run(
+          supabase.from('formula_item_stores').insert(visibleStoreIds.map((storeId) => ({ formula_item_id: itemId, store_id: storeId })))
+        )
       }
       if (isDrink && selectedSizeIds.length) {
-        await supabase.from('formula_item_sizes').insert(selectedSizeIds.map((sizeId) => ({ formula_item_id: itemId, size_id: sizeId })))
+        await run(
+          supabase.from('formula_item_sizes').insert(selectedSizeIds.map((sizeId) => ({ formula_item_id: itemId, size_id: sizeId })))
+        )
       }
       onSaved()
     } catch (err) {
@@ -582,9 +670,10 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                     <span className="text-xs font-semibold text-brand-500">Step {idx + 1}</span>
                     <div className="flex items-center gap-2">
                       <label className="cursor-pointer text-xs text-brand-600 hover:underline">
-                        {s.image_path ? 'Change image' : 'Add image'}
+                        {s.image_path ? 'Change image/video' : 'Add image/video'}
                         <input
                           type="file"
+                          accept="image/*,video/*"
                           className="hidden"
                           onChange={async (e) => {
                             const f = e.target.files[0]
@@ -600,7 +689,12 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                     </div>
                   </div>
                   <SimpleRichTextEditor value={s.instruction_html} onChange={(v) => updateStep(idx, { instruction_html: v })} />
-                  {s.image_path && <img src={s.image_path} alt="" className="mt-2 max-w-xs rounded-lg border border-gray-200" />}
+                  {s.image_path &&
+                    (isVideoPath(s.image_path) ? (
+                      <video src={s.image_path} controls className="mt-2 max-w-xs rounded-lg border border-gray-200" />
+                    ) : (
+                      <img src={s.image_path} alt="" className="mt-2 max-w-xs rounded-lg border border-gray-200" />
+                    ))}
                 </div>
               ))}
             </div>
@@ -610,10 +704,10 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
             <div className="mb-1 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-brand-700">Notes (optional)</h4>
               <label className="cursor-pointer text-xs text-brand-600 hover:underline">
-                {notesImagePath ? 'Change image' : '+ Add image'}
+                {notesImagePath ? 'Change image/video' : '+ Add image/video'}
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   className="hidden"
                   onChange={async (e) => {
                     const f = e.target.files[0]
@@ -626,13 +720,18 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
             </div>
             <p className="mb-1 text-xs text-gray-400">
               For things that aren't really an ingredient/quantity — a mixing ratio, "see table", a clarifying footnote.
-              Shown as a small note under the ingredients on the Formula page. Attach an image instead/as well for
-              things that are easier to show than type out (a reference chart, an unusual layout, etc).
+              Shown as a small note under the ingredients on the Formula page. Attach an image or a short how-to video
+              instead/as well for things that are easier to show than type out (a reference chart, an unusual layout,
+              a made-in-house tutorial clip, etc).
             </p>
             <SimpleRichTextEditor value={notes} onChange={setNotes} placeholder="e.g. TA mash = 1.5 topping" />
             {notesImagePath && (
               <div className="mt-2 flex items-start gap-2">
-                <img src={notesImagePath} alt="" className="max-w-xs rounded-lg border border-gray-200" />
+                {isVideoPath(notesImagePath) ? (
+                  <video src={notesImagePath} controls className="max-w-xs rounded-lg border border-gray-200" />
+                ) : (
+                  <img src={notesImagePath} alt="" className="max-w-xs rounded-lg border border-gray-200" />
+                )}
                 <button
                   onClick={() => setNotesImagePath('')}
                   className="mt-1 text-xs text-gray-400 hover:text-red-500"
