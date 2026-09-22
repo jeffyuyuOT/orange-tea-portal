@@ -1,14 +1,19 @@
 import { Fragment, useMemo, useState } from 'react'
-import { dayHours } from '../../../lib/excelRoster'
+import { format, parseISO } from 'date-fns'
+import { dayHours, rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+// Always read the weekday off the actual date, never off its position in the
+// week — "Week starting (Mon)" is only a hint for what to pick, it doesn't
+// force the chosen date to be a Monday, so a fixed ['Mon','Tue',...] array
+// applied by index used to mislabel every column whenever the picked start
+// date wasn't really a Monday (e.g. picking a Tuesday still showed "Mon" in
+// the first column).
+function weekdayLabel(dateStr) {
+  return format(parseISO(dateStr), 'EEE')
+}
 
 function round2(n) {
   return Math.round(n * 100) / 100
-}
-
-function staffFullName(s) {
-  return `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim()
 }
 
 // The same Name × day-of-week grid the manager already builds in Excel:
@@ -32,18 +37,26 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
   )
 
   const rows = useMemo(() => {
-    const staffRows = staff.map((s) => ({ key: s.id, profileId: s.id, name: staffFullName(s) }))
+    const staffRows = staff.map((s) => ({ key: s.id, profileId: s.id, name: rosterDisplayName(s) }))
+    // Pending staff (Roster Hub > Setting > Name display) always get a row
+    // too, same as real staff — so a not-yet-formal hire can be scheduled
+    // ahead of time instead of only appearing after a "+ Add row"/import
+    // happens to use their exact name for this particular week.
+    const pendingRows = pendingStaff.map((p) => ({ key: `pending:${p.id}`, profileId: '', name: pendingRosterName(p) }))
     const staffNamesLower = new Set(staffRows.map((r) => r.name.toLowerCase()))
-    // Pending-staff placeholders (User Management > Pending Staff) — no
-    // login/profile yet, so like the imported/manual rows below they're
-    // matched by name text, not an id.
-    const pendingRows = pendingStaff
-      .filter((p) => p.name && !staffNamesLower.has(p.name.toLowerCase()))
-      .map((p) => ({ key: `pending:${p.id}`, profileId: '', name: p.name }))
-    const pendingNamesLower = new Set(pendingRows.map((r) => r.name.toLowerCase()))
+    // A name typed into a "+ Add row" casual slot (or a Pending staff row
+    // above) has no profileId, so the moment hours are entered for it, that
+    // same name also shows up in `importedNames` below (it scans `entries`
+    // for any profileId-less staffName). Without excluding those names here
+    // too, that one person would render TWICE — once as their own row,
+    // once again as a duplicate "imported" row carrying the identical
+    // hours — the instant their hours are filled in.
+    const manualNamesLower = new Set(
+      [...manualRows.map((m) => m.name), ...pendingRows.map((p) => p.name)].map((n) => n.trim().toLowerCase()).filter(Boolean)
+    )
     // Stable per-index key (not per-name) — see comment above.
     const importedRows = importedNames
-      .filter((name) => !staffNamesLower.has(name.toLowerCase()) && !pendingNamesLower.has(name.toLowerCase()))
+      .filter((name) => !staffNamesLower.has(name.toLowerCase()) && !manualNamesLower.has(name.toLowerCase()))
       .map((name, i) => ({ key: `imported:${i}`, profileId: '', name }))
     const manual = manualRows.map((m) => ({ key: m.key, profileId: '', name: m.name }))
     return [...staffRows, ...pendingRows, ...importedRows, ...manual]
@@ -113,9 +126,9 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
             <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-left font-medium text-brand-700">
               Name
             </th>
-            {weekDates.map((d, i) => (
+            {weekDates.map((d) => (
               <th key={d} colSpan={2} className="border border-brand-100 px-2 py-1 text-center font-medium text-brand-700">
-                {DAY_LABELS[i]} {d.slice(5)}
+                {weekdayLabel(d)} {d.slice(5)}
               </th>
             ))}
             <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
@@ -170,7 +183,6 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
         </button>
         <span className="ml-2 text-xs text-gray-400">
           For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
-          Pending Staff (Admin Center &gt; User Management) show up here automatically.
         </span>
       </div>
     </div>

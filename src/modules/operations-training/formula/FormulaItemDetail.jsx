@@ -5,7 +5,7 @@ import RichTextViewer from '../../../components/ui/RichTextViewer'
 import PronounceButton from '../../../components/ui/PronounceButton'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import FormulaIngredientsView from './FormulaIngredientsView'
-import { isVideoPath } from '../../../lib/mediaType'
+import MediaPreview from '../../../components/ui/MediaPreview'
 
 function stripHtml(html) {
   return (html || '').replace(/<[^>]*>/g, '').trim()
@@ -22,6 +22,7 @@ export default function FormulaItemDetail({ item, onClose }) {
   const [sizes, setSizes] = useState([]) // sizes this item offers; [] = single formula, no sizing
   const [annotationsAbove, setAnnotationsAbove] = useState([])
   const [annotationsBelow, setAnnotationsBelow] = useState([])
+  const [videos, setVideos] = useState([])
   const [steps, setSteps] = useState([])
   const [loading, setLoading] = useState(true)
   const [showHot, setShowHot] = useState(false) // Iced/Cold vs Hot, when item.has_hot_version
@@ -49,7 +50,8 @@ export default function FormulaItemDetail({ item, onClose }) {
         ? supabase.from('formula_item_sizes').select('size_id, drink_sizes(id, name, sort_order)').eq('formula_item_id', item.id)
         : Promise.resolve({ data: [] }),
       supabase.from('formula_item_annotations').select('*').eq('formula_item_id', item.id).order('sort_order'),
-    ]).then(([ingRes, stepRes, sizeRes, annRes]) => {
+      supabase.from('formula_item_videos').select('*').eq('formula_item_id', item.id).order('sort_order'),
+    ]).then(([ingRes, stepRes, sizeRes, annRes, videoRes]) => {
       if (!active) return
       // Drop rows where no ingredient was ever picked (a "+ Add ingredient"
       // row left blank in Edit Item) — these used to show up as their own
@@ -64,6 +66,7 @@ export default function FormulaItemDetail({ item, onClose }) {
       const annotations = annRes.data ?? []
       setAnnotationsAbove(annotations.filter((a) => a.position === 'above'))
       setAnnotationsBelow(annotations.filter((a) => a.position !== 'above'))
+      setVideos(videoRes.data ?? [])
       setLoading(false)
     })
     return () => {
@@ -98,6 +101,7 @@ export default function FormulaItemDetail({ item, onClose }) {
               annotationsBelow={annotationsBelow}
               notesHtml={item?.notes}
               notesImagePath={item?.notes_image_path}
+              videos={videos}
             />
           </section>
 
@@ -114,16 +118,13 @@ export default function FormulaItemDetail({ item, onClose }) {
                     </span>
                     <div className="flex-1">
                       <RichTextViewer html={s.instruction_html} />
-                      {s.image_path &&
-                        (isVideoPath(s.image_path) ? (
-                          <video src={s.image_path} controls className="mt-1 max-w-xs rounded-lg border border-gray-200" />
-                        ) : (
-                          <img
-                            src={s.image_path}
-                            alt={`Step ${s.step_number}`}
-                            className="mt-1 max-w-xs rounded-lg border border-gray-200"
-                          />
-                        ))}
+                      {s.image_path && (
+                        <MediaPreview
+                          src={s.image_path}
+                          alt={`Step ${s.step_number}`}
+                          className="mt-1 max-w-xs rounded-lg border border-gray-200"
+                        />
+                      )}
                     </div>
                   </li>
                 ))}

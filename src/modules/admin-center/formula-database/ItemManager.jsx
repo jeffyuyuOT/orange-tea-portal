@@ -41,6 +41,96 @@ export default function ItemManager({ groupKey, categoryId, onBack, backLabel })
     load()
   }
 
+  // Duplicates an item and every piece of its content — ingredients (all
+  // sizes/hot state), method steps, above/below annotations, Notes (incl.
+  // its image/video), and video links — so admins can use an existing
+  // drink as a starting point instead of rebuilding one from scratch. The
+  // copy is placed last in this list, named "<original>-copy"; it shares
+  // the same uploaded images/videos as the original (those are just
+  // storage links, so there's nothing to duplicate there) but every DB row
+  // is its own independent copy — editing one afterward never touches the
+  // other.
+  async function copy(item) {
+    const { data: newItem, error } = await supabase
+      .from('formula_items')
+      .insert({
+        group_key: item.group_key,
+        category_id: item.category_id,
+        name_en: `${item.name_en}-copy`,
+        name_zh: item.name_zh,
+        sort_order: items.length,
+        is_active: item.is_active,
+        display_mode: item.display_mode,
+        custom_image_path: item.custom_image_path,
+        notes: item.notes,
+        notes_image_path: item.notes_image_path,
+        has_hot_version: item.has_hot_version,
+      })
+      .select()
+      .single()
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    const [ingRes, stepRes, sizeRes, annRes, videoRes, storeRes] = await Promise.all([
+      supabase.from('formula_item_ingredients').select('*').eq('formula_item_id', item.id),
+      supabase.from('formula_item_steps').select('*').eq('formula_item_id', item.id),
+      supabase.from('formula_item_sizes').select('*').eq('formula_item_id', item.id),
+      supabase.from('formula_item_annotations').select('*').eq('formula_item_id', item.id),
+      supabase.from('formula_item_videos').select('*').eq('formula_item_id', item.id),
+      supabase.from('formula_item_stores').select('*').eq('formula_item_id', item.id),
+    ])
+
+    const inserts = []
+    if (ingRes.data?.length) {
+      inserts.push(
+        supabase
+          .from('formula_item_ingredients')
+          .insert(ingRes.data.map(({ id: _id, formula_item_id: _fid, ...rest }) => ({ ...rest, formula_item_id: newItem.id })))
+      )
+    }
+    if (stepRes.data?.length) {
+      inserts.push(
+        supabase
+          .from('formula_item_steps')
+          .insert(stepRes.data.map(({ id: _id, formula_item_id: _fid, ...rest }) => ({ ...rest, formula_item_id: newItem.id })))
+      )
+    }
+    if (sizeRes.data?.length) {
+      inserts.push(
+        supabase
+          .from('formula_item_sizes')
+          .insert(sizeRes.data.map(({ formula_item_id: _fid, ...rest }) => ({ ...rest, formula_item_id: newItem.id })))
+      )
+    }
+    if (annRes.data?.length) {
+      inserts.push(
+        supabase
+          .from('formula_item_annotations')
+          .insert(annRes.data.map(({ id: _id, formula_item_id: _fid, ...rest }) => ({ ...rest, formula_item_id: newItem.id })))
+      )
+    }
+    if (videoRes.data?.length) {
+      inserts.push(
+        supabase
+          .from('formula_item_videos')
+          .insert(videoRes.data.map(({ id: _id, formula_item_id: _fid, ...rest }) => ({ ...rest, formula_item_id: newItem.id })))
+      )
+    }
+    if (storeRes.data?.length) {
+      inserts.push(
+        supabase
+          .from('formula_item_stores')
+          .insert(storeRes.data.map(({ formula_item_id: _fid, ...rest }) => ({ ...rest, formula_item_id: newItem.id })))
+      )
+    }
+    const results = await Promise.all(inserts)
+    const copyErr = results.find((r) => r.error)?.error
+    if (copyErr) alert(copyErr.message)
+    load()
+  }
+
   return (
     <div>
       {onBack && (
@@ -69,9 +159,14 @@ export default function ItemManager({ groupKey, categoryId, onBack, backLabel })
                 <button onClick={() => setEditing(item)} className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600">
                   {item.name_en} {item.name_zh && <span className="font-zh text-brand-500">· {item.name_zh}</span>}
                 </button>
-                <Button variant="danger" onClick={() => remove(item.id)}>
-                  Delete
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="secondary" onClick={() => copy(item)}>
+                    Copy
+                  </Button>
+                  <Button variant="danger" onClick={() => remove(item.id)}>
+                    Delete
+                  </Button>
+                </div>
               </div>
             )
           })}

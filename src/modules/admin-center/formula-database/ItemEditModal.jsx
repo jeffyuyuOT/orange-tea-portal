@@ -6,7 +6,7 @@ import Button from '../../../components/ui/Button'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import IngredientPicker from './IngredientPicker'
 import FormulaIngredientsView from '../../operations-training/formula/FormulaIngredientsView'
-import { isVideoPath } from '../../../lib/mediaType'
+import MediaPreview from '../../../components/ui/MediaPreview'
 
 async function uploadImage(file, pathPrefix) {
   const path = `${pathPrefix}/${Date.now()}-${file.name}`
@@ -54,6 +54,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   const [activeHot, setActiveHot] = useState(false) // which ingredient set is showing: false = Iced/Cold, true = Hot
   const [ingredients, setIngredients] = useState([])
   const [annotations, setAnnotations] = useState([]) // small notes shown just above/below the table on the Formula page
+  const [videos, setVideos] = useState([]) // titled videos — a drink or shop-training item can have more than one
   const [steps, setSteps] = useState([])
   const [visibleStoreIds, setVisibleStoreIds] = useState(null) // null = all stores
   const [saving, setSaving] = useState(false)
@@ -101,6 +102,12 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
       .eq('formula_item_id', item.id)
       .order('sort_order')
       .then(({ data }) => setAnnotations(data ?? []))
+    supabase
+      .from('formula_item_videos')
+      .select('*')
+      .eq('formula_item_id', item.id)
+      .order('sort_order')
+      .then(({ data }) => setVideos(data ?? []))
     supabase
       .from('formula_item_steps')
       .select('*')
@@ -305,6 +312,16 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
     setAnnotations((prev) => prev.filter((a) => (a._key ?? a.id) !== key))
   }
 
+  function addVideo() {
+    setVideos((prev) => [...prev, { _key: Math.random(), title: '', url: '' }])
+  }
+  function updateVideo(key, patch) {
+    setVideos((prev) => prev.map((v) => ((v._key ?? v.id) === key ? { ...v, ...patch } : v)))
+  }
+  function removeVideo(key) {
+    setVideos((prev) => prev.filter((v) => (v._key ?? v.id) !== key))
+  }
+
   function addStep() {
     setSteps((prev) => [...prev, { _key: Math.random(), step_number: prev.length + 1, instruction_html: '', image_path: '' }])
   }
@@ -343,6 +360,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         if (error) throw error
         await run(supabase.from('formula_item_ingredients').delete().eq('formula_item_id', itemId))
         await run(supabase.from('formula_item_annotations').delete().eq('formula_item_id', itemId))
+        await run(supabase.from('formula_item_videos').delete().eq('formula_item_id', itemId))
         await run(supabase.from('formula_item_steps').delete().eq('formula_item_id', itemId))
         await run(supabase.from('formula_item_stores').delete().eq('formula_item_id', itemId))
         if (isDrink) await run(supabase.from('formula_item_sizes').delete().eq('formula_item_id', itemId))
@@ -377,6 +395,19 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
               formula_item_id: itemId,
               position: a.position === 'above' ? 'above' : 'below',
               text: a.text.trim(),
+              sort_order: idx,
+            }))
+          )
+        )
+      }
+      const nonEmptyVideos = videos.filter((v) => v.url.trim())
+      if (nonEmptyVideos.length) {
+        await run(
+          supabase.from('formula_item_videos').insert(
+            nonEmptyVideos.map((v, idx) => ({
+              formula_item_id: itemId,
+              title: v.title?.trim() || null,
+              url: v.url.trim(),
               sort_order: idx,
             }))
           )
@@ -689,12 +720,23 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                     </div>
                   </div>
                   <SimpleRichTextEditor value={s.instruction_html} onChange={(v) => updateStep(idx, { instruction_html: v })} />
-                  {s.image_path &&
-                    (isVideoPath(s.image_path) ? (
-                      <video src={s.image_path} controls className="mt-2 max-w-xs rounded-lg border border-gray-200" />
-                    ) : (
-                      <img src={s.image_path} alt="" className="mt-2 max-w-xs rounded-lg border border-gray-200" />
-                    ))}
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className="shrink-0 text-[11px] text-gray-400">or video link:</span>
+                    <input
+                      type="text"
+                      className="input flex-1"
+                      placeholder="https://... (a video already in your file repository, YouTube, etc.)"
+                      value={s.image_path || ''}
+                      onChange={(e) => updateStep(idx, { image_path: e.target.value })}
+                    />
+                  </div>
+                  {s.image_path && (
+                    <MediaPreview
+                      src={s.image_path}
+                      alt={`Step ${idx + 1}`}
+                      className="mt-2 max-w-xs rounded-lg border border-gray-200"
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -727,11 +769,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
             <SimpleRichTextEditor value={notes} onChange={setNotes} placeholder="e.g. TA mash = 1.5 topping" />
             {notesImagePath && (
               <div className="mt-2 flex items-start gap-2">
-                {isVideoPath(notesImagePath) ? (
-                  <video src={notesImagePath} controls className="max-w-xs rounded-lg border border-gray-200" />
-                ) : (
-                  <img src={notesImagePath} alt="" className="max-w-xs rounded-lg border border-gray-200" />
-                )}
+                <MediaPreview src={notesImagePath} alt="" className="max-w-xs rounded-lg border border-gray-200" />
                 <button
                   onClick={() => setNotesImagePath('')}
                   className="mt-1 text-xs text-gray-400 hover:text-red-500"
@@ -741,6 +779,66 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                 </button>
               </div>
             )}
+          </section>
+
+          <section>
+            <div className="mb-1 flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-brand-700">Videos (optional)</h4>
+              <Button variant="secondary" onClick={addVideo}>
+                + Add video
+              </Button>
+            </div>
+            <p className="mb-2 text-xs text-gray-400">
+              Attach one or more instructional videos, each with its own short title — e.g. a "Blending" clip and a
+              separate "Garnish" clip for the same drink. Paste a link (from File Repository, YouTube, etc. — the
+              same link can be reused across multiple drinks) or upload a file directly.
+            </p>
+            <div className="space-y-2">
+              {videos.map((v) => {
+                const key = v._key ?? v.id
+                return (
+                  <div key={key} className="rounded-lg border border-gray-200 p-2.5">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <input
+                        className="input flex-1"
+                        placeholder="Title (e.g. Blending steps)"
+                        value={v.title || ''}
+                        onChange={(e) => updateVideo(key, { title: e.target.value })}
+                      />
+                      <label className="shrink-0 cursor-pointer text-xs text-brand-600 hover:underline">
+                        Upload
+                        <input
+                          type="file"
+                          accept="video/*,image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const f = e.target.files[0]
+                            if (!f) return
+                            const url = await uploadImage(f, 'videos')
+                            updateVideo(key, { url })
+                          }}
+                        />
+                      </label>
+                      <button onClick={() => removeVideo(key)} className="shrink-0 text-gray-400 hover:text-red-500">
+                        ✕
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      className="input w-full"
+                      placeholder="https://... (paste a link, or use Upload above)"
+                      value={v.url || ''}
+                      onChange={(e) => updateVideo(key, { url: e.target.value })}
+                    />
+                    {v.url && (
+                      <a href={v.url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-brand-600 hover:underline">
+                        ▶ Test link
+                      </a>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </section>
         </div>
 
@@ -760,6 +858,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                 annotationsBelow={annotationsBelow.filter((a) => a.text.trim())}
                 notesHtml={notes}
                 notesImagePath={notesImagePath}
+                videos={videos.filter((v) => v.url.trim())}
               />
             </div>
           </div>

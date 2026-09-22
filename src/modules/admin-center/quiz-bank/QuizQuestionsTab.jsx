@@ -19,6 +19,8 @@ export default function QuizQuestionsTab() {
   const [categoryId, setCategoryId] = useState('')
   const [questions, setQuestions] = useState([])
   const [editing, setEditing] = useState(null)
+  // Which question's ✕ button is mid-delete — locks just that button.
+  const [removingId, setRemovingId] = useState(null)
 
   useEffect(() => {
     if (group === 'drink') {
@@ -52,8 +54,10 @@ export default function QuizQuestionsTab() {
 
   async function remove(id) {
     if (!confirm('Delete this question?')) return
+    setRemovingId(id)
     await supabase.from('quiz_questions').delete().eq('id', id)
-    load()
+    await load()
+    setRemovingId(null)
   }
 
   return (
@@ -92,7 +96,11 @@ export default function QuizQuestionsTab() {
                   Importance {q.importance}
                 </Badge>
               </button>
-              <button onClick={() => remove(q.id)} className="text-gray-400 hover:text-red-500">
+              <button
+                onClick={() => remove(q.id)}
+                disabled={removingId === q.id}
+                className="text-gray-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+              >
                 ✕
               </button>
             </div>

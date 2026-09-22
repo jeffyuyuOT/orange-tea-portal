@@ -2,51 +2,127 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { ROLE_LABELS } from '../../../lib/permissions'
+import { pendingRosterName } from '../../../lib/excelRoster'
 import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import UserDetailModal from './UserDetailModal'
-import PendingStaffModal from './PendingStaffModal'
-import LinkPendingStaffModal from './LinkPendingStaffModal'
 
 export default function UserManagementPage() {
   const { accessibleStores } = useAuth()
   const [storeFilter, setStoreFilter] = useState('all')
+  const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
   const [selected, setSelected] = useState(null)
-  const [pending, setPending] = useState([])
-  const [editingPending, setEditingPending] = useState(null) // null closed, 'new', or a pending row
-  const [linkingPending, setLinkingPending] = useState(null)
+  // Pending staff — someone to schedule and try out before formally
+  // inviting them in Supabase, no account needed yet (see migration
+  // 0027's comment on roster_pending_staff). Managed here alongside real
+  // accounts since both answer "who is this store's roster for"; Roster
+  // Hub > Setting > Name display only edits what name shows on the roster.
+  const [pendingList, setPendingList] = useState([])
+  const [staffByStore, setStaffByStore] = useState({}) // store_id -> active profiles, for the Link-to picker
+  const [newPendingName, setNewPendingName] = useState('')
+  const [addingPending, setAddingPending] = useState(false)
+  const [removingPendingId, setRemovingPendingId] = useState(null)
+  const [linkingId, setLinkingId] = useState(null)
 
+  // profiles<->stores now has two possible join paths — the direct
+  // primary_store_id fk, and the many-to-many via user_stores (added in
+  // migration 0027) — so PostgREST can't auto-pick one for a plain
+  // "stores(name)" embed (PGRST201, ambiguous embedding) and errors out;
+  // every embed of stores from profiles must name the fk explicitly.
   async function load() {
-    let q = supabase.from('profiles').select('*, stores(name)').order('first_name')
-    if (storeFilter !== 'all') q = q.eq('primary_store_id', storeFilter)
-    const { data } = await q
-    setUsers(data ?? [])
+    if (storeFilter === 'all') {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*, stores!profiles_primary_store_id_fkey(name)')
+        .order('first_name')
+      if (error) console.error('load users failed', error)
+      setUsers(data ?? [])
+      return
+    }
+    // A person can now be on a store's roster via user_stores without it
+    // being their primary_store_id (see migration 0027 — e.g. an admin
+    // added to a second store without changing their home store), so
+    // filtering by primary_store_id alone here would hide them even though
+    // they do show up on that store's Manage Roster / Name display.
+    const [{ data: primaryMatches, error: err1 }, { data: memberships, error: err2 }] = await Promise.all([
+      supabase.from('profiles').select('*, stores!profiles_primary_store_id_fkey(name)').eq('primary_store_id', storeFilter),
+      supabase.from('user_stores').select('profiles(*, stores!profiles_primary_store_id_fkey(name))').eq('store_id', storeFilter),
+    ])
+    if (err1 || err2) console.error('load users failed', err1 ?? err2)
+    const byId = new Map()
+    ;(primaryMatches ?? []).forEach((p) => byId.set(p.id, p))
+    ;(memberships ?? []).forEach((m) => m.profiles && byId.set(m.profiles.id, m.profiles))
+    setUsers(Array.from(byId.values()).sort((a, b) => (a.first_name ?? '').localeCompare(b.first_name ?? '')))
   }
 
   async function loadPending() {
-    let q = supabase
-      .from('pending_staff')
-      .select('*, stores(name)')
-      .is('linked_profile_id', null)
-      .order('created_at', { ascending: false })
-    if (storeFilter !== 'all') q = q.eq('primary_store_id', storeFilter)
+    let q = supabase.from('roster_pending_staff').select('*, stores(name)').order('created_at')
+    if (storeFilter !== 'all') q = q.eq('store_id', storeFilter)
     const { data } = await q
-    setPending(data ?? [])
+    setPendingList(data ?? [])
+    // The Link-to picker for a pending row needs that row's own store's
+    // active staff — fetch each distinct store once rather than per row.
+    const storeIds = Array.from(new Set((data ?? []).map((p) => p.store_id)))
+    if (!storeIds.length) {
+      setStaffByStore({})
+      return
+    }
+    const results = await Promise.all(
+      storeIds.map((id) => supabase.from('user_stores').select('profiles(id, first_name, last_name, is_active)').eq('store_id', id))
+    )
+    const map = {}
+    storeIds.forEach((id, i) => {
+      map[id] = (results[i].data ?? []).map((r) => r.profiles).filter((p) => p && p.is_active)
+    })
+    setStaffByStore(map)
   }
 
   useEffect(() => {
     load()
     loadPending()
-  }, [storeFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [storeFilter])
 
-  async function removePending(p) {
-    const name = `${p.first_name} ${p.last_name ?? ''}`.trim()
-    if (!confirm(`Remove pending staff "${name}"?`)) return
-    await supabase.from('pending_staff').delete().eq('id', p.id)
-    loadPending()
+  async function addPending() {
+    const name = newPendingName.trim()
+    if (!name || storeFilter === 'all') return
+    setAddingPending(true)
+    const { data } = await supabase
+      .from('roster_pending_staff')
+      .insert({ store_id: storeFilter, display_name: name })
+      .select('*, stores(name)')
+      .single()
+    if (data) setPendingList((prev) => [...prev, data])
+    setNewPendingName('')
+    setAddingPending(false)
   }
+
+  async function removePending(id) {
+    setRemovingPendingId(id)
+    await supabase.from('roster_pending_staff').delete().eq('id', id)
+    setPendingList((prev) => prev.filter((p) => p.id !== id))
+    setRemovingPendingId(null)
+  }
+
+  // Once a pending person is properly invited (a real profile now exists
+  // for them), this folds their trial history into that account instead of
+  // leaving it stranded under the old pending name: every roster_entries
+  // row still keyed by the name they were scheduled under (no profile_id
+  // of its own to match on) gets pointed at the real profile, then the
+  // pending entry itself is removed.
+  async function linkPending(pending, profileId) {
+    if (!profileId) return
+    setLinkingId(pending.id)
+    await supabase.from('roster_entries').update({ profile_id: profileId }).eq('staff_name_raw', pendingRosterName(pending)).is('profile_id', null)
+    await supabase.from('roster_pending_staff').delete().eq('id', pending.id)
+    setPendingList((prev) => prev.filter((p) => p.id !== pending.id))
+    setLinkingId(null)
+  }
+
+  const visibleUsers = search.trim()
+    ? users.filter((u) => `${u.first_name ?? ''} ${u.last_name ?? ''} ${u.email ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()))
+    : users
 
   return (
     <div>
@@ -57,61 +133,28 @@ export default function UserManagementPage() {
         sign up. See the README for wiring up a self-service invite flow.
       </p>
 
-      <select className="input mb-4 w-56" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
-        <option value="all">All stores</option>
-        {accessibleStores.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-
-      <div className="mb-6">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-brand-700">Pending Staff (no login yet)</h2>
-          <Button variant="secondary" onClick={() => setEditingPending('new')}>
-            + New Pending Staff
-          </Button>
-        </div>
-        <p className="mb-2 text-xs text-gray-400">
-          Reserve a name, role, and store for someone before they have login access — they'll show up as a
-          selectable row in Manage Roster right away. Once they're invited and sign in through Supabase, link
-          their new account here to hand the role/store over and retire this placeholder.
-        </p>
-        {!pending.length ? (
-          <EmptyState label="No pending staff." />
-        ) : (
-          <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-            {pending.map((p) => (
-              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                <span className="flex items-center gap-2">
-                  <span className="font-medium text-gray-800">{`${p.first_name} ${p.last_name ?? ''}`.trim()}</span>
-                  <Badge color="gray">{ROLE_LABELS[p.role] ?? p.role}</Badge>
-                  {p.stores?.name && <Badge color="brand">{p.stores.name}</Badge>}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Button variant="ghost" onClick={() => setLinkingPending(p)}>
-                    Link to account
-                  </Button>
-                  <Button variant="ghost" onClick={() => setEditingPending(p)}>
-                    Edit
-                  </Button>
-                  <button onClick={() => removePending(p)} className="px-2 text-gray-300 hover:text-red-500" title="Remove">
-                    ✕
-                  </button>
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="mb-4 flex flex-wrap gap-2">
+        <select className="input w-56" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
+          <option value="all">All stores</option>
+          {accessibleStores.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <input
+          className="input w-56"
+          placeholder="Search by name or email"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
 
-      <h2 className="mb-2 text-sm font-semibold text-brand-700">Active Accounts</h2>
-      {!users.length ? (
+      {!visibleUsers.length ? (
         <EmptyState label="No users found." />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {users.map((u) => (
+          {visibleUsers.map((u) => (
             <button
               key={u.id}
               onClick={() => setSelected(u)}
@@ -141,27 +184,88 @@ export default function UserManagementPage() {
           }}
         />
       )}
-      {editingPending && (
-        <PendingStaffModal
-          pending={editingPending === 'new' ? null : editingPending}
-          onClose={() => setEditingPending(null)}
-          onSaved={() => {
-            setEditingPending(null)
-            loadPending()
-          }}
-        />
+
+      <h2 className="mb-1 mt-8 text-lg font-semibold text-gray-900">Pending staff</h2>
+      <p className="mb-3 text-sm text-gray-500">
+        Someone to schedule and try out on the roster before formally inviting them in Supabase — no account needed
+        yet. Once you do invite them for real, use "Link to" to fold their trial hours into the new account.
+      </p>
+      {!pendingList.length ? (
+        <EmptyState label="No pending staff." />
+      ) : (
+        <div className="mb-3 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+          {pendingList.map((p) => (
+            <PendingRow
+              key={p.id}
+              pending={p}
+              storeLabel={storeFilter === 'all' ? p.stores?.name : null}
+              staffOptions={staffByStore[p.store_id] ?? []}
+              onSave={(name) => {
+                supabase.from('roster_pending_staff').update({ display_name: name }).eq('id', p.id)
+                setPendingList((prev) => prev.map((row) => (row.id === p.id ? { ...row, display_name: name } : row)))
+              }}
+              onRemove={() => removePending(p.id)}
+              removing={removingPendingId === p.id}
+              onLink={(profileId) => linkPending(p, profileId)}
+              linking={linkingId === p.id}
+            />
+          ))}
+        </div>
       )}
-      {linkingPending && (
-        <LinkPendingStaffModal
-          pending={linkingPending}
-          onClose={() => setLinkingPending(null)}
-          onLinked={() => {
-            setLinkingPending(null)
-            loadPending()
-            load()
-          }}
+      <div className="flex items-center gap-2">
+        <input
+          className="input max-w-xs"
+          placeholder="Name"
+          value={newPendingName}
+          disabled={storeFilter === 'all'}
+          onChange={(e) => setNewPendingName(e.target.value)}
         />
-      )}
+        <Button variant="secondary" disabled={storeFilter === 'all' || addingPending || !newPendingName.trim()} onClick={addPending}>
+          + Add pending staff
+        </Button>
+        {storeFilter === 'all' && <span className="text-xs text-gray-400">Pick a specific store above to add one.</span>}
+      </div>
+    </div>
+  )
+}
+
+// A pending row's own name (editable here — this is the "original name"
+// Name display shows next to its roster-only override) plus the day-it-
+// becomes-real "Link to" control and remove.
+function PendingRow({ pending, storeLabel, staffOptions, onSave, onRemove, removing, onLink, linking }) {
+  const [draft, setDraft] = useState(pending.display_name)
+  const dirty = draft !== pending.display_name
+  const [linkTarget, setLinkTarget] = useState('')
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+      {storeLabel && <Badge color="brand">{storeLabel}</Badge>}
+      <input className="input flex-1 basis-48" value={draft} onChange={(e) => setDraft(e.target.value)} />
+      <Button variant="secondary" disabled={!dirty || !draft.trim()} onClick={() => onSave(draft.trim())}>
+        Save
+      </Button>
+      <div className="flex items-center gap-1.5 text-xs text-gray-500">
+        <span>Link to</span>
+        <select className="input !w-40 !py-1" value={linkTarget} onChange={(e) => setLinkTarget(e.target.value)}>
+          <option value="">Select staff…</option>
+          {staffOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {`${s.first_name ?? ''} ${s.last_name ?? ''}`.trim() || '(unnamed)'}
+            </option>
+          ))}
+        </select>
+        <Button variant="secondary" disabled={!linkTarget || linking} onClick={() => onLink(linkTarget)}>
+          {linking ? 'Linking…' : 'Link'}
+        </Button>
+      </div>
+      <button
+        onClick={onRemove}
+        disabled={removing}
+        className="ml-auto text-gray-300 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+        title="Remove this pending entry"
+      >
+        ✕
+      </button>
     </div>
   )
 }

@@ -11,6 +11,11 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   const [storeId, setStoreId] = useState(user.primary_store_id ?? '')
   const [isActive, setIsActive] = useState(user.is_active)
   const [overrides, setOverrides] = useState({}) // page_key -> boolean (explicit override) or undefined
+  // Store(s) this person shows up on the roster for, beyond their primary
+  // Store above — e.g. an admin who only actually works a couple of
+  // stores, not every store the way `role: admin` used to imply for roster
+  // purposes. Backed by user_stores (see migration 0027).
+  const [extraStoreIds, setExtraStoreIds] = useState([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -23,7 +28,18 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         ;(data ?? []).forEach((o) => (map[o.page_key] = o.allowed))
         setOverrides(map)
       })
-  }, [user.id])
+    supabase
+      .from('user_stores')
+      .select('store_id')
+      .eq('profile_id', user.id)
+      .then(({ data }) => {
+        setExtraStoreIds((data ?? []).map((r) => r.store_id).filter((id) => id !== (user.primary_store_id ?? '')))
+      })
+  }, [user.id, user.primary_store_id])
+
+  function toggleExtraStore(id) {
+    setExtraStoreIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
 
   const effective = getEffectivePages(
     { role },
@@ -52,6 +68,17 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       updated_by: me.id,
     }))
     if (rows.length) await supabase.from('permission_overrides').insert(rows)
+
+    // Sync user_stores to exactly {Store above} ∪ {checked extra stores} —
+    // this is what Manage Roster / Name display use to decide which
+    // store(s) this person appears on, instead of assuming an admin
+    // belongs on every store's roster.
+    const storeIds = Array.from(new Set([storeId, ...extraStoreIds].filter(Boolean)))
+    await supabase.from('user_stores').delete().eq('profile_id', user.id)
+    if (storeIds.length) {
+      await supabase.from('user_stores').insert(storeIds.map((id) => ({ profile_id: user.id, store_id: id })))
+    }
+
     setSaving(false)
     onSaved()
   }
@@ -95,6 +122,26 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
           Active
         </label>
       </div>
+
+      {accessibleStores.length > 1 && (
+        <div className="mb-5">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Also on the roster at (in addition to Store above)</span>
+          <div className="flex flex-wrap gap-3">
+            {accessibleStores
+              .filter((s) => s.id !== storeId)
+              .map((s) => (
+                <label key={s.id} className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <input type="checkbox" checked={extraStoreIds.includes(s.id)} onChange={() => toggleExtraStore(s.id)} />
+                  {s.name}
+                </label>
+              ))}
+          </div>
+          <p className="mt-1 text-xs text-gray-400">
+            For someone (e.g. an admin) working more than one store — they only show up on a store's Manage
+            Roster / Name display if it's their Store above or checked here.
+          </p>
+        </div>
+      )}
 
       <h4 className="mb-2 text-sm font-semibold text-brand-700">Page Access</h4>
       <div className="space-y-3">

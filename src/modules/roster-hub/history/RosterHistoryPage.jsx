@@ -6,7 +6,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
-import { exportRosterGrid, timeToDecimal } from '../../../lib/excelRoster'
+import { exportRosterGrid, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
 import MultiStoreExportModal from './MultiStoreExportModal'
 
 export default function RosterHistoryPage() {
@@ -24,7 +24,7 @@ export default function RosterHistoryPage() {
       .from('roster_periods')
       .select('*')
       .eq('store_id', currentStoreId)
-      .order('created_at', { ascending: false })
+      .order('updated_at', { ascending: false })
       .then(({ data }) => {
         setPeriods(data ?? [])
         setLoading(false)
@@ -32,20 +32,21 @@ export default function RosterHistoryPage() {
   }, [currentStoreId])
 
   async function exportPeriod(period) {
-    const [{ data: rows }, { data: staffList }] = await Promise.all([
-      supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
-      supabase.from('profiles').select('id, first_name, last_name').eq('primary_store_id', currentStoreId).eq('is_active', true),
+    const [{ data: rows }, { data: memberships }] = await Promise.all([
+      supabase.from('roster_entries').select('*, profiles(first_name, last_name, roster_display_name)').eq('roster_period_id', period.id),
+      supabase.from('user_stores').select('profiles(id, first_name, last_name, roster_display_name, is_active)').eq('store_id', currentStoreId),
     ])
+    const staffList = (memberships ?? []).map((m) => m.profiles).filter((p) => p && p.is_active)
     const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(period.week_start_date), i), 'yyyy-MM-dd'))
     const entries = (rows ?? []).map((r) => ({
       profileId: r.profile_id ?? '',
-      staffName: r.profiles ? `${r.profiles.first_name ?? ''} ${r.profiles.last_name ?? ''}`.trim() : r.staff_name_raw ?? '',
+      staffName: r.profiles ? rosterDisplayName(r.profiles) : r.staff_name_raw ?? '',
       date: r.work_date,
       startTime: timeToDecimal(r.start_time),
       endTime: timeToDecimal(r.end_time),
       breakHours: r.break_half_hours ?? '',
     }))
-    exportRosterGrid(storeName, staffList ?? [], weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
+    exportRosterGrid(storeName, staffList, weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
   }
 
   return (
@@ -79,7 +80,7 @@ export default function RosterHistoryPage() {
                     {p.status === 'submitted' ? '已完成' : '未提交'}
                   </Badge>
                 </div>
-                <div className="text-xs text-gray-400">Saved {new Date(p.created_at).toLocaleString()}</div>
+                <div className="text-xs text-gray-400">Saved {new Date(p.updated_at ?? p.created_at).toLocaleString()}</div>
               </div>
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => navigate('/roster-hub/manage-roster', { state: { loadPeriodId: p.id } })}>

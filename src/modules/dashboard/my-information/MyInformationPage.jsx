@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
+import { STAFF_DOC_TYPES } from '../../../lib/staffDocumentTypes'
 import Button from '../../../components/ui/Button'
 
-const DOC_TYPES = [
-  { key: 'tfn', label: 'Tax File Number (TFN) Declaration', templateCategory: 'tfn_template' },
-  { key: 'super', label: 'Super Choice Form', templateCategory: 'super_template' },
-  { key: 'parent_consent', label: 'Parent / Guardian Consent Form', templateCategory: 'parent_consent_template' },
-]
+const DOC_TYPES = STAFF_DOC_TYPES
 
 export default function MyInformationPage() {
-  const { profile, refreshProfile } = useAuth()
+  const { profile, currentStoreId, refreshProfile } = useAuth()
+  const navigate = useNavigate()
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [docs, setDocs] = useState({})
@@ -40,19 +39,31 @@ export default function MyInformationPage() {
         ;(data ?? []).forEach((d) => (map[d.doc_type] = d))
         setDocs(map)
       })
+  }, [profile])
+
+  // Which blank template file to offer depends on the staff's store — set
+  // per store in Store Management (store_document_links) so, e.g., a
+  // state-specific form can differ between stores. No store selected yet,
+  // or that store has no file linked for a category, just means no
+  // "Download blank form" link shows for it.
+  useEffect(() => {
+    if (!currentStoreId) {
+      setTemplates({})
+      return
+    }
     supabase
-      .from('file_repository')
-      .select('*')
-      .in(
-        'category',
-        DOC_TYPES.map((d) => d.templateCategory)
-      )
+      .from('store_document_links')
+      .select('doc_type, url, file_repository(file_path)')
+      .eq('store_id', currentStoreId)
       .then(({ data }) => {
         const map = {}
-        ;(data ?? []).forEach((f) => (map[f.category] = f))
+        ;(data ?? []).forEach((l) => {
+          const href = l.url || (l.file_repository ? supabase.storage.from('documents').getPublicUrl(l.file_repository.file_path).data.publicUrl : null)
+          if (href) map[l.doc_type] = href
+        })
         setTemplates(map)
       })
-  }, [profile])
+  }, [currentStoreId])
 
   async function save() {
     setSaving(true)
@@ -115,6 +126,13 @@ export default function MyInformationPage() {
       </section>
 
       <section>
+        <h2 className="mb-3 text-sm font-semibold text-brand-700">Account</h2>
+        <Button variant="secondary" onClick={() => navigate('/set-password')}>
+          Change password
+        </Button>
+      </section>
+
+      <section>
         <h2 className="mb-3 text-sm font-semibold text-brand-700">Documents</h2>
         <div className="space-y-3">
           {DOC_TYPES.map((d) => (
@@ -123,15 +141,10 @@ export default function MyInformationPage() {
                 <div className="text-sm font-medium text-gray-800">{d.label}</div>
                 <div className="text-xs text-gray-400">
                   {docs[d.key] ? `Uploaded: ${docs[d.key].original_name}` : 'Not uploaded yet'}
-                  {templates[d.templateCategory] && (
+                  {templates[d.key] && (
                     <>
                       {' · '}
-                      <a
-                        className="text-brand-600 hover:underline"
-                        href={supabase.storage.from('documents').getPublicUrl(templates[d.templateCategory].file_path).data.publicUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className="text-brand-600 hover:underline" href={templates[d.key]} target="_blank" rel="noreferrer">
                         Download blank form
                       </a>
                     </>

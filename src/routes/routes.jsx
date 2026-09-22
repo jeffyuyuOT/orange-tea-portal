@@ -3,6 +3,8 @@ import AppShell from '../components/layout/AppShell'
 import RequireAuth from './RequireAuth'
 import RequirePage from './RequirePage'
 
+import SetPasswordPage from '../modules/auth/SetPasswordPage'
+
 import FormulaPage from '../modules/operations-training/formula/FormulaPage'
 import ShopTrainingPage from '../modules/operations-training/shop-training/ShopTrainingPage'
 
@@ -36,6 +38,13 @@ function guarded(pageKey, element) {
 export default function AppRoutes() {
   return (
     <Routes>
+      {/* Public — reached from a Supabase invite/reset-password email link
+          (see main.jsx) or from My Information's "Change password" button.
+          Deliberately outside RequireAuth: it establishes its own session
+          from the link (or uses the one already logged in) instead of
+          needing one up front. */}
+      <Route path="/set-password" element={<SetPasswordPage />} />
+
       <Route
         element={
           <RequireAuth>

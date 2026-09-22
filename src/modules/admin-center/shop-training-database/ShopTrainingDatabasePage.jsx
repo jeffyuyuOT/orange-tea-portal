@@ -11,6 +11,11 @@ export default function ShopTrainingDatabasePage() {
   const { profile } = useAuth()
   const [items, setItems] = useState([])
   const [editing, setEditing] = useState(null)
+  // Locks BOTH ↑/↓ buttons for every row while a reorder is in flight —
+  // not just the one clicked — since a reorder is a two-step swap
+  // (two sequential updates) and a second click landing mid-swap could
+  // race it and leave sort_order inconsistent, not just double-fire.
+  const [moving, setMoving] = useState(false)
 
   async function load() {
     const { data } = await supabase.from('shop_training_items').select('*').order('sort_order')
@@ -21,12 +26,15 @@ export default function ShopTrainingDatabasePage() {
   }, [])
 
   async function move(item, dir) {
+    if (moving) return
     const idx = items.findIndex((i) => i.id === item.id)
     const swapWith = items[idx + dir]
     if (!swapWith) return
+    setMoving(true)
     await supabase.from('shop_training_items').update({ sort_order: swapWith.sort_order }).eq('id', item.id)
     await supabase.from('shop_training_items').update({ sort_order: item.sort_order }).eq('id', swapWith.id)
-    load()
+    await load()
+    setMoving(false)
   }
 
   async function remove(id) {
@@ -58,10 +66,18 @@ export default function ShopTrainingDatabasePage() {
                 {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
               </button>
               <div className="flex items-center gap-1">
-                <button disabled={idx === 0} onClick={() => move(item, -1)} className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30">
+                <button
+                  disabled={idx === 0 || moving}
+                  onClick={() => move(item, -1)}
+                  className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                >
                   ↑
                 </button>
-                <button disabled={idx === items.length - 1} onClick={() => move(item, 1)} className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30">
+                <button
+                  disabled={idx === items.length - 1 || moving}
+                  onClick={() => move(item, 1)}
+                  className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                >
                   ↓
                 </button>
                 <Button variant="danger" onClick={() => remove(item.id)}>

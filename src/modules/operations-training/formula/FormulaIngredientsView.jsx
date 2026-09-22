@@ -1,5 +1,6 @@
+import { useEffect, useRef, useState } from 'react'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
-import { isVideoPath } from '../../../lib/mediaType'
+import MediaPreview from '../../../components/ui/MediaPreview'
 
 const GROUP_BORDER = '#f97316' // brand orange — distinct from the table's own thin gray gridlines
 
@@ -22,11 +23,27 @@ export default function FormulaIngredientsView({
   annotationsBelow = [],
   notesHtml,
   notesImagePath,
+  videos = [], // titled videos — a drink or shop-training item can have more than one
 }) {
   const visibleIngredients = hasHotVersion ? ingredients.filter((ing) => !!ing.is_hot === showHot) : ingredients
 
+  // The table/chips only have room for each ingredient's abbreviation —
+  // hovering it with a mouse, or tapping it on mobile (where there's no
+  // hover), pops up its full "name(unit)" instead. Only one popover is
+  // open at a time; tracking it here rather than locally in each chip/
+  // header cell lets a tap anywhere else in this section close it.
+  const [openTooltip, setOpenTooltip] = useState(null)
+  const containerRef = useRef(null)
+  useEffect(() => {
+    function handleOutsideClick(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpenTooltip(null)
+    }
+    document.addEventListener('click', handleOutsideClick)
+    return () => document.removeEventListener('click', handleOutsideClick)
+  }, [])
+
   return (
-    <div>
+    <div ref={containerRef}>
       <div className="mb-2 flex items-center justify-between">
         <h4 className="text-sm font-semibold text-brand-700">Ingredients</h4>
         {hasHotVersion && (
@@ -62,9 +79,9 @@ export default function FormulaIngredientsView({
       ) : visibleIngredients.length === 0 ? (
         <p className="text-sm text-gray-400">No ingredients recorded.</p>
       ) : sizes.length > 0 ? (
-        <IngredientMatrix ingredients={visibleIngredients} sizes={sizes} />
+        <IngredientMatrix ingredients={visibleIngredients} sizes={sizes} openTooltip={openTooltip} setOpenTooltip={setOpenTooltip} />
       ) : (
-        <GroupedChips ingredients={visibleIngredients} />
+        <GroupedChips ingredients={visibleIngredients} openTooltip={openTooltip} setOpenTooltip={setOpenTooltip} />
       )}
 
       {annotationsBelow.length > 0 && (
@@ -76,13 +93,43 @@ export default function FormulaIngredientsView({
       )}
 
       {notesHtml && <RichTextViewer html={notesHtml} className="mt-2" />}
-      {notesImagePath &&
-        (isVideoPath(notesImagePath) ? (
-          <video src={notesImagePath} controls className="mt-2 max-w-sm rounded-lg border border-gray-200" />
-        ) : (
-          <img src={notesImagePath} alt="" className="mt-2 max-w-sm rounded-lg border border-gray-200" />
-        ))}
+      {notesImagePath && <MediaPreview src={notesImagePath} alt="" className="mt-2 max-w-sm rounded-lg border border-gray-200" />}
+
+      {videos.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {videos.map((v, i) => (
+            <div key={v.id ?? i} className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">{v.title || 'Video'}</span>
+              <a
+                href={v.url}
+                target="_blank"
+                rel="noreferrer"
+                title="Watch video"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500 text-xs text-white hover:bg-brand-600"
+              >
+                ▶
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
+  )
+}
+
+// Small dark popover showing an ingredient's full name(unit). `position`
+// controls which side it opens on: chips open it above themselves (they
+// can sit anywhere down the page), matrix header cells open it below
+// (above would land outside the scrollable table area).
+function NameTooltip({ name, unit, position = 'top' }) {
+  const text = unit ? `${name} (${unit})` : name
+  const posClass = position === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
+  return (
+    <span
+      className={`pointer-events-none absolute left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-normal text-white shadow-lg ${posClass}`}
+    >
+      {text}
+    </span>
   )
 }
 
@@ -90,7 +137,7 @@ export default function FormulaIngredientsView({
 // group_label (set in Edit Item, e.g. "Blender") are drawn together inside
 // one bordered box instead of as separate standalone chips — for things
 // like "these four go in the blender together" vs. a topping added after.
-function GroupedChips({ ingredients }) {
+function GroupedChips({ ingredients, openTooltip, setOpenTooltip }) {
   const segments = []
   for (const ing of ingredients) {
     const label = ing.group_label || ''
@@ -108,7 +155,7 @@ function GroupedChips({ ingredients }) {
     <div className="flex flex-wrap items-start gap-2">
       {segments.map((seg, i) =>
         seg.type === 'single' ? (
-          <IngredientChip key={seg.item.id ?? seg.item._key ?? i} ing={seg.item} />
+          <IngredientChip key={seg.item.id ?? seg.item._key ?? i} ing={seg.item} openTooltip={openTooltip} setOpenTooltip={setOpenTooltip} />
         ) : (
           <div key={i} className="flex items-center gap-1.5 rounded-lg border-2 p-1.5" style={{ borderColor: GROUP_BORDER }}>
             {seg.label && (
@@ -117,7 +164,7 @@ function GroupedChips({ ingredients }) {
               </span>
             )}
             {seg.items.map((ing) => (
-              <IngredientChip key={ing.id ?? ing._key} ing={ing} />
+              <IngredientChip key={ing.id ?? ing._key} ing={ing} openTooltip={openTooltip} setOpenTooltip={setOpenTooltip} />
             ))}
           </div>
         )
@@ -132,7 +179,7 @@ function GroupedChips({ ingredients }) {
 // Columns sharing the same non-blank group_label get an orange box drawn
 // around their header + every size's cells, same idea as the chip grouping
 // above but spanning the whole column instead of one chip.
-function IngredientMatrix({ ingredients, sizes }) {
+function IngredientMatrix({ ingredients, sizes, openTooltip, setOpenTooltip }) {
   // The same ingredient can legitimately appear more than once for one
   // size (e.g. sugar added at two different points in the recipe), so
   // columns can't just be keyed by ingredient_id — that collapsed every
@@ -192,6 +239,16 @@ function IngredientMatrix({ ingredients, sizes }) {
 
   const hasGroups = columns.some((c) => c.ing.group_label)
 
+  function toggle(key) {
+    setOpenTooltip?.((cur) => (cur === key ? null : key))
+  }
+  function showOnHover(key) {
+    setOpenTooltip?.(key)
+  }
+  function hideOnLeave(key) {
+    setOpenTooltip?.((cur) => (cur === key ? null : cur))
+  }
+
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200">
       <table className="border-collapse text-sm">
@@ -231,13 +288,23 @@ function IngredientMatrix({ ingredients, sizes }) {
             </th>
             {columns.map(({ ing: col, colKey }, idx) => {
               const rule = col.ingredient_master?.ingredient_format_rules
+              const name = col.ingredient_master?.name || 'Ingredient'
+              const unit = col.ingredient_master?.unit
+              const isOpen = openTooltip === colKey
               return (
                 <th
                   key={colKey}
-                  className="border-b border-r border-gray-200 px-2.5 py-1.5 text-center text-xs whitespace-nowrap"
+                  className="relative cursor-pointer border-b border-r border-gray-200 px-2.5 py-1.5 text-center text-xs whitespace-nowrap"
                   style={{ ...ruleStyle(rule, { header: true }), ...groupBorderStyle(idx) }}
+                  onMouseEnter={() => showOnHover(colKey)}
+                  onMouseLeave={() => hideOnLeave(colKey)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggle(colKey)
+                  }}
                 >
-                  {rule?.abbreviation || col.ingredient_master?.name || 'Ingredient'}
+                  {rule?.abbreviation || name}
+                  {isOpen && <NameTooltip name={name} unit={unit} position="bottom" />}
                 </th>
               )
             })}
@@ -250,7 +317,6 @@ function IngredientMatrix({ ingredients, sizes }) {
               {columns.map(({ ing: col, colKey }, idx) => {
                 const cell = cellFor(size.id, colKey)
                 const rule = col.ingredient_master?.ingredient_format_rules
-                const unit = col.ingredient_master?.unit
                 const isLastRow = rowIdx === sizes.length - 1
                 return (
                   <td
@@ -261,7 +327,6 @@ function IngredientMatrix({ ingredients, sizes }) {
                       ...groupBorderStyle(idx),
                       borderBottom: isLastRow && col.group_label ? `2px solid ${GROUP_BORDER}` : undefined,
                     }}
-                    title={cell?.quantity_text && unit ? unit : undefined}
                   >
                     {cell?.quantity_text || ''}
                   </td>
@@ -275,13 +340,17 @@ function IngredientMatrix({ ingredients, sizes }) {
   )
 }
 
-function IngredientChip({ ing }) {
+function IngredientChip({ ing, openTooltip, setOpenTooltip }) {
   const rule = ing.ingredient_master?.ingredient_format_rules
   const label = rule?.abbreviation || ing.ingredient_master?.name || 'Ingredient'
+  const name = ing.ingredient_master?.name || 'Ingredient'
   const unit = ing.ingredient_master?.unit
+  const key = ing.id ?? ing._key
+  const isOpen = openTooltip === key
+
   return (
     <span
-      className="rounded-md border px-2 py-1 text-sm"
+      className="relative inline-block cursor-pointer rounded-md border px-2 py-1 text-sm"
       style={{
         fontSize: rule?.font_size || '14px',
         color: rule?.font_color || '#1f2937',
@@ -290,14 +359,21 @@ function IngredientChip({ ing }) {
         fontWeight: rule?.is_bold ? 700 : 400,
         fontStyle: rule?.is_italic ? 'italic' : 'normal',
       }}
+      onMouseEnter={() => setOpenTooltip?.(key)}
+      onMouseLeave={() => setOpenTooltip?.((cur) => (cur === key ? null : cur))}
+      onClick={(e) => {
+        e.stopPropagation()
+        setOpenTooltip?.((cur) => (cur === key ? null : key))
+      }}
     >
       {label}
       {ing.quantity_text && (
         <>
           {' · '}
-          <span title={unit || undefined}>{ing.quantity_text}</span>
+          <span>{ing.quantity_text}</span>
         </>
       )}
+      {isOpen && <NameTooltip name={name} unit={unit} position="top" />}
     </span>
   )
 }
