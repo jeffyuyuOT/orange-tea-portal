@@ -119,6 +119,13 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
         await supabase
           .from('announcement_history')
           .insert({ announcement_id: data.id, action: 'created', actor_id: profile.id, actor_name: actorName })
+        // The poster has obviously already "seen" their own post — mark it
+        // read for them so it doesn't show up flagged NEW on their own
+        // Bulletin Board.
+        await supabase.from('announcement_reads').upsert(
+          { profile_id: profile.id, announcement_id: data.id },
+          { onConflict: 'profile_id,announcement_id', ignoreDuplicates: true }
+        )
       } else {
         const { error } = await supabase
           .from('announcements')
