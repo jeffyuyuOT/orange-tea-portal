@@ -27,6 +27,11 @@ export default function ManageRosterPage() {
   const [notes, setNotes] = useState('')
   const [staff, setStaff] = useState([])
   const [pendingStaff, setPendingStaff] = useState([])
+  // Staff/Pending people hidden from just THIS store+week's grid via the ✕
+  // next to their auto-populated row (their profile / Pending staff entry
+  // is untouched — see roster_hidden_staff, migration 0030). Each item:
+  // { id (the hidden-row id, for restoring), profileId, pendingStaffId, name }.
+  const [hiddenStaff, setHiddenStaff] = useState([])
   const [rules, setRules] = useState([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -80,6 +85,34 @@ export default function ManageRosterPage() {
       .then(({ data }) => setRules(data ?? []))
   }, [currentStoreId])
 
+  // Who's hidden from THIS store+week's grid — reloads whenever either
+  // changes, same as the staff/pendingStaff/rules loads above.
+  useEffect(() => {
+    if (!currentStoreId || !weekStart) {
+      setHiddenStaff([])
+      return
+    }
+    supabase
+      .from('roster_hidden_staff')
+      .select('id, profile_id, pending_staff_id, profiles(first_name, last_name, roster_display_name), roster_pending_staff(display_name, roster_display_name)')
+      .eq('store_id', currentStoreId)
+      .eq('week_start_date', weekStart)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('load roster_hidden_staff failed', error)
+          return
+        }
+        setHiddenStaff(
+          (data ?? []).map((h) => ({
+            id: h.id,
+            profileId: h.profile_id,
+            pendingStaffId: h.pending_staff_id,
+            name: h.profile_id ? rosterDisplayName(h.profiles) : pendingRosterName(h.roster_pending_staff),
+          }))
+        )
+      })
+  }, [currentStoreId, weekStart])
+
   // "Load" a period passed via History page navigation state.
   useEffect(() => {
     const loadPeriodId = location.state?.loadPeriodId
@@ -112,7 +145,48 @@ export default function ManageRosterPage() {
   // Pending staff show up in the downloadable template and "current grid"
   // export too, same as on-screen, so a not-yet-formal hire can be
   // scheduled ahead of time whichever way the roster gets filled in.
+  // Template/export/import-matching still use the FULL staff/pendingStaff —
+  // hiding someone from this week's grid shouldn't also hide them from the
+  // Excel template or stop an uploaded name from matching them. Only the
+  // on-screen grid rows are filtered down to `visible*`.
   const templateStaff = [...staff, ...pendingAsStaff(pendingStaff)]
+  const hiddenProfileIds = new Set(hiddenStaff.filter((h) => h.profileId).map((h) => h.profileId))
+  const hiddenPendingIds = new Set(hiddenStaff.filter((h) => h.pendingStaffId).map((h) => h.pendingStaffId))
+  const visibleStaff = staff.filter((s) => !hiddenProfileIds.has(s.id))
+  const visiblePendingStaff = pendingStaff.filter((p) => !hiddenPendingIds.has(p.id))
+
+  // Called from the grid's ✕ on an auto-populated staff/pending row — hides
+  // them from just this store+week (their profile / Pending staff entry is
+  // untouched).
+  async function hideStaffRow(row) {
+    if (!currentStoreId || !weekStart) return
+    const { data, error } = await supabase
+      .from('roster_hidden_staff')
+      .insert({
+        store_id: currentStoreId,
+        week_start_date: weekStart,
+        profile_id: row.kind === 'staff' ? row.profileId : null,
+        pending_staff_id: row.kind === 'pending' ? row.pendingId : null,
+      })
+      .select()
+      .single()
+    if (error) {
+      console.error('hide staff failed', error)
+      return
+    }
+    setHiddenStaff((prev) => [...prev, { id: data.id, profileId: data.profile_id, pendingStaffId: data.pending_staff_id, name: row.name }])
+  }
+
+  // "+ <name>" in the "N staff not on this week's roster" list — brings
+  // them back onto the grid for this week.
+  async function restoreStaffRow(hidden) {
+    const { error } = await supabase.from('roster_hidden_staff').delete().eq('id', hidden.id)
+    if (error) {
+      console.error('restore staff failed', error)
+      return
+    }
+    setHiddenStaff((prev) => prev.filter((h) => h.id !== hidden.id))
+  }
 
   function knownNames() {
     return [
@@ -303,7 +377,16 @@ export default function ManageRosterPage() {
         </Button>
       </div>
 
-      <RosterEntryGrid staff={staff} pendingStaff={pendingStaff} weekDates={weekDates} entries={entries} setEntries={setEntries} />
+      <RosterEntryGrid
+        staff={visibleStaff}
+        pendingStaff={visiblePendingStaff}
+        weekDates={weekDates}
+        entries={entries}
+        setEntries={setEntries}
+        hiddenStaff={hiddenStaff}
+        onHideStaff={hideStaffRow}
+        onRestoreStaff={restoreStaffRow}
+      />
       <UnderstaffedWarnings entries={entries} rules={rules} />
 
       <label className="mt-4 block">

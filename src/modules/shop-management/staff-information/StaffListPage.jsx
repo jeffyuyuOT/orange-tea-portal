@@ -15,13 +15,24 @@ export default function StaffListPage() {
   async function load() {
     if (!currentStoreId) return
     setLoading(true)
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('primary_store_id', currentStoreId)
-      .order('is_active', { ascending: false })
-      .order('first_name')
-    setStaff(data ?? [])
+    // A person can be on this store's roster via user_stores without it
+    // being their primary_store_id (e.g. an admin added to a second store
+    // without changing their home store — see migration 0027) — filtering
+    // by primary_store_id alone would hide them here even though they show
+    // up on this store's Manage Roster / Name display.
+    const [{ data: primaryMatches, error: err1 }, { data: memberships, error: err2 }] = await Promise.all([
+      supabase.from('profiles').select('*').eq('primary_store_id', currentStoreId),
+      supabase.from('user_stores').select('profiles(*)').eq('store_id', currentStoreId),
+    ])
+    if (err1 || err2) console.error('load staff failed', err1 ?? err2)
+    const byId = new Map()
+    ;(primaryMatches ?? []).forEach((p) => byId.set(p.id, p))
+    ;(memberships ?? []).forEach((m) => m.profiles && byId.set(m.profiles.id, m.profiles))
+    const merged = Array.from(byId.values()).sort((a, b) => {
+      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1
+      return (a.first_name ?? '').localeCompare(b.first_name ?? '')
+    })
+    setStaff(merged)
     setLoading(false)
   }
 

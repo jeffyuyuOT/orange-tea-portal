@@ -67,7 +67,14 @@ export default function MyInformationPage() {
 
   async function save() {
     setSaving(true)
-    await supabase.from('profiles').update(form).eq('id', profile.id)
+    // An empty date input sends '' — Postgres's `date` column rejects that
+    // outright (invalid input syntax for type date), which PostgREST
+    // surfaces as an opaque HTTP 400 with no field-level detail in the UI.
+    // Anyone who hasn't filled in a date of birth yet hits this on every
+    // save, not just when editing the date field itself.
+    const payload = { ...form, date_of_birth: form.date_of_birth || null }
+    const { error } = await supabase.from('profiles').update(payload).eq('id', profile.id)
+    if (error) alert(`Save failed: ${error.message}`)
     await refreshProfile()
     setSaving(false)
   }

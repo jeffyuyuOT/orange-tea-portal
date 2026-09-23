@@ -20,12 +20,25 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
 
   async function save() {
     setSaving(true)
-    const payload = { ...form }
+    // Empty date inputs send '' — Postgres's `date` columns reject that
+    // outright (invalid input syntax for type date), which comes back as
+    // an opaque HTTP 400 with no field-level detail in the UI. A brand
+    // new staff member with no date_of_birth/hire_date set yet hits this
+    // on every save, not just when editing those fields.
+    const payload = {
+      ...form,
+      date_of_birth: form.date_of_birth || null,
+      hire_date: form.hire_date || null,
+    }
     // Per spec: hire date is manager/admin editable, but only admin can
     // change it here from Shop Management (managers can still view it).
     if (!isAdmin) delete payload.hire_date
-    await supabase.from('profiles').update(payload).eq('id', staff.id)
+    const { error } = await supabase.from('profiles').update(payload).eq('id', staff.id)
     setSaving(false)
+    if (error) {
+      alert(`Save failed: ${error.message}`)
+      return
+    }
     onSaved()
   }
 

@@ -25,7 +25,16 @@ function round2(n) {
 // `entries` stays a flat array (one record per person + date, matching a
 // roster_entries row) — this component only pivots it into a grid for
 // editing; ManageRosterPage still saves/loads the flat shape.
-export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, entries, setEntries }) {
+export default function RosterEntryGrid({
+  staff,
+  pendingStaff = [],
+  weekDates,
+  entries,
+  setEntries,
+  hiddenStaff = [],
+  onHideStaff,
+  onRestoreStaff,
+}) {
   // "+ Add row" placeholders for a casual/one-off name not in Staff
   // Information yet. Keyed by a stable id (not by the typed name) so
   // typing into the Name field doesn't remount the row on every keystroke.
@@ -37,12 +46,24 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
   )
 
   const rows = useMemo(() => {
-    const staffRows = staff.map((s) => ({ key: s.id, profileId: s.id, name: rosterDisplayName(s) }))
+    // `kind` (+ the id fields it carries) is what removeRow needs to tell a
+    // genuinely-auto-populated person (staff/pending, still exists in User
+    // Management / Pending staff — the ✕ should only hide them from THIS
+    // week) apart from an imported/manually-typed name (the ✕ should just
+    // wipe their hours, same as before — there's nothing else of theirs to
+    // keep).
+    const staffRows = staff.map((s) => ({ key: s.id, profileId: s.id, pendingId: '', name: rosterDisplayName(s), kind: 'staff' }))
     // Pending staff (Roster Hub > Setting > Name display) always get a row
     // too, same as real staff — so a not-yet-formal hire can be scheduled
     // ahead of time instead of only appearing after a "+ Add row"/import
     // happens to use their exact name for this particular week.
-    const pendingRows = pendingStaff.map((p) => ({ key: `pending:${p.id}`, profileId: '', name: pendingRosterName(p) }))
+    const pendingRows = pendingStaff.map((p) => ({
+      key: `pending:${p.id}`,
+      profileId: '',
+      pendingId: p.id,
+      name: pendingRosterName(p),
+      kind: 'pending',
+    }))
     const staffNamesLower = new Set(staffRows.map((r) => r.name.toLowerCase()))
     // A name typed into a "+ Add row" casual slot (or a Pending staff row
     // above) has no profileId, so the moment hours are entered for it, that
@@ -57,8 +78,8 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
     // Stable per-index key (not per-name) — see comment above.
     const importedRows = importedNames
       .filter((name) => !staffNamesLower.has(name.toLowerCase()) && !manualNamesLower.has(name.toLowerCase()))
-      .map((name, i) => ({ key: `imported:${i}`, profileId: '', name }))
-    const manual = manualRows.map((m) => ({ key: m.key, profileId: '', name: m.name }))
+      .map((name, i) => ({ key: `imported:${i}`, profileId: '', pendingId: '', name, kind: 'imported' }))
+    const manual = manualRows.map((m) => ({ key: m.key, profileId: '', pendingId: '', name: m.name, kind: 'manual' }))
     return [...staffRows, ...pendingRows, ...importedRows, ...manual]
   }, [staff, pendingStaff, importedNames, manualRows])
 
@@ -103,6 +124,12 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
   function removeRow(row) {
     setEntries((prev) => prev.filter((e) => !matches(row, e)))
     setManualRows((prev) => prev.filter((m) => m.key !== row.key))
+    // Staff/Pending rows are auto-populated every time this store+week is
+    // opened — clearing their hours alone wouldn't keep the row off the
+    // grid, it'd just come back empty next load. Hide them for this
+    // specific week instead (their profile / Pending staff entry is
+    // untouched — see ManageRosterPage's hideStaffRow).
+    if ((row.kind === 'staff' || row.kind === 'pending') && onHideStaff) onHideStaff(row)
   }
 
   function rowTotals(row) {
@@ -233,6 +260,26 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
           For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
         </span>
       </div>
+
+      {hiddenStaff.length > 0 && (
+        <details className="border-t border-brand-100 p-2 text-sm">
+          <summary className="cursor-pointer font-medium text-gray-500">
+            {hiddenStaff.length} staff not on this week's roster
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {hiddenStaff.map((h) => (
+              <button
+                key={h.id}
+                onClick={() => onRestoreStaff?.(h)}
+                className="rounded-full border border-brand-200 px-3 py-1 text-xs text-brand-700 hover:bg-brand-50"
+                title="Add back to this week's roster"
+              >
+                + {h.name}
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   )
 }
