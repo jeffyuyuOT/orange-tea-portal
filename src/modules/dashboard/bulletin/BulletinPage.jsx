@@ -11,18 +11,20 @@ import AnnouncementDetailModal from './AnnouncementDetailModal'
 import ImportantAnnouncementsModal from './ImportantAnnouncementsModal'
 import RosterWeekTable from '../../roster-hub/shared/RosterWeekTable'
 
-// Toggle filters shown to the user. There's no third button for quiz
-// reminders — those only ever appear in the unfiltered "all" view, same as
-// any future message type that isn't roster/announcement.
+// Toggle filters shown to the user. There's no button for quiz reminders —
+// those only ever appear in the unfiltered "all" view, same as any future
+// message type that isn't roster/announcement/customer complaint.
 const FILTERS = [
   { key: 'roster', label: 'Roster' },
   { key: 'announcement', label: 'Store Announcement' },
+  { key: 'customer_complaint', label: 'Customer Complaint' },
 ]
 
 const TYPE_BADGE = {
   announcement: { label: 'Announcement', color: 'brand' },
   roster: { label: 'Roster', color: 'green' },
   quiz_reminder: { label: 'Quiz Reminder', color: 'red' },
+  customer_complaint: { label: 'Customer Complaint', color: 'red' },
 }
 
 // Unified Bulletin Board feed: merges store announcements, newly-submitted
@@ -49,12 +51,22 @@ export default function BulletinPage() {
 
     const oneMonthAgo = addMonths(new Date(), -1).toISOString()
 
-    const [{ data: announcementRows }, { data: rosterRows }, { data: settingsRow }] = await Promise.all([
+    const [{ data: announcementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }] = await Promise.all([
       supabase
         .from('announcements')
         .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
         .eq('store_id', currentStoreId)
+        .eq('category', 'normal')
         .gte('updated_at', oneMonthAgo)
+        .order('updated_at', { ascending: false }),
+      // Customer complaints don't drop out of the feed after a month like
+      // everything else here — they stay visible (via their own tab) until
+      // someone actually marks them solved.
+      supabase
+        .from('announcements')
+        .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
+        .eq('store_id', currentStoreId)
+        .eq('category', 'customer_complaint')
         .order('updated_at', { ascending: false }),
       supabase
         .from('roster_periods')
@@ -136,6 +148,24 @@ export default function BulletinPage() {
       }
     })
 
+    const complaintItems = (complaintRows ?? []).map((a) => {
+      const actor = a.editor ?? a.creator
+      const actorName = a.updated_by_name || a.created_by_name || (actor ? `${actor.first_name ?? ''} ${actor.last_name ?? ''}`.trim() : '')
+      const solvedNote = a.solved
+        ? ` · ✓ Solved ${new Date(a.solved_at).toLocaleDateString()}${a.solved_by_name ? ` by ${a.solved_by_name}` : ''}`
+        : ''
+      return {
+        id: `announcement-${a.id}`,
+        type: 'customer_complaint',
+        date: new Date(a.updated_at),
+        title: a.title,
+        subtitle: `${new Date(a.updated_at).toLocaleString()}${actorName ? ` · ${actorName}` : ''}${solvedNote}`,
+        isImportant: a.is_important,
+        solved: a.solved,
+        raw: a,
+      }
+    })
+
     const rosterItems = (rosterRows ?? []).map((r) => {
       const creatorName = r.created_by_name || (r.creator ? `${r.creator.first_name ?? ''} ${r.creator.last_name ?? ''}`.trim() : '')
       return {
@@ -148,7 +178,7 @@ export default function BulletinPage() {
       }
     })
 
-    const merged = [...announcementItems, ...rosterItems, ...quizReminders].sort((a, b) => b.date - a.date)
+    const merged = [...announcementItems, ...complaintItems, ...rosterItems, ...quizReminders].sort((a, b) => b.date - a.date)
     setItems(merged)
     setLoading(false)
   }
@@ -164,7 +194,7 @@ export default function BulletinPage() {
   }
 
   function openItem(item) {
-    if (item.type === 'announcement') setOpenAnnouncementId(item.raw.id)
+    if (item.type === 'announcement' || item.type === 'customer_complaint') setOpenAnnouncementId(item.raw.id)
     else if (item.type === 'roster') setOpenRosterPeriod(item.raw)
   }
 
@@ -213,6 +243,8 @@ export default function BulletinPage() {
                 <div className="flex items-center gap-2">
                   <Badge color={badge.color}>{badge.label}</Badge>
                   {item.isImportant && <Badge color="red">Important</Badge>}
+                  {item.type === 'customer_complaint' &&
+                    (item.solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
                   <span className="font-medium text-gray-800">{item.title}</span>
                 </div>
                 <div className="flex items-center gap-3">
