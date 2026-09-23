@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
+import CameraCaptureModal from './CameraCaptureModal'
 
 // A minimal contentEditable-based rich text editor (bold / italic / list /
 // link) that stores its value as an HTML string. This keeps the project
@@ -7,17 +8,24 @@ import { supabase } from '../../lib/supabaseClient'
 // (tables, embedded images with resize, etc.) is needed.
 //
 // Photo insertion is opt-in via `imageUploadPath` — pass a storage folder
-// (e.g. `announcements/${storeId}`) to show a 📷 Photo button that uploads
-// the picked file and inserts it inline at the cursor; leave it unset for
-// callers that don't need images (most of this editor's other uses).
-// A plain <input type="file" accept="image/*"> (no `capture` attribute)
-// is what gives mobile browsers the "Take Photo / Choose from Library"
-// picker — adding `capture` would force the camera and remove the gallery
-// option.
+// (e.g. `announcements/${storeId}`) to show 📷 Camera / 🖼 Library buttons
+// that upload the picked/captured file and insert it inline at the
+// cursor; leave it unset for callers that don't need images (most of
+// this editor's other uses).
+//
+// Camera and Library are deliberately two separate controls rather than
+// one <input type="file" capture>: `capture` hands the page off to the
+// OS's native camera app, and coming back from that app switch is exactly
+// when mobile browsers (Android especially, under memory pressure) may
+// kill the tab and reload it — losing whatever was mid-edit. Camera uses
+// CameraCaptureModal (getUserMedia, never leaves the page); Library stays
+// a plain <input type="file" accept="image/*"> (no `capture`) for picking
+// an existing photo.
 export default function SimpleRichTextEditor({ value, onChange, placeholder = 'Type here…', imageUploadPath, imageBucket = 'documents' }) {
   const ref = useRef(null)
   const fileInputRef = useRef(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [showCamera, setShowCamera] = useState(false)
 
   // Only push `value` into the DOM when it changed from OUTSIDE this editor
   // (opening a different item, switching category, etc). Writing it on every
@@ -69,8 +77,11 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
         <ToolbarButton onClick={() => exec('insertOrderedList')}>1. List</ToolbarButton>
         {imageUploadPath && (
           <>
+            <ToolbarButton onClick={() => setShowCamera(true)} disabled={uploadingImage}>
+              📷 {uploadingImage ? 'Uploading…' : 'Camera'}
+            </ToolbarButton>
             <ToolbarButton onClick={() => fileInputRef.current?.click()} disabled={uploadingImage}>
-              📷 {uploadingImage ? 'Uploading…' : 'Photo'}
+              🖼 Library
             </ToolbarButton>
             <input
               ref={fileInputRef}
@@ -93,6 +104,15 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
         data-placeholder={placeholder}
         className="prose-content min-h-[100px] px-3 py-2 text-sm outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
       />
+      {showCamera && (
+        <CameraCaptureModal
+          onClose={() => setShowCamera(false)}
+          onCapture={(file) => {
+            setShowCamera(false)
+            insertImage(file)
+          }}
+        />
+      )}
     </div>
   )
 }
