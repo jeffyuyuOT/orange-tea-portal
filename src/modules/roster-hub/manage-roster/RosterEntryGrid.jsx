@@ -118,44 +118,98 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
 
   const grandTotal = round2(rows.reduce((sum, row) => sum + rowTotals(row).total, 0))
 
+  // The full 7-day grid is 1 name + 14 hour columns + 2 totals + remove —
+  // far wider than a phone screen, so under the `sm` breakpoint this swaps
+  // to one day at a time (day tabs above a vertical list of staff cards)
+  // instead of forcing a wide, awkward horizontal scroll for every edit.
+  const [mobileDayIdx, setMobileDayIdx] = useState(0)
+  const mobileDate = weekDates[Math.min(mobileDayIdx, weekDates.length - 1)]
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-brand-100">
-      <table className="min-w-full border-collapse text-sm">
-        <thead className="bg-brand-50">
-          <tr>
-            <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-left font-medium text-brand-700">
-              Name
-            </th>
-            {weekDates.map((d) => (
-              <th key={d} colSpan={2} className="border border-brand-100 px-2 py-1 text-center font-medium text-brand-700">
-                {weekdayLabel(d)} {d.slice(5)}
+    <div className="rounded-xl border border-brand-100">
+      <div className="hidden overflow-x-auto sm:block">
+        <table className="min-w-full border-collapse text-sm">
+          <thead className="bg-brand-50">
+            <tr>
+              <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-left font-medium text-brand-700">
+                Name
               </th>
-            ))}
-            <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
-              Total hr
-            </th>
-            <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
-              WKD hr
-            </th>
-            <th rowSpan={2} className="border border-brand-100"></th>
-          </tr>
-          <tr>
-            {weekDates.map((d) => (
-              <Fragment key={d}>
-                <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">S</th>
-                <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">E</th>
-              </Fragment>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
+              {weekDates.map((d) => (
+                <th key={d} colSpan={2} className="border border-brand-100 px-2 py-1 text-center font-medium text-brand-700">
+                  {weekdayLabel(d)} {d.slice(5)}
+                </th>
+              ))}
+              <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
+                Total hr
+              </th>
+              <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
+                WKD hr
+              </th>
+              <th rowSpan={2} className="border border-brand-100"></th>
+            </tr>
+            <tr>
+              {weekDates.map((d) => (
+                <Fragment key={d}>
+                  <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">S</th>
+                  <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">E</th>
+                </Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const { total, wkd } = rowTotals(row)
+              return (
+                <StaffRowPair
+                  key={row.key}
+                  row={row}
+                  weekDates={weekDates}
+                  findEntry={findEntry}
+                  updateCell={updateCell}
+                  renameRow={renameRow}
+                  removeRow={removeRow}
+                  total={total}
+                  wkd={wkd}
+                />
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-brand-50 font-medium text-brand-800">
+              <td className="border border-brand-100 px-2 py-1.5" colSpan={15}>
+                Total
+              </td>
+              <td className="border border-brand-100 px-2 py-1.5 text-center">{grandTotal || ''}</td>
+              <td className="border border-brand-100"></td>
+              <td className="border border-brand-100"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="sm:hidden">
+        <div className="flex border-b border-brand-100">
+          {weekDates.map((d, i) => (
+            <button
+              key={d}
+              onClick={() => setMobileDayIdx(i)}
+              className={`flex flex-1 flex-col items-center gap-0.5 border-b-2 py-2 text-xs font-medium ${
+                i === mobileDayIdx ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-transparent text-gray-400'
+              }`}
+            >
+              <span>{weekdayLabel(d)}</span>
+              <span>{d.slice(8)}</span>
+            </button>
+          ))}
+        </div>
+        <div className="divide-y divide-brand-100">
           {rows.map((row) => {
             const { total, wkd } = rowTotals(row)
             return (
-              <StaffRowPair
+              <MobileStaffCard
                 key={row.key}
                 row={row}
-                weekDates={weekDates}
+                date={mobileDate}
                 findEntry={findEntry}
                 updateCell={updateCell}
                 renameRow={renameRow}
@@ -165,18 +219,12 @@ export default function RosterEntryGrid({ staff, pendingStaff = [], weekDates, e
               />
             )
           })}
-        </tbody>
-        <tfoot>
-          <tr className="bg-brand-50 font-medium text-brand-800">
-            <td className="border border-brand-100 px-2 py-1.5" colSpan={15}>
-              Total
-            </td>
-            <td className="border border-brand-100 px-2 py-1.5 text-center">{grandTotal || ''}</td>
-            <td className="border border-brand-100"></td>
-            <td className="border border-brand-100"></td>
-          </tr>
-        </tfoot>
-      </table>
+        </div>
+        <div className="border-t border-brand-100 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-800">
+          Week total: {grandTotal || 0} hr
+        </div>
+      </div>
+
       <div className="border-t border-brand-100 p-2 text-sm">
         <button onClick={addRow} className="rounded-lg border border-brand-300 px-3 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
           + Add row
@@ -269,5 +317,60 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
         })}
       </tr>
     </>
+  )
+}
+
+// Mobile equivalent of StaffRowPair's one row — same person, but only the
+// currently-selected day's Start/End/Break, laid out as a vertical card
+// instead of two wide table rows. Wk/WKD totals still reflect the whole
+// week (computed the same way as desktop) so switching days doesn't lose
+// sight of the running total.
+function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd }) {
+  const nameEmpty = !row.name.trim()
+  const entry = findEntry(row, date)
+  return (
+    <div className="space-y-2 p-3">
+      <div className="flex items-center gap-2">
+        {row.profileId ? (
+          <span className="flex-1 truncate font-medium text-gray-800">
+            {row.name || <span className="text-gray-400">Unnamed</span>}
+          </span>
+        ) : (
+          <input
+            className="input !py-1 flex-1"
+            placeholder="Name"
+            value={row.name}
+            onChange={(e) => renameRow(row, e.target.value)}
+          />
+        )}
+        <span className="shrink-0 text-xs text-gray-400">
+          Wk {total || 0}h{wkd ? ` · WKD ${wkd}h` : ''}
+        </span>
+        <button onClick={() => removeRow(row)} className="shrink-0 text-gray-300 hover:text-red-500" title="Clear this row's hours">
+          ✕
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-medium text-gray-400">Start</span>
+          <HourInput value={entry?.startTime} disabled={nameEmpty} onChange={(v) => updateCell(row, date, { startTime: v })} />
+        </label>
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-medium text-gray-400">End</span>
+          <HourInput value={entry?.endTime} disabled={nameEmpty} onChange={(v) => updateCell(row, date, { endTime: v })} />
+        </label>
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-medium text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
+            Break (½h)
+          </span>
+          <HourInput
+            value={entry?.breakHours}
+            disabled={nameEmpty}
+            onChange={(v) => updateCell(row, date, { breakHours: v })}
+            className="text-red-600"
+          />
+        </label>
+      </div>
+    </div>
   )
 }

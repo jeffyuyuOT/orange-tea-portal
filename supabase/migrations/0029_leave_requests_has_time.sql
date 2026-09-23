@@ -1,0 +1,11 @@
+-- Apply Leave now defaults to picking whole days (no time-of-day); a
+-- "Specify time" checkbox reveals start/end time pickers when a leave
+-- genuinely needs one. This flag records which kind a row is, so the
+-- Leave Schedule timeline's tooltip knows whether to show a time or just a
+-- date (see src/modules/roster-hub/leave-management/leaveDates.js).
+--
+-- Existing rows all predate this feature and were always created with an
+-- explicit start/end time (the old Apply Leave form required one), so they
+-- default to true — never all-day — rather than being silently
+-- reinterpreted as day-only leave.
+alter table leave_requests add column if not exists has_time boolean not null default true;

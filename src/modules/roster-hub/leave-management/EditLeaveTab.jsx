@@ -3,12 +3,13 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { HALF_HOUR_TIMES, buildLeaveTimestamps, formatTimeLabel, leaveTooltipLabel, parseLeaveTimestamps } from './leaveDates'
 
 export default function EditLeaveTab() {
   const { profile } = useAuth()
   const [leaves, setLeaves] = useState([])
   const [editingId, setEditingId] = useState(null)
-  const [form, setForm] = useState({ start_at: '', end_at: '', reason: '' })
+  const [form, setForm] = useState(null)
 
   async function load() {
     const { data } = await supabase
@@ -27,11 +28,12 @@ export default function EditLeaveTab() {
 
   function startEdit(l) {
     setEditingId(l.id)
-    setForm({ start_at: l.start_at.slice(0, 16), end_at: l.end_at.slice(0, 16), reason: l.reason ?? '' })
+    setForm({ ...parseLeaveTimestamps(l.start_at, l.end_at, l.has_time), reason: l.reason ?? '' })
   }
 
   async function save() {
-    await supabase.from('leave_requests').update(form).eq('id', editingId)
+    const timestamps = buildLeaveTimestamps(form)
+    await supabase.from('leave_requests').update({ ...timestamps, reason: form.reason }).eq('id', editingId)
     setEditingId(null)
     load()
   }
@@ -49,19 +51,35 @@ export default function EditLeaveTab() {
         editingId === l.id ? (
           <div key={l.id} className="space-y-2 p-4">
             <div className="grid grid-cols-2 gap-2">
-              <input
-                type="datetime-local"
-                className="input"
-                value={form.start_at}
-                onChange={(e) => setForm({ ...form, start_at: e.target.value })}
-              />
-              <input
-                type="datetime-local"
-                className="input"
-                value={form.end_at}
-                onChange={(e) => setForm({ ...form, end_at: e.target.value })}
-              />
+              <input type="date" className="input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+              <input type="date" className="input" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
             </div>
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={form.includeTime}
+                onChange={(e) => setForm({ ...form, includeTime: e.target.checked })}
+              />
+              Specify time (leave unchecked for a whole-day leave)
+            </label>
+            {form.includeTime && (
+              <div className="grid grid-cols-2 gap-2">
+                <select className="input" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })}>
+                  {HALF_HOUR_TIMES.map((t) => (
+                    <option key={t} value={t}>
+                      {formatTimeLabel(t)}
+                    </option>
+                  ))}
+                </select>
+                <select className="input" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })}>
+                  {HALF_HOUR_TIMES.map((t) => (
+                    <option key={t} value={t}>
+                      {formatTimeLabel(t)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <input className="input" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
             <div className="flex gap-2">
               <Button onClick={save}>Save</Button>
@@ -73,9 +91,7 @@ export default function EditLeaveTab() {
         ) : (
           <div key={l.id} className="flex items-center justify-between p-4">
             <div>
-              <div className="text-sm font-medium text-gray-800">
-                {new Date(l.start_at).toLocaleString()} – {new Date(l.end_at).toLocaleString()}
-              </div>
+              <div className="text-sm font-medium text-gray-800">{leaveTooltipLabel(l)}</div>
               {l.reason && <div className="text-xs text-gray-400">{l.reason}</div>}
             </div>
             <div className="flex gap-2">
