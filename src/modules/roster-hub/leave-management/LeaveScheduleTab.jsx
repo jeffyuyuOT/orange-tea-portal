@@ -117,9 +117,10 @@ export default function LeaveScheduleTab() {
 // drawn as a colored segment positioned/sized by the calendar dates it
 // covers, labelled with the employee's name — a shape/position at a glance
 // instead of reading every leave's start/end date as text. Hovering a
-// segment shows the exact (unclipped) date range in a tooltip.
+// segment shows the exact (unclipped) date range via the browser's native
+// tooltip (the `title` attribute on the bar) — just the one popup, no
+// second custom-styled box under it.
 function MonthTimelineView({ rows, year, month, daysInMonth }) {
-  const [hoverId, setHoverId] = useState(null)
   const dayWidth = 28 // px per day, so a full month stays readable and horizontally scrollable on narrow screens
   const nameColWidth = 140 // matches the name column's rendered width closely enough to size the scroll area
 
@@ -153,17 +154,7 @@ function MonthTimelineView({ rows, year, month, daysInMonth }) {
                   <div key={d} className="absolute top-0 bottom-0 border-l border-gray-200" style={{ left: `${(d / daysInMonth) * 100}%` }} />
                 ))}
                 {row.entries.map((entry) => (
-                  <LeaveBar
-                    key={entry.id}
-                    entry={entry}
-                    name={row.name}
-                    year={year}
-                    month={month}
-                    daysInMonth={daysInMonth}
-                    hovering={hoverId === entry.id}
-                    onHoverEnter={() => setHoverId(entry.id)}
-                    onHoverLeave={() => setHoverId((cur) => (cur === entry.id ? null : cur))}
-                  />
+                  <LeaveBar key={entry.id} entry={entry} name={row.name} year={year} month={month} daysInMonth={daysInMonth} />
                 ))}
               </div>
             </div>
@@ -174,7 +165,7 @@ function MonthTimelineView({ rows, year, month, daysInMonth }) {
   )
 }
 
-function LeaveBar({ entry, name, year, month, daysInMonth, hovering, onHoverEnter, onHoverLeave }) {
+function LeaveBar({ entry, name, year, month, daysInMonth }) {
   // The bar is always drawn at day granularity (even for a leave with a
   // specific time) — leaveDisplayDates gives the calendar days it touches;
   // leaveTooltipLabel separately decides whether to also show a time.
@@ -197,38 +188,27 @@ function LeaveBar({ entry, name, year, month, daysInMonth, hovering, onHoverEnte
   const continuesAfter = trueEnd > monthEnd
   const color = colorForName(name)
 
+  // Browser-native tooltip only — name, date range, and the reason (if any),
+  // all in this one string, since there's no custom box to show it in.
   const rangeLabel = leaveTooltipLabel(entry)
+  const tooltip = `${name}: ${rangeLabel}${entry.reason ? ` — ${entry.reason}` : ''}`
 
   return (
-    <>
-      <div
-        className="absolute top-0.5 bottom-0.5 flex cursor-default items-center overflow-hidden px-1.5"
-        style={{
-          left: `${leftPct}%`,
-          width: `${widthPct}%`,
-          minWidth: '10px',
-          backgroundColor: color,
-          borderTopLeftRadius: continuesBefore ? 0 : 6,
-          borderBottomLeftRadius: continuesBefore ? 0 : 6,
-          borderTopRightRadius: continuesAfter ? 0 : 6,
-          borderBottomRightRadius: continuesAfter ? 0 : 6,
-        }}
-        onMouseEnter={onHoverEnter}
-        onMouseLeave={onHoverLeave}
-        title={`${name}: ${rangeLabel}`}
-      >
-        <span className="truncate text-[11px] font-semibold text-white">{name}</span>
-      </div>
-      {hovering && (
-        <div
-          className="pointer-events-none absolute top-full z-10 mt-1 w-56 rounded-lg border border-gray-200 bg-white p-2.5 text-xs shadow-lg"
-          style={{ left: `clamp(0px, ${leftPct}%, calc(100% - 14rem))` }}
-        >
-          <div className="font-semibold text-gray-800">{name}</div>
-          <div className="mt-0.5 text-gray-500">{rangeLabel}</div>
-          {entry.reason && <div className="mt-0.5 text-gray-400">{entry.reason}</div>}
-        </div>
-      )}
-    </>
+    <div
+      className="absolute top-0.5 bottom-0.5 flex cursor-default items-center overflow-hidden px-1.5"
+      style={{
+        left: `${leftPct}%`,
+        width: `${widthPct}%`,
+        minWidth: '10px',
+        backgroundColor: color,
+        borderTopLeftRadius: continuesBefore ? 0 : 6,
+        borderBottomLeftRadius: continuesBefore ? 0 : 6,
+        borderTopRightRadius: continuesAfter ? 0 : 6,
+        borderBottomRightRadius: continuesAfter ? 0 : 6,
+      }}
+      title={tooltip}
+    >
+      <span className="truncate text-[11px] font-semibold text-white">{name}</span>
+    </div>
   )
 }

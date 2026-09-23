@@ -17,6 +17,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // purposes. Backed by user_stores (see migration 0027).
   const [extraStoreIds, setExtraStoreIds] = useState([])
   const [saving, setSaving] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
 
   useEffect(() => {
     supabase
@@ -83,6 +84,19 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     onSaved()
   }
 
+  // "Remove" here is the same soft-deactivate as Shop Management > Staff
+  // Information's "Remove staff" — sets is_active false rather than
+  // deleting anything, so roster/leave/quiz history is preserved. A true
+  // delete of the login itself can only be done from the Supabase
+  // Dashboard (Authentication > Users), and even then only cascades
+  // cleanly if this person never created content that other tables track
+  // by who-created-it (announcements, formula/quiz items, uploaded
+  // files, etc.) — those reference profiles without cascading.
+  async function deactivate() {
+    await supabase.from('profiles').update({ is_active: false }).eq('id', user.id)
+    onSaved()
+  }
+
   return (
     <Modal
       open
@@ -90,9 +104,14 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       wide
       title={`${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email}
       footer={
-        <Button onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        <>
+          <Button variant="danger" onClick={() => setConfirmRemove(true)}>
+            Remove
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </>
       }
     >
       <div className="mb-5 grid grid-cols-3 gap-3">
@@ -140,6 +159,22 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
             For someone (e.g. an admin) working more than one store — they only show up on a store's Manage
             Roster / Name display if it's their Store above or checked here.
           </p>
+        </div>
+      )}
+
+      {confirmRemove && (
+        <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          Remove {user.first_name || user.email} from active staff? This sets them inactive rather than
+          permanently deleting their history — they'll stop being able to sign in, but their roster, leave,
+          and quiz records are kept.
+          <div className="mt-2 flex gap-2">
+            <Button variant="danger" onClick={deactivate}>
+              Confirm remove
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmRemove(false)}>
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
 
