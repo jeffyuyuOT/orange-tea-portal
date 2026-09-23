@@ -43,20 +43,38 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     setSaving(true)
     try {
       if (isNew) {
+        // created_by_name/actor_name are permanent text snapshots (not a
+        // live join) — so "who posted this" still shows correctly even
+        // after that person's account is later removed.
+        const actorName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email
         const { data, error } = await supabase
           .from('announcements')
-          .insert({ store_id: storeId, title, content_html: content, is_important: isImportant, created_by: profile.id, updated_by: profile.id })
+          .insert({
+            store_id: storeId,
+            title,
+            content_html: content,
+            is_important: isImportant,
+            created_by: profile.id,
+            created_by_name: actorName,
+            updated_by: profile.id,
+            updated_by_name: actorName,
+          })
           .select()
           .single()
         if (error) throw error
-        await supabase.from('announcement_history').insert({ announcement_id: data.id, action: 'created', actor_id: profile.id })
+        await supabase
+          .from('announcement_history')
+          .insert({ announcement_id: data.id, action: 'created', actor_id: profile.id, actor_name: actorName })
       } else {
+        const actorName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email
         const { error } = await supabase
           .from('announcements')
-          .update({ title, content_html: content, is_important: isImportant, updated_by: profile.id })
+          .update({ title, content_html: content, is_important: isImportant, updated_by: profile.id, updated_by_name: actorName })
           .eq('id', announcementId)
         if (error) throw error
-        await supabase.from('announcement_history').insert({ announcement_id: announcementId, action: 'edited', actor_id: profile.id })
+        await supabase
+          .from('announcement_history')
+          .insert({ announcement_id: announcementId, action: 'edited', actor_id: profile.id, actor_name: actorName })
       }
       onSaved()
     } finally {
@@ -111,7 +129,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               {history.map((h) => (
                 <li key={h.id}>
                   {new Date(h.acted_at).toLocaleString()} — {h.action.replace('_', ' ')} by{' '}
-                  {h.actor ? `${h.actor.first_name ?? ''} ${h.actor.last_name ?? ''}`.trim() : 'Unknown'}
+                  {h.actor_name || (h.actor ? `${h.actor.first_name ?? ''} ${h.actor.last_name ?? ''}`.trim() : 'Unknown')}
                 </li>
               ))}
             </ul>

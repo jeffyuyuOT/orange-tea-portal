@@ -121,8 +121,10 @@ export default function BulletinPage() {
     }
 
     const announcementItems = (announcementRows ?? []).map((a) => {
+      // Prefer the permanent name snapshot over the live creator/editor
+      // join, which goes blank once that person's account is removed.
       const actor = a.editor ?? a.creator
-      const actorName = actor ? `${actor.first_name ?? ''} ${actor.last_name ?? ''}`.trim() : ''
+      const actorName = a.updated_by_name || a.created_by_name || (actor ? `${actor.first_name ?? ''} ${actor.last_name ?? ''}`.trim() : '')
       return {
         id: `announcement-${a.id}`,
         type: 'announcement',
@@ -135,7 +137,7 @@ export default function BulletinPage() {
     })
 
     const rosterItems = (rosterRows ?? []).map((r) => {
-      const creatorName = r.creator ? `${r.creator.first_name ?? ''} ${r.creator.last_name ?? ''}`.trim() : ''
+      const creatorName = r.created_by_name || (r.creator ? `${r.creator.first_name ?? ''} ${r.creator.last_name ?? ''}`.trim() : '')
       return {
         id: `roster-${r.id}`,
         type: 'roster',

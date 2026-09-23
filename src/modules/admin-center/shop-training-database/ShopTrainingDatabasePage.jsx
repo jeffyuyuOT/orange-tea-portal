@@ -94,6 +94,7 @@ export default function ShopTrainingDatabasePage() {
           item={editing}
           nextSortOrder={items.length}
           profileId={profile.id}
+          profileName={`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -105,7 +106,7 @@ export default function ShopTrainingDatabasePage() {
   )
 }
 
-function EditModal({ item, nextSortOrder, profileId, onClose, onSaved }) {
+function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSaved }) {
   const isNew = !item.id
   const [title, setTitle] = useState(item.title ?? '')
   const [content, setContent] = useState(item.content_html ?? '')
@@ -115,13 +116,18 @@ function EditModal({ item, nextSortOrder, profileId, onClose, onSaved }) {
   async function save() {
     setSaving(true)
     if (isNew) {
-      await supabase
-        .from('shop_training_items')
-        .insert({ title, content_html: content, visible_to_training: visible, sort_order: nextSortOrder, created_by: profileId })
+      await supabase.from('shop_training_items').insert({
+        title,
+        content_html: content,
+        visible_to_training: visible,
+        sort_order: nextSortOrder,
+        created_by: profileId,
+        created_by_name: profileName,
+      })
     } else {
       await supabase
         .from('shop_training_items')
-        .update({ title, content_html: content, visible_to_training: visible, updated_by: profileId })
+        .update({ title, content_html: content, visible_to_training: visible, updated_by: profileId, updated_by_name: profileName })
         .eq('id', item.id)
     }
     setSaving(false)

@@ -350,7 +350,12 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
       if (isNew) {
         const { data, error } = await supabase
           .from('formula_items')
-          .insert({ ...base, sort_order: nextSortOrder, created_by: profile.id })
+          .insert({
+            ...base,
+            sort_order: nextSortOrder,
+            created_by: profile.id,
+            created_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
+          })
           .select()
           .single()
         if (error) throw error

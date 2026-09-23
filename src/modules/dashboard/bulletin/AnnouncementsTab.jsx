@@ -48,8 +48,11 @@ export default function AnnouncementsTab() {
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {announcements.map((a) => {
+            // Prefer the permanent name snapshot (updated_by_name/created_by_name)
+            // over the live creator/editor join — the join goes blank once that
+            // person's account is removed, the snapshot doesn't.
             const actor = a.editor ?? a.creator
-            const actorName = actor ? `${actor.first_name ?? ''} ${actor.last_name ?? ''}`.trim() : ''
+            const actorName = a.updated_by_name || a.created_by_name || (actor ? `${actor.first_name ?? ''} ${actor.last_name ?? ''}`.trim() : '')
             return (
               <button
                 key={a.id}

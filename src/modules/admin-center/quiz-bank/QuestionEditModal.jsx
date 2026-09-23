@@ -58,7 +58,15 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
       }
       let id = question.id
       if (isNew) {
-        const { data, error } = await supabase.from('quiz_questions').insert({ ...payload, created_by: profile.id }).select().single()
+        const { data, error } = await supabase
+          .from('quiz_questions')
+          .insert({
+            ...payload,
+            created_by: profile.id,
+            created_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
+          })
+          .select()
+          .single()
         if (error) throw error
         id = data.id
       } else {

@@ -48,6 +48,7 @@ export default function FileRepositoryPage() {
         display_name: displayName || file.name,
         file_path: path,
         uploaded_by: profile.id,
+        uploaded_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
       })
       setDisplayName('')
       load()

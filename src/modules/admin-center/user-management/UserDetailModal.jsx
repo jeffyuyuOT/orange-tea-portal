@@ -62,11 +62,13 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     setSaving(true)
     await supabase.from('profiles').update({ role, primary_store_id: storeId || null, is_active: isActive }).eq('id', user.id)
     await supabase.from('permission_overrides').delete().eq('profile_id', user.id)
+    const meName = `${me.first_name ?? ''} ${me.last_name ?? ''}`.trim() || me.email
     const rows = Object.entries(overrides).map(([page_key, allowed]) => ({
       profile_id: user.id,
       page_key,
       allowed,
       updated_by: me.id,
+      updated_by_name: meName,
     }))
     if (rows.length) await supabase.from('permission_overrides').insert(rows)
 

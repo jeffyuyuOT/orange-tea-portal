@@ -30,7 +30,11 @@ export default function PendingStaffModal({ pending, onClose, onSaved }) {
       notes: notes.trim() || null,
     }
     const { error } = isNew
-      ? await supabase.from('pending_staff').insert({ ...payload, created_by: me.id })
+      ? await supabase.from('pending_staff').insert({
+          ...payload,
+          created_by: me.id,
+          created_by_name: `${me.first_name ?? ''} ${me.last_name ?? ''}`.trim() || me.email,
+        })
       : await supabase.from('pending_staff').update(payload).eq('id', pending.id)
     setSaving(false)
     if (error) {
