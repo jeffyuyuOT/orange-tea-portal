@@ -52,6 +52,25 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
     onChange?.(ref.current?.innerHTML ?? '')
   }
 
+  // Pasted content (from Word, a webpage, another app, even another step
+  // in this same editor) carries its own inline styles along with the
+  // text — and an inline `style="..."` attribute always wins over this
+  // component's `.prose-content` CSS class, no matter what that CSS says,
+  // because inline styles outrank class selectors regardless of Tailwind
+  // layers. Word's list HTML in particular is notorious for shipping a
+  // negative margin/indent on the marker, which is exactly what pushed
+  // "1."/"•" outside the box after a paste even though the same markers
+  // render correctly when added with the toolbar buttons (no foreign
+  // inline styles involved there). Stripping every paste down to plain
+  // text sidesteps this whole class of bug — formatting can still be
+  // reapplied afterwards with Bold/Italic/List.
+  function handlePaste(e) {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    document.execCommand('insertText', false, text)
+    onChange?.(ref.current?.innerHTML ?? '')
+  }
+
   async function insertImage(file) {
     if (!file || !imageUploadPath) return
     setUploadingImage(true)
@@ -101,6 +120,7 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
         contentEditable
         suppressContentEditableWarning
         onInput={(e) => onChange?.(e.currentTarget.innerHTML)}
+        onPaste={handlePaste}
         data-placeholder={placeholder}
         className="prose-content min-h-[100px] px-3 py-2 text-sm outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
       />
