@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { addDays, format, parseISO } from 'date-fns'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { rosterDisplayName } from '../../../lib/excelRoster'
 
 // Renders one week's schedule as a grid: staff down the side, weekdays
 // across the top. Used by both "My Roster" (filtered to one staff member)
@@ -15,7 +16,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     let active = true
     let q = supabase
       .from('roster_entries')
-      .select('*, profiles(first_name, last_name)')
+      .select('*, profiles(first_name, last_name, roster_display_name)')
       .eq('roster_period_id', period.id)
     if (onlyProfileId) q = q.eq('profile_id', onlyProfileId)
     q.order('work_date').then(({ data }) => {
@@ -38,7 +39,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     new Map(
       entries.map((e) => [
         e.profile_id ?? e.staff_name_raw,
-        e.profiles ? `${e.profiles.first_name ?? ''} ${e.profiles.last_name ?? ''}`.trim() : e.staff_name_raw,
+        e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
       ])
     )
   )

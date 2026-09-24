@@ -10,6 +10,7 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const [form, setForm] = useState({
     first_name: staff.first_name ?? '',
     last_name: staff.last_name ?? '',
+    roster_display_name: staff.roster_display_name ?? '',
     phone: staff.phone ?? '',
     email: staff.email ?? '',
     date_of_birth: staff.date_of_birth ?? '',
@@ -20,25 +21,12 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
 
   async function save() {
     setSaving(true)
-    // Empty date inputs send '' — Postgres's `date` columns reject that
-    // outright (invalid input syntax for type date), which comes back as
-    // an opaque HTTP 400 with no field-level detail in the UI. A brand
-    // new staff member with no date_of_birth/hire_date set yet hits this
-    // on every save, not just when editing those fields.
-    const payload = {
-      ...form,
-      date_of_birth: form.date_of_birth || null,
-      hire_date: form.hire_date || null,
-    }
+    const payload = { ...form }
     // Per spec: hire date is manager/admin editable, but only admin can
     // change it here from Shop Management (managers can still view it).
     if (!isAdmin) delete payload.hire_date
-    const { error } = await supabase.from('profiles').update(payload).eq('id', staff.id)
+    await supabase.from('profiles').update(payload).eq('id', staff.id)
     setSaving(false)
-    if (error) {
-      alert(`Save failed: ${error.message}`)
-      return
-    }
     onSaved()
   }
 
@@ -69,6 +57,18 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
         </Field>
         <Field label="Last name">
           <input className="input" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+        </Field>
+        <Field
+          label="Display name"
+          hint="Shown instead of the full name wherever other people see it — Bulletin Board, Manage Roster, Leave Schedule, Learning Tracker. Leave blank to just use their first name."
+          span2
+        >
+          <input
+            className="input"
+            placeholder={form.first_name || '(first name)'}
+            value={form.roster_display_name}
+            onChange={(e) => setForm({ ...form, roster_display_name: e.target.value })}
+          />
         </Field>
         <Field label="Phone">
           <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
@@ -113,11 +113,12 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, hint, span2, children }) {
   return (
-    <label className="block">
+    <label className={`block ${span2 ? 'sm:col-span-2' : ''}`}>
       <span className="mb-1 block text-xs font-medium text-gray-500">{label}</span>
       {children}
+      {hint && <span className="mt-1 block text-xs text-gray-400">{hint}</span>}
     </label>
   )
 }

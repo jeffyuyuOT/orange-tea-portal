@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { rosterDisplayName } from '../../../lib/excelRoster'
 import StaffStudyDetail from './StaffStudyDetail'
 
 export default function LearningTrackerPage() {
@@ -20,7 +21,11 @@ export default function LearningTrackerPage() {
       .eq('is_active', true)
       .order('first_name')
       .then(({ data }) => {
-        setStaff(data ?? [])
+        // Re-sort by the same Roster Hub > Setting display name shown below,
+        // so the list order matches what's actually on screen instead of
+        // each person's (possibly different) raw first name.
+        const sorted = [...(data ?? [])].sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
+        setStaff(sorted)
         setLoading(false)
       })
   }, [currentStoreId])
@@ -44,9 +49,7 @@ export default function LearningTrackerPage() {
               onClick={() => setSelected(s)}
               className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50"
             >
-              <span className="font-medium text-gray-800">
-                {s.first_name} {s.last_name}
-              </span>
+              <span className="font-medium text-gray-800">{rosterDisplayName(s)}</span>
               <span className="text-gray-300">›</span>
             </button>
           ))}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { rosterDisplayName } from '../../../lib/excelRoster'
 import { leaveDisplayDates, leaveTooltipLabel } from './leaveDates'
 
 const MONTH_NAMES = [
@@ -34,7 +35,7 @@ export default function LeaveScheduleTab() {
     const monthEndExclusive = new Date(viewYear, viewMonth + 1, 1)
     supabase
       .from('leave_requests')
-      .select('*, profiles(first_name,last_name)')
+      .select('*, profiles(first_name,last_name,roster_display_name)')
       .eq('store_id', currentStoreId)
       .eq('status', 'active')
       .lt('start_at', monthEndExclusive.toISOString())
@@ -63,7 +64,7 @@ export default function LeaveScheduleTab() {
     leaves.forEach((l) => {
       const key = l.profile_id
       if (!byProfile.has(key)) {
-        const name = `${l.profiles?.first_name ?? ''} ${l.profiles?.last_name ?? ''}`.trim() || 'Unknown'
+        const name = l.profiles ? rosterDisplayName(l.profiles) : 'Unknown'
         byProfile.set(key, { profileId: key, name, entries: [] })
       }
       byProfile.get(key).entries.push(l)
@@ -259,12 +260,15 @@ function MonthTimelineViewMobile({ rows, year, month, daysInMonth }) {
     setActiveEntry(null)
   }, [year, month])
 
-  // Tapping anywhere else on the page (not on a bar — each bar's own tap
-  // handler stops this from firing, see VerticalLeaveBar) closes the detail
-  // panel, same as tapping the bar itself again would.
+  // Tapping anywhere else — another tab, the month picker, empty space,
+  // even outside this component entirely — closes the detail panel, same
+  // as tapping the open bar again would. Checking the click's target
+  // (rather than stopping propagation on the bar) is what makes this catch
+  // every kind of "somewhere else", not just clicks inside this widget.
   useEffect(() => {
     if (!activeEntry) return
-    function closeOnOutsideClick() {
+    function closeOnOutsideClick(e) {
+      if (e.target.closest?.('[data-leave-bar]')) return // the bar's own onTap already handles this click
       setActiveEntry(null)
     }
     document.addEventListener('click', closeOnOutsideClick)
@@ -294,9 +298,6 @@ function MonthTimelineViewMobile({ rows, year, month, daysInMonth }) {
           </div>
           {rows.map((row) => (
             <div key={row.profileId} className="shrink-0 border-l border-gray-100 px-1" style={{ width: `${colWidth}px` }}>
-              <div className="mb-1 h-5 truncate text-center text-[10px] font-medium text-gray-500" title={row.name}>
-                {row.name}
-              </div>
               <div className="relative rounded-md border border-gray-200 bg-gray-50" style={{ height: `${totalHeight}px` }}>
                 {Array.from({ length: daysInMonth - 1 }, (_, i) => i + 1).map((d) => (
                   <div key={d} className="absolute left-0 right-0 border-t border-gray-200" style={{ top: `${(d / daysInMonth) * 100}%` }} />
@@ -351,16 +352,14 @@ function VerticalLeaveBar({ entry, name, year, month, daysInMonth, active, onTap
     <div
       role="button"
       tabIndex={0}
-      // Stop this tap from also reaching the document-level "click
-      // anywhere else closes the panel" listener above — otherwise opening
-      // (or switching to) a bar's detail panel would immediately close
-      // again as the same click bubbles up.
-      onClick={(e) => {
-        e.stopPropagation()
-        onTap()
-      }}
+      // Marks this as a bar for the outside-click-closes-the-panel listener
+      // in MonthTimelineViewMobile — that listener skips anything inside a
+      // `[data-leave-bar]`, since tapping a bar (below) already decides the
+      // panel's next state itself.
+      data-leave-bar="true"
+      onClick={onTap}
       onKeyDown={(e) => e.key === 'Enter' && onTap()}
-      className="absolute left-0.5 right-0.5 cursor-pointer"
+      className="absolute left-0.5 right-0.5 flex cursor-pointer items-start justify-center overflow-hidden pt-0.5"
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
@@ -372,6 +371,8 @@ function VerticalLeaveBar({ entry, name, year, month, daysInMonth, active, onTap
         borderBottomRightRadius: continuesAfter ? 0 : 6,
         boxShadow: active ? '0 0 0 2px #1f2937' : 'none',
       }}
-    />
+    >
+      <span className="truncate text-[9px] font-semibold leading-tight text-white">{name}</span>
+    </div>
   )
 }
