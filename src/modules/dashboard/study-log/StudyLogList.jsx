@@ -24,7 +24,10 @@ const GROUPS = [
 // `onProgressChange`: fired after a (non-senior) toggle persists, so a
 // parent tracking overall memorized % (e.g. the forced-quiz-every-10%
 // check in StudyLogPage) can re-evaluate immediately.
-export default function StudyLogList({ profileId, allowBulkSelect = false, senior = false, onProgressChange }) {
+// `headerActions`: optional content (e.g. StudyLogPage's Quick Quiz/Formal
+// Quiz buttons) rendered at the right end of the group-tabs row, so a
+// caller isn't stuck putting its own controls below the whole list.
+export default function StudyLogList({ profileId, allowBulkSelect = false, senior = false, onProgressChange, headerActions }) {
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([]) // drink-group sub-categories, for the filter dropdown
   const [progress, setProgress] = useState({}) // formula_item_id -> row
@@ -96,18 +99,21 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
 
   return (
     <div>
-      <div className="mb-3 flex gap-1 border-b border-brand-100">
-        {GROUPS.map((g) => (
-          <button
-            key={g.key}
-            onClick={() => selectGroup(g.key)}
-            className={`px-4 py-2 text-sm font-medium ${
-              group === g.key ? 'border-b-2 border-brand-500 text-brand-700' : 'text-gray-500 hover:text-brand-600'
-            }`}
-          >
-            {g.label}
-          </button>
-        ))}
+      <div className="mb-3 flex items-center justify-between gap-2 border-b border-brand-100">
+        <div className="flex gap-1">
+          {GROUPS.map((g) => (
+            <button
+              key={g.key}
+              onClick={() => selectGroup(g.key)}
+              className={`px-4 py-2 text-sm font-medium ${
+                group === g.key ? 'border-b-2 border-brand-500 text-brand-700' : 'text-gray-500 hover:text-brand-600'
+              }`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        {headerActions && <div className="flex items-center gap-2 pb-2">{headerActions}</div>}
       </div>
 
       <div className="mb-3 flex items-center justify-between gap-2">

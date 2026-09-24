@@ -12,13 +12,19 @@ export default function StudyLogPage() {
 
   return (
     <div>
-      <StudyLogList profileId={profile?.id} />
-      <div className="mt-5 flex justify-center gap-3">
-        <Button onClick={() => setShowQuiz(true)}>🧠 Quick Quiz</Button>
-        <Button variant="secondary" onClick={() => setShowFormalQuiz(true)}>
-          📝 Formal Quiz
-        </Button>
-      </div>
+      <StudyLogList
+        profileId={profile?.id}
+        headerActions={
+          <>
+            <Button className="!px-3 !py-1.5 text-xs" onClick={() => setShowQuiz(true)}>
+              🧠 Quick Quiz
+            </Button>
+            <Button className="!px-3 !py-1.5 text-xs" variant="secondary" onClick={() => setShowFormalQuiz(true)}>
+              📝 Formal Quiz
+            </Button>
+          </>
+        }
+      />
       {showQuiz && <QuickQuizModal onClose={() => setShowQuiz(false)} />}
       {showFormalQuiz && <FormalQuizModal onClose={() => setShowFormalQuiz(false)} />}
     </div>
