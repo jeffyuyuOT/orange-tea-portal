@@ -33,6 +33,20 @@ export default function SetPasswordPage() {
     let mounted = true
 
     async function establishSession() {
+      // An expired or already-used link carries no token at all — Supabase
+      // redirects here with error/error_code instead (see main.jsx). Catch
+      // that up front rather than falling through to getSession()/verifyOtp,
+      // which would just hang in "checking" forever since there's nothing
+      // for either to find.
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+      const searchParams = new URLSearchParams(window.location.search)
+      const linkError =
+        hashParams.get('error') || searchParams.get('error') || hashParams.get('error_code') || searchParams.get('error_code')
+      if (linkError) {
+        if (mounted) setStatus('invalid')
+        return
+      }
+
       const { data } = await supabase.auth.getSession()
       if (data.session) {
         if (mounted) setStatus('ready')
@@ -99,8 +113,14 @@ export default function SetPasswordPage() {
     return (
       <AuthLayout title="Link expired">
         <p className="text-sm text-gray-600">
-          This link is invalid or has already been used. Ask an admin to resend the invite or password reset email,
-          then open that new email's link directly (not a forwarded copy, and only once).
+          This link is invalid, has expired, or has already been used. Ask an admin to resend the invite or password
+          reset email, then open that new link right away.
+        </p>
+        <p className="mt-3 text-sm text-gray-600">
+          If the link was opened from inside a chat app (LINE, Messenger, etc.) rather than a regular browser, that
+          can also invalidate it before you ever tap it — those apps often "preview" links automatically. Try
+          long-pressing the link and choosing "Open in Browser" (or copy it and paste it into Safari/Chrome)
+          instead of tapping it directly in the chat.
         </p>
         <Button variant="secondary" className="mt-4 w-full" onClick={() => navigate('/')}>
           Back to sign in
