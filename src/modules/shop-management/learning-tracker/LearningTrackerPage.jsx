@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import Badge from '../../../components/ui/Badge'
 import { rosterDisplayName } from '../../../lib/excelRoster'
 import StaffStudyDetail from './StaffStudyDetail'
 
 export default function LearningTrackerPage() {
   const { currentStoreId } = useAuth()
   const [staff, setStaff] = useState([])
+  const [qualifiedIds, setQualifiedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
 
@@ -20,12 +22,25 @@ export default function LearningTrackerPage() {
       .eq('primary_store_id', currentStoreId)
       .eq('is_active', true)
       .order('first_name')
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         // Re-sort by the same Roster Hub > Setting display name shown below,
         // so the list order matches what's actually on screen instead of
         // each person's (possibly different) raw first name.
         const sorted = [...(data ?? [])].sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
         setStaff(sorted)
+        // Qualified = has at least one Formal Quiz attempt a manager/admin
+        // has ticked as a pass (see StaffStudyDetail's Quiz History tab) —
+        // not tied to this store, since it's a personal achievement.
+        const ids = sorted.map((s) => s.id)
+        if (ids.length) {
+          const { data: passed } = await supabase
+            .from('quiz_attempts')
+            .select('profile_id')
+            .eq('quiz_type', 'formal')
+            .eq('passed', true)
+            .in('profile_id', ids)
+          setQualifiedIds(new Set((passed ?? []).map((p) => p.profile_id)))
+        }
         setLoading(false)
       })
   }, [currentStoreId])
@@ -49,7 +64,10 @@ export default function LearningTrackerPage() {
               onClick={() => setSelected(s)}
               className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50"
             >
-              <span className="font-medium text-gray-800">{rosterDisplayName(s)}</span>
+              <span className="flex items-center gap-2 font-medium text-gray-800">
+                {rosterDisplayName(s)}
+                {qualifiedIds.has(s.id) && <Badge color="green">Qualified</Badge>}
+              </span>
               <span className="text-gray-300">›</span>
             </button>
           ))}
