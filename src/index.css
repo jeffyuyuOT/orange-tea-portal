@@ -65,6 +65,13 @@ body {
    is only a FALLBACK grid: any border/background color that SimpleRichText
    Editor's paste handler successfully carried over as an inline style still
    wins, since inline styles always beat these class-based rules. */
-.prose-content :where(table) { border-collapse: collapse; margin: 0.5em 0; max-width: 100%; }
-.prose-content :where(td), .prose-content :where(th) { border: 1px solid #d1d5db; padding: 0.25em 0.5em; vertical-align: top; }
+.prose-content :where(table) { border-collapse: collapse; margin: 0.5em 0; max-width: 100%; table-layout: auto; }
+.prose-content :where(td), .prose-content :where(th) { border: 1px solid #d1d5db; padding: 0.25em 0.5em; vertical-align: top; overflow-wrap: anywhere; }
 .prose-content :where(th) { background: #f9fafb; font-weight: 600; }
+/* Belt-and-braces alongside SimpleRichTextEditor's paste handler (which
+   strips Word/Excel's fixed pixel/point widths before insertion): even
+   normal typed or pasted text can overflow the box on one long unbroken
+   token (a URL, a run-together phrase with no spaces). Every element pasted
+   or typed in here wraps inside the box instead of pushing it wider. */
+.prose-content { overflow-wrap: anywhere; }
+.prose-content :where(*) { max-width: 100%; }

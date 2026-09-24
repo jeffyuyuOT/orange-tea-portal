@@ -107,12 +107,43 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
     }
   }
 
+  // Word/Excel also stamp fixed pixel/point widths onto nearly everything
+  // they export — the whole document's page width on outer <p>/<div>s, each
+  // <table>'s width down to the exact column widths, sized for a printed
+  // page rather than this narrow editor box — plus `mso-*` layout hints
+  // that mean nothing outside Office. Left in place, those are exactly what
+  // pushed pasted content past the editor's border. Strip only sizing/
+  // layout properties here; colors, borders, fonts and everything
+  // `inlineStylesFromClipboardHead` just inlined stay untouched.
+  function stripFixedLayoutSizing(root) {
+    const DROP_PROPS = new Set(['width', 'min-width', 'max-width', 'height', 'min-height', 'max-height', 'white-space'])
+    root.querySelectorAll('[style]').forEach((el) => {
+      const kept = (el.getAttribute('style') || '')
+        .split(';')
+        .map((decl) => decl.trim())
+        .filter((decl) => {
+          if (!decl) return false
+          const prop = decl.split(':')[0]?.trim().toLowerCase()
+          if (!prop) return false
+          if (prop.startsWith('mso-')) return false
+          return !DROP_PROPS.has(prop)
+        })
+      if (kept.length) el.setAttribute('style', kept.join('; '))
+      else el.removeAttribute('style')
+    })
+    root.querySelectorAll('[width], [height]').forEach((el) => {
+      el.removeAttribute('width')
+      el.removeAttribute('height')
+    })
+  }
+
   function handlePaste(e) {
     const html = e.clipboardData?.getData('text/html')
     if (!html) return // plain text only — let the browser's default paste run
     e.preventDefault()
     const parsed = new DOMParser().parseFromString(html, 'text/html')
     inlineStylesFromClipboardHead(parsed, parsed.body)
+    stripFixedLayoutSizing(parsed.body)
     ref.current?.focus()
     document.execCommand('insertHTML', false, parsed.body.innerHTML)
     onChange?.(ref.current?.innerHTML ?? '')
@@ -153,7 +184,7 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
         onInput={(e) => onChange?.(e.currentTarget.innerHTML)}
         onPaste={handlePaste}
         data-placeholder={placeholder}
-        className="prose-content min-h-[100px] px-3 py-2 text-sm outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+        className="prose-content min-h-[100px] max-w-full overflow-x-auto px-3 py-2 text-sm outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
       />
       {showCamera && (
         <CameraCaptureModal
