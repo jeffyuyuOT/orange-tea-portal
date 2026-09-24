@@ -140,7 +140,10 @@ export default function FormulaItemDetail({ item, onClose }) {
 function ItemTitle({ item }) {
   return (
     <span className="flex items-center gap-2">
-      {item?.name_en}
+      <span className="flex items-center gap-1">
+        {item?.name_en}
+        <PronounceButton text={item?.name_en} lang="en-AU" />
+      </span>
       {item?.name_zh && (
         <span className="flex items-center gap-1 text-brand-600 font-zh">
           · {item.name_zh}
