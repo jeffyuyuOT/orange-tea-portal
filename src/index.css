@@ -54,8 +54,13 @@ body {
    looked like they did nothing — they were inserting a real <ul>/<ol>, it
    just had no bullet/number to show for it. */
 .prose-content :where(p) { margin: 0 0 0.5em; }
-.prose-content :where(ul) { margin: 0 0 0.5em 1.25em; list-style: disc outside; }
-.prose-content :where(ol) { margin: 0 0 0.5em 1.25em; list-style: decimal outside; }
+/* padding-left (not margin-left) for the indent: with list-style-position
+   outside (the default), the marker draws inside the element's padding
+   box — Preflight zeroes padding-left too, so a margin-only indent shifts
+   the whole list right but leaves no room for the marker itself, and the
+   number/bullet renders on top of the first word instead of beside it. */
+.prose-content :where(ul) { margin: 0 0 0.5em; padding-left: 1.25em; list-style: disc outside; }
+.prose-content :where(ol) { margin: 0 0 0.5em; padding-left: 1.25em; list-style: decimal outside; }
 .prose-content :where(li) { margin: 0 0 0.15em; }
 .prose-content :where(img) { max-width: 100%; border-radius: 0.5rem; margin: 0.5em 0; }
 .prose-content :where(strong) { font-weight: 700; }
