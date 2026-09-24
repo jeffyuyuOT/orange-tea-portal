@@ -129,14 +129,18 @@ function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSav
       .then(({ data }) => setFiles(data ?? []))
   }, [isNew, item.id])
 
-  async function addFile(file) {
+  async function addFiles(fileList) {
     setUploadingFile(true)
-    const path = `shop-training/${Date.now()}-${file.name}`
-    const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
-    if (error) {
-      alert(error.message)
-    } else {
-      setFiles((prev) => [...prev, { _key: Math.random(), display_name: file.name, file_path: path }])
+    // Uploaded one at a time (not Promise.all) so a shared timestamp prefix
+    // can't collide two files picked in the same click into the same path.
+    for (const file of Array.from(fileList)) {
+      const path = `shop-training/${Date.now()}-${file.name}`
+      const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (error) {
+        alert(error.message)
+      } else {
+        setFiles((prev) => [...prev, { _key: Math.random(), display_name: file.name, file_path: path }])
+      }
     }
     setUploadingFile(false)
   }
@@ -219,9 +223,10 @@ function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSav
               {uploadingFile ? 'Uploading…' : '+ Add file'}
               <input
                 type="file"
+                multiple
                 className="hidden"
                 disabled={uploadingFile}
-                onChange={(e) => e.target.files[0] && addFile(e.target.files[0])}
+                onChange={(e) => e.target.files.length && addFiles(e.target.files)}
               />
             </label>
           </div>
