@@ -289,7 +289,7 @@ export default function BulletinPage() {
         <Modal
           open
           onClose={() => setOpenRosterPeriod(null)}
-          wide
+          extraWide
           title={`Roster: ${openRosterPeriod.week_start_date} – ${openRosterPeriod.week_end_date}`}
         >
           <RosterWeekTable period={openRosterPeriod} />

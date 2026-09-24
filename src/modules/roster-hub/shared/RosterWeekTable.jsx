@@ -80,7 +80,14 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         <tbody className="divide-y divide-brand-50">
           {staffNames.map(([key, info]) => (
             <tr key={key}>
-              <td className="px-3 py-2 font-medium text-gray-700">{info.name || 'Unassigned'}</td>
+              <td className="px-3 py-2 font-medium text-gray-700">
+                <div>{info.name || 'Unassigned'}</div>
+                {/* "Break" label lives once under the name (in red) instead of being
+                    repeated in every day cell — each cell below then only needs to
+                    show the count, per Jeff, since everyone already knows what it
+                    refers to and one break = 30 min. */}
+                <div className="text-xs font-normal text-red-500">Break</div>
+              </td>
               {days.map((d) => {
                 const dayStr = format(d, 'yyyy-MM-dd')
                 const shift = entries.find(
@@ -90,14 +97,11 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                   <td key={dayStr} className="px-3 py-2 text-gray-600">
                     {shift ? (
                       <>
-                        <div>
+                        <div className="whitespace-nowrap">
                           {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
                         </div>
                         {shift.break_half_hours ? (
-                          // Just the count of 30-min breaks (e.g. "Break x2") —
-                          // per Jeff, everyone already knows one break = 30 min,
-                          // so there's no need to spell out the total time.
-                          <div className="text-xs text-gray-400">Break x{shift.break_half_hours}</div>
+                          <div className="text-xs text-red-500">x{shift.break_half_hours}</div>
                         ) : null}
                       </>
                     ) : (
