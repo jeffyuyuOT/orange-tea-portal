@@ -74,8 +74,14 @@ export default function LeaveScheduleTab() {
   return (
     <div>
       {/* One row, always — year first (left) then month (right), on both
-          desktop and mobile. The month select flexes to fill what's left so
-          this never wraps to a second line on a narrow phone screen. */}
+          desktop and mobile. Widths are `!`-forced because the shared
+          `.input` class sets width:100% outside any Tailwind layer, so a
+          plain `w-*` utility loses to it (same reason other screens in
+          this app — e.g. UserManagementPage's Link-to select — use `!w-*`
+          on an `.input` too); fixed, non-responsive widths just wide
+          enough for "2026" / "September" plus a little breathing room, so
+          this always fits one line instead of forcing the page to scroll
+          sideways to reach the ›  button. */}
       <div className="mb-4 flex items-center gap-2">
         <button
           onClick={() => goToMonth(-1)}
@@ -83,18 +89,14 @@ export default function LeaveScheduleTab() {
         >
           ‹
         </button>
-        <select className="input w-20 shrink-0 sm:w-24" value={viewYear} onChange={(e) => setViewYear(Number(e.target.value))}>
+        <select className="input !w-20 shrink-0" value={viewYear} onChange={(e) => setViewYear(Number(e.target.value))}>
           {Array.from({ length: 5 }, (_, i) => today.getFullYear() - 2 + i).map((y) => (
             <option key={y} value={y}>
               {y}
             </option>
           ))}
         </select>
-        <select
-          className="input min-w-0 flex-1 sm:w-40 sm:flex-none"
-          value={viewMonth}
-          onChange={(e) => setViewMonth(Number(e.target.value))}
-        >
+        <select className="input !w-32 shrink-0" value={viewMonth} onChange={(e) => setViewMonth(Number(e.target.value))}>
           {MONTH_NAMES.map((m, i) => (
             <option key={m} value={i}>
               {m}
