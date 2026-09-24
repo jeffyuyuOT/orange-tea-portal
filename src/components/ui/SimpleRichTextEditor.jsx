@@ -52,25 +52,6 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
     onChange?.(ref.current?.innerHTML ?? '')
   }
 
-  // Pasted content (from Word, a webpage, another app, even another step
-  // in this same editor) carries its own inline styles along with the
-  // text — and an inline `style="..."` attribute always wins over this
-  // component's `.prose-content` CSS class, no matter what that CSS says,
-  // because inline styles outrank class selectors regardless of Tailwind
-  // layers. Word's list HTML in particular is notorious for shipping a
-  // negative margin/indent on the marker, which is exactly what pushed
-  // "1."/"•" outside the box after a paste even though the same markers
-  // render correctly when added with the toolbar buttons (no foreign
-  // inline styles involved there). Stripping every paste down to plain
-  // text sidesteps this whole class of bug — formatting can still be
-  // reapplied afterwards with Bold/Italic/List.
-  function handlePaste(e) {
-    e.preventDefault()
-    const text = e.clipboardData.getData('text/plain')
-    document.execCommand('insertText', false, text)
-    onChange?.(ref.current?.innerHTML ?? '')
-  }
-
   async function insertImage(file) {
     if (!file || !imageUploadPath) return
     setUploadingImage(true)
@@ -84,6 +65,56 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
     const { data } = supabase.storage.from(imageBucket).getPublicUrl(path)
     ref.current?.focus()
     document.execCommand('insertHTML', false, `<img src="${data.publicUrl}" alt="" />`)
+    onChange?.(ref.current?.innerHTML ?? '')
+  }
+
+  // Excel/Word put a pasted table's actual formatting (borders, cell fill
+  // colors) in a <style> block referenced by class names on the cells
+  // (e.g. `class="xl65"`), NOT as inline styles — that block lives in the
+  // clipboard HTML's <head>, outside the <body> fragment. Handing the raw
+  // paste off to the browser's default handling was dropping that <head>
+  // entirely, so the table landed with no class definitions left to give
+  // it any border or color — visually just bare text in a grid. Walk the
+  // <style> rules here and copy each one onto the elements it matches as
+  // an inline `style` attribute before inserting, so the formatting
+  // survives being lifted out of its original document.
+  function inlineStylesFromClipboardHead(parsedDoc, root) {
+    const styleEls = parsedDoc.querySelectorAll('style')
+    if (!styleEls.length) return
+    const probe = document.createElement('style')
+    probe.textContent = Array.from(styleEls)
+      .map((s) => s.textContent)
+      .join('\n')
+    document.head.appendChild(probe)
+    try {
+      const rules = probe.sheet ? Array.from(probe.sheet.cssRules) : []
+      for (const rule of rules) {
+        if (!rule.selectorText || !rule.style?.cssText) continue
+        let matches
+        try {
+          matches = root.querySelectorAll(rule.selectorText)
+        } catch {
+          continue // selector the browser can't run outside a live page (e.g. :hover) — skip it
+        }
+        matches.forEach((el) => {
+          // Existing inline styles (rare, but some Word markup has them)
+          // stay authoritative — they're listed after, so they win.
+          el.setAttribute('style', `${rule.style.cssText};${el.getAttribute('style') || ''}`)
+        })
+      }
+    } finally {
+      document.head.removeChild(probe)
+    }
+  }
+
+  function handlePaste(e) {
+    const html = e.clipboardData?.getData('text/html')
+    if (!html) return // plain text only — let the browser's default paste run
+    e.preventDefault()
+    const parsed = new DOMParser().parseFromString(html, 'text/html')
+    inlineStylesFromClipboardHead(parsed, parsed.body)
+    ref.current?.focus()
+    document.execCommand('insertHTML', false, parsed.body.innerHTML)
     onChange?.(ref.current?.innerHTML ?? '')
   }
 
