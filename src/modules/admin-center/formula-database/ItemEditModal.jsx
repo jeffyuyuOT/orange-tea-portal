@@ -7,6 +7,7 @@ import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import IngredientPicker from './IngredientPicker'
 import FormulaIngredientsView from '../../operations-training/formula/FormulaIngredientsView'
 import MediaPreview from '../../../components/ui/MediaPreview'
+import { getMediaKind } from '../../../lib/mediaType'
 
 async function uploadImage(file, pathPrefix) {
   const path = `${pathPrefix}/${Date.now()}-${file.name}`
@@ -725,16 +726,23 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                     </div>
                   </div>
                   <SimpleRichTextEditor value={s.instruction_html} onChange={(v) => updateStep(idx, { instruction_html: v })} />
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <span className="shrink-0 text-[11px] text-gray-400">or video link:</span>
-                    <input
-                      type="text"
-                      className="input flex-1"
-                      placeholder="https://... (a video already in your file repository, YouTube, etc.)"
-                      value={s.image_path || ''}
-                      onChange={(e) => updateStep(idx, { image_path: e.target.value })}
-                    />
-                  </div>
+                  {/* An uploaded image already shows right below via MediaPreview —
+                      there's nothing to link to, so this box only needs to appear
+                      for the video case: no attachment yet (so a link can be pasted
+                      instead of uploading a file), or an attachment that's already a
+                      video/external link (so it can still be edited). */}
+                  {getMediaKind(s.image_path) !== 'image' && (
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <span className="shrink-0 text-[11px] text-gray-400">or video link:</span>
+                      <input
+                        type="text"
+                        className="input flex-1"
+                        placeholder="https://... (a video already in your file repository, YouTube, etc.)"
+                        value={s.image_path || ''}
+                        onChange={(e) => updateStep(idx, { image_path: e.target.value })}
+                      />
+                    </div>
+                  )}
                   {s.image_path && (
                     <MediaPreview
                       src={s.image_path}

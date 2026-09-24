@@ -69,7 +69,11 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
       <table className="min-w-full divide-y divide-brand-100 text-sm">
         <thead className="bg-brand-50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium text-brand-700">Staff</th>
+            {/* Sticky staff column — on a narrow phone screen this table has
+                to scroll sideways to see the later weekdays, so this stays
+                pinned in place (same trick as Leave Schedule's mobile sticky
+                date column) rather than scrolling the name out of view too. */}
+            <th className="sticky left-0 z-10 bg-brand-50 px-3 py-2 text-left font-medium text-brand-700">Staff</th>
             {days.map((d) => (
               <th key={d.toISOString()} className="px-3 py-2 text-left font-medium text-brand-700">
                 {format(d, 'EEE d/M')}
@@ -80,7 +84,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         <tbody className="divide-y divide-brand-50">
           {staffNames.map(([key, info]) => (
             <tr key={key}>
-              <td className="px-3 py-2 font-medium text-gray-700">
+              <td className="sticky left-0 z-10 bg-white px-3 py-2 font-medium text-gray-700">
                 <div>{info.name || 'Unassigned'}</div>
                 {/* "Break" label lives once under the name (in red) instead of being
                     repeated in every day cell — each cell below then only needs to
