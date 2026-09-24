@@ -10,6 +10,7 @@ export default function ShopTrainingPage() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [openItem, setOpenItem] = useState(null)
+  const [openItemFiles, setOpenItemFiles] = useState([])
 
   useEffect(() => {
     let active = true
@@ -26,6 +27,27 @@ export default function ShopTrainingPage() {
       active = false
     }
   }, [profile])
+
+  // Fetched per item as it's opened rather than bulk-loaded upfront with
+  // the list, since most items are never opened in a given visit.
+  useEffect(() => {
+    if (!openItem) {
+      setOpenItemFiles([])
+      return
+    }
+    let active = true
+    supabase
+      .from('shop_training_item_files')
+      .select('*')
+      .eq('shop_training_item_id', openItem.id)
+      .order('sort_order')
+      .then(({ data }) => {
+        if (active) setOpenItemFiles(data ?? [])
+      })
+    return () => {
+      active = false
+    }
+  }, [openItem])
 
   return (
     <div>
@@ -53,6 +75,24 @@ export default function ShopTrainingPage() {
 
       <Modal open={!!openItem} onClose={() => setOpenItem(null)} title={openItem?.title} wide>
         <RichTextViewer html={openItem?.content_html} />
+        {openItemFiles.length > 0 && (
+          <div className="mt-4 border-t border-brand-100 pt-3">
+            <div className="mb-1.5 text-xs font-semibold text-gray-500">Attached files</div>
+            <div className="space-y-1">
+              {openItemFiles.map((f) => (
+                <a
+                  key={f.id}
+                  href={supabase.storage.from('documents').getPublicUrl(f.file_path).data.publicUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-sm text-brand-600 hover:underline"
+                >
+                  📎 {f.display_name}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )
