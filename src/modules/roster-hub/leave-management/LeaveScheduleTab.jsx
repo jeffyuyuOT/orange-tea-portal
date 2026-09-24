@@ -73,30 +73,37 @@ export default function LeaveScheduleTab() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      {/* One row, always — year first (left) then month (right), on both
+          desktop and mobile. The month select flexes to fill what's left so
+          this never wraps to a second line on a narrow phone screen. */}
+      <div className="mb-4 flex items-center gap-2">
         <button
           onClick={() => goToMonth(-1)}
-          className="rounded-md border border-brand-200 px-2 py-1 text-sm text-brand-600 hover:bg-brand-50"
+          className="shrink-0 rounded-md border border-brand-200 px-2 py-1 text-sm text-brand-600 hover:bg-brand-50"
         >
           ‹
         </button>
-        <select className="input w-36" value={viewMonth} onChange={(e) => setViewMonth(Number(e.target.value))}>
-          {MONTH_NAMES.map((m, i) => (
-            <option key={m} value={i}>
-              {m}
-            </option>
-          ))}
-        </select>
-        <select className="input w-24" value={viewYear} onChange={(e) => setViewYear(Number(e.target.value))}>
+        <select className="input w-20 shrink-0 sm:w-24" value={viewYear} onChange={(e) => setViewYear(Number(e.target.value))}>
           {Array.from({ length: 5 }, (_, i) => today.getFullYear() - 2 + i).map((y) => (
             <option key={y} value={y}>
               {y}
             </option>
           ))}
         </select>
+        <select
+          className="input min-w-0 flex-1 sm:w-40 sm:flex-none"
+          value={viewMonth}
+          onChange={(e) => setViewMonth(Number(e.target.value))}
+        >
+          {MONTH_NAMES.map((m, i) => (
+            <option key={m} value={i}>
+              {m}
+            </option>
+          ))}
+        </select>
         <button
           onClick={() => goToMonth(1)}
-          className="rounded-md border border-brand-200 px-2 py-1 text-sm text-brand-600 hover:bg-brand-50"
+          className="shrink-0 rounded-md border border-brand-200 px-2 py-1 text-sm text-brand-600 hover:bg-brand-50"
         >
           ›
         </button>
@@ -107,7 +114,21 @@ export default function LeaveScheduleTab() {
       ) : !rows.length ? (
         <EmptyState label="No leave scheduled this month." />
       ) : (
-        <MonthTimelineView rows={rows} year={viewYear} month={viewMonth} daysInMonth={daysInMonth} />
+        <>
+          {/* Desktop/tablet: unchanged horizontal timeline (day-of-month
+              across, one row per employee). */}
+          <div className="hidden sm:block">
+            <MonthTimelineView rows={rows} year={viewYear} month={viewMonth} daysInMonth={daysInMonth} />
+          </div>
+          {/* Mobile: a full week's worth of horizontal scrolling to see one
+              bar was awkward to operate, so this is the same idea rotated —
+              day-of-month runs top-to-bottom (only needs vertical scroll,
+              which a phone already does naturally) and each employee gets a
+              narrow vertical column instead of a wide horizontal row. */}
+          <div className="sm:hidden">
+            <MonthTimelineViewMobile rows={rows} year={viewYear} month={viewMonth} daysInMonth={daysInMonth} />
+          </div>
+        </>
       )}
     </div>
   )
@@ -210,5 +231,145 @@ function LeaveBar({ entry, name, year, month, daysInMonth }) {
     >
       <span className="truncate text-[11px] font-semibold text-white">{name}</span>
     </div>
+  )
+}
+
+// Mobile version of the same idea, rotated: day-of-month runs down instead
+// of across, and each employee gets a narrow vertical column instead of a
+// wide horizontal row — only vertical scrolling is ever needed, which a
+// phone already does naturally, instead of horizontal scrolling to line a
+// bar up against a day header far off to the side.
+//
+// A phone has no hover, so a tap can't rely on the native `title` tooltip
+// the desktop view uses — tapping a bar instead shows the same name/date
+// (time)/reason details in a small panel below the grid.
+function MonthTimelineViewMobile({ rows, year, month, daysInMonth }) {
+  const dayHeight = 18 // px per day
+  const colWidth = 72 // px per employee column
+  const rulerWidth = 24 // px for the day-of-month numbers down the left
+  const totalHeight = daysInMonth * dayHeight
+  const [activeEntry, setActiveEntry] = useState(null)
+
+  // A tapped leave's month may no longer be the one on screen after
+  // switching months — drop the open detail panel rather than showing
+  // stale info for an entry that isn't even drawn anymore.
+  useEffect(() => {
+    setActiveEntry(null)
+  }, [year, month])
+
+  // Tapping anywhere else on the page (not on a bar — each bar's own tap
+  // handler stops this from firing, see VerticalLeaveBar) closes the detail
+  // panel, same as tapping the bar itself again would.
+  useEffect(() => {
+    if (!activeEntry) return
+    function closeOnOutsideClick() {
+      setActiveEntry(null)
+    }
+    document.addEventListener('click', closeOnOutsideClick)
+    return () => document.removeEventListener('click', closeOnOutsideClick)
+  }, [activeEntry])
+
+  return (
+    <div className="rounded-xl border border-brand-100 bg-white p-3">
+      <div className="overflow-x-auto">
+        <div className="flex" style={{ minWidth: `${rulerWidth + rows.length * colWidth}px` }}>
+          {/* Sticky, same trick as the desktop view's sticky name column —
+              scrolling right to see more employees never scrolls the day
+              numbers out of view along with it. */}
+          <div className="sticky left-0 z-10 shrink-0 bg-white" style={{ width: `${rulerWidth}px` }}>
+            <div className="h-5" />
+            <div className="relative" style={{ height: `${totalHeight}px` }}>
+              {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
+                <span
+                  key={d}
+                  className="absolute right-1 -translate-y-1/2 text-[9px] text-gray-400"
+                  style={{ top: `${((d - 0.5) / daysInMonth) * 100}%` }}
+                >
+                  {d}
+                </span>
+              ))}
+            </div>
+          </div>
+          {rows.map((row) => (
+            <div key={row.profileId} className="shrink-0 border-l border-gray-100 px-1" style={{ width: `${colWidth}px` }}>
+              <div className="mb-1 h-5 truncate text-center text-[10px] font-medium text-gray-500" title={row.name}>
+                {row.name}
+              </div>
+              <div className="relative rounded-md border border-gray-200 bg-gray-50" style={{ height: `${totalHeight}px` }}>
+                {Array.from({ length: daysInMonth - 1 }, (_, i) => i + 1).map((d) => (
+                  <div key={d} className="absolute left-0 right-0 border-t border-gray-200" style={{ top: `${(d / daysInMonth) * 100}%` }} />
+                ))}
+                {row.entries.map((entry) => (
+                  <VerticalLeaveBar
+                    key={entry.id}
+                    entry={entry}
+                    name={row.name}
+                    year={year}
+                    month={month}
+                    daysInMonth={daysInMonth}
+                    active={activeEntry?.id === entry.id}
+                    onTap={() => setActiveEntry((cur) => (cur?.id === entry.id ? null : { ...entry, name }))}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {activeEntry && (
+        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5 text-xs">
+          <div className="font-semibold text-gray-800">{activeEntry.name}</div>
+          <div className="mt-0.5 text-gray-500">{leaveTooltipLabel(activeEntry)}</div>
+          {activeEntry.reason && <div className="mt-0.5 text-gray-400">{activeEntry.reason}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VerticalLeaveBar({ entry, name, year, month, daysInMonth, active, onTap }) {
+  const { startDate: trueStart, endDate: trueEnd } = leaveDisplayDates(entry)
+  const monthStart = new Date(year, month, 1)
+  const monthEnd = new Date(year, month, daysInMonth)
+
+  const clippedStart = trueStart < monthStart ? monthStart : trueStart
+  const clippedEnd = trueEnd > monthEnd ? monthEnd : trueEnd
+  if (clippedEnd < clippedStart) return null
+
+  const startDayIdx = clippedStart.getDate() - 1
+  const endDayIdx = clippedEnd.getDate() - 1
+  const topPct = (startDayIdx / daysInMonth) * 100
+  const heightPct = ((endDayIdx - startDayIdx + 1) / daysInMonth) * 100
+  const continuesBefore = trueStart < monthStart
+  const continuesAfter = trueEnd > monthEnd
+  const color = colorForName(name)
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      // Stop this tap from also reaching the document-level "click
+      // anywhere else closes the panel" listener above — otherwise opening
+      // (or switching to) a bar's detail panel would immediately close
+      // again as the same click bubbles up.
+      onClick={(e) => {
+        e.stopPropagation()
+        onTap()
+      }}
+      onKeyDown={(e) => e.key === 'Enter' && onTap()}
+      className="absolute left-0.5 right-0.5 cursor-pointer"
+      style={{
+        top: `${topPct}%`,
+        height: `${heightPct}%`,
+        minHeight: '10px',
+        backgroundColor: color,
+        borderTopLeftRadius: continuesBefore ? 0 : 6,
+        borderTopRightRadius: continuesBefore ? 0 : 6,
+        borderBottomLeftRadius: continuesAfter ? 0 : 6,
+        borderBottomRightRadius: continuesAfter ? 0 : 6,
+        boxShadow: active ? '0 0 0 2px #1f2937' : 'none',
+      }}
+    />
   )
 }
