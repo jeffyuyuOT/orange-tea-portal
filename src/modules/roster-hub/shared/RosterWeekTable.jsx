@@ -12,8 +12,19 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!period) return
+    // No published period for this week (e.g. next week's roster hasn't
+    // been submitted yet) — there's nothing to fetch, so this must still
+    // turn `loading` off itself. Leaving it untouched here was a bug: with
+    // `loading` starting `true` and no period ever coming in, the "no
+    // roster published yet" message below could never actually be reached
+    // and the spinner would just spin forever instead.
+    if (!period) {
+      setEntries([])
+      setLoading(false)
+      return
+    }
     let active = true
+    setLoading(true)
     let q = supabase
       .from('roster_entries')
       .select('*, profiles(first_name, last_name, roster_display_name)')
@@ -31,18 +42,27 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
   }, [period, onlyProfileId])
 
   if (loading) return <LoadingSpinner />
-  if (!period) return <EmptyState label="No roster published for this week yet." />
+  if (!period) return <EmptyState label="Not available — this week's roster hasn't been published yet." />
   if (!entries.length) return <EmptyState label="No shifts recorded for this week." />
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(parseISO(period.week_start_date), i))
+  // Real staff (has a profile_id) first, then everyone else (Pending
+  // staff/imported/manual names, which roster_entries can't tell apart from
+  // each other) — both groups alphabetical by the same display name shown
+  // on screen. This is the same rule Manage Roster's staff list now sorts
+  // by (see ManageRosterPage.jsx), so this table lines up with it instead
+  // of showing names in Supabase's arbitrary default order.
   const staffNames = Array.from(
     new Map(
       entries.map((e) => [
         e.profile_id ?? e.staff_name_raw,
-        e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
+        { name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw, isStaff: !!e.profile_id },
       ])
     )
-  )
+  ).sort(([, a], [, b]) => {
+    if (a.isStaff !== b.isStaff) return a.isStaff ? -1 : 1
+    return (a.name || '').localeCompare(b.name || '')
+  })
 
   return (
     <div className="overflow-x-auto rounded-xl border border-brand-100">
@@ -58,9 +78,9 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-brand-50">
-          {staffNames.map(([key, name]) => (
+          {staffNames.map(([key, info]) => (
             <tr key={key}>
-              <td className="px-3 py-2 font-medium text-gray-700">{name || 'Unassigned'}</td>
+              <td className="px-3 py-2 font-medium text-gray-700">{info.name || 'Unassigned'}</td>
               {days.map((d) => {
                 const dayStr = format(d, 'yyyy-MM-dd')
                 const shift = entries.find(
@@ -68,7 +88,21 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                 )
                 return (
                   <td key={dayStr} className="px-3 py-2 text-gray-600">
-                    {shift ? `${shift.start_time?.slice(0, 5)}–${shift.end_time?.slice(0, 5)}` : '—'}
+                    {shift ? (
+                      <>
+                        <div>
+                          {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
+                        </div>
+                        {shift.break_half_hours ? (
+                          // Just the count of 30-min breaks (e.g. "Break x2") —
+                          // per Jeff, everyone already knows one break = 30 min,
+                          // so there's no need to spell out the total time.
+                          <div className="text-xs text-gray-400">Break x{shift.break_half_hours}</div>
+                        ) : null}
+                      </>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                 )
               })}
