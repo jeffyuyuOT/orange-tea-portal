@@ -172,6 +172,14 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     setDraftSolved(payload.solved)
     setSolvedByName(payload.solved_by_name)
     setSolvedAt(payload.solved_at)
+    // Without this, the write above succeeds but the list this modal was
+    // opened from (BulletinPage / AnnouncementsTab) never re-fetches, so it
+    // keeps showing whatever Solved/Unsolved badge it had when the modal
+    // was first opened — that's why toggling to Unsolved and hitting Submit
+    // looked like it "still showed Solved" afterwards. Every other write in
+    // this modal (save(), removeAnnouncement()) already closes + refreshes
+    // the list this same way.
+    onSaved()
   }
 
   async function removeAnnouncement() {
