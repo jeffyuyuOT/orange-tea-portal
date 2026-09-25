@@ -3,7 +3,6 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
-import NameDisplayTab from './NameDisplayTab'
 import LeaveLimitsTab from './LeaveLimitsTab'
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -72,9 +71,10 @@ function buildTicks(open, close) {
 
 export default function RosterSettingsPage() {
   const { currentStoreId } = useAuth()
-  // Split into two tabs: Labour allocation (the staffing-rules timeline
-  // below, unchanged) and Name display (a separate concern — what to call
-  // each person on the roster — that got crowded onto the same page).
+  // Two tabs: Labour allocation (the staffing-rules timeline below,
+  // unchanged) and Leave limits. Display-name editing lives in Shop
+  // Management > Staff Information (StaffDetailModal / PendingStaffDetailModal)
+  // — it does not have a tab here.
   const [tab, setTab] = useState('labour')
   const [rules, setRules] = useState([])
   // weekdayFrom === weekdayTo means a single day — same as before; picking
@@ -207,14 +207,9 @@ export default function RosterSettingsPage() {
         <TabButton active={tab === 'leave'} onClick={() => setTab('leave')}>
           Leave limits
         </TabButton>
-        <TabButton active={tab === 'name'} onClick={() => setTab('name')}>
-          Name display
-        </TabButton>
       </div>
 
-      {tab === 'name' ? (
-        <NameDisplayTab />
-      ) : tab === 'leave' ? (
+      {tab === 'leave' ? (
         <LeaveLimitsTab />
       ) : (
         <>

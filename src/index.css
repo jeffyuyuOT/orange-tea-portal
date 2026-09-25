@@ -25,6 +25,14 @@ html, body, #root {
   height: 100%;
 }
 
+html {
+  /* Same fix as the <meta name="color-scheme"> tag in index.html, belt-
+     and-braces at the CSS level: tells the browser this page is light-only
+     so it stops some phones' automatic dark-mode rewriting from turning
+     the white background black on its own. */
+  color-scheme: light only;
+}
+
 body {
   margin: 0;
   background: #ffffff;

@@ -5,8 +5,9 @@ import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 
 export default function StaffDetailModal({ staff, onClose, onSaved }) {
-  const { profile: me } = useAuth()
+  const { profile: me, currentStoreId, accessibleStores } = useAuth()
   const isAdmin = me?.role === 'admin'
+  const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? 'this store'
   const [form, setForm] = useState({
     first_name: staff.first_name ?? '',
     last_name: staff.last_name ?? '',
@@ -26,14 +27,26 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
     // for a date column with a 400 ("invalid input syntax for type date"),
     // which used to fail the WHOLE update (even just a name edit) whenever
     // either date happened to be blank. Send null instead of '' for those.
-    const payload = { ...form, date_of_birth: form.date_of_birth || null, hire_date: form.hire_date || null }
+    // roster_display_name lives on user_stores (one value per store this
+    // person is on, not on profiles) — saved separately below, scoped to
+    // whichever store is currently selected, so editing it here only
+    // changes what this store sees, not every store this person works at.
+    const { roster_display_name, ...profileFields } = form
+    const payload = { ...profileFields, date_of_birth: form.date_of_birth || null, hire_date: form.hire_date || null }
     // Per spec: hire date is manager/admin editable, but only admin can
     // change it here from Shop Management (managers can still view it).
     if (!isAdmin) delete payload.hire_date
-    const { error } = await supabase.from('profiles').update(payload).eq('id', staff.id)
+    const [{ error }, { error: nameError }] = await Promise.all([
+      supabase.from('profiles').update(payload).eq('id', staff.id),
+      supabase
+        .from('user_stores')
+        .update({ roster_display_name: roster_display_name.trim() || null })
+        .eq('profile_id', staff.id)
+        .eq('store_id', currentStoreId),
+    ])
     setSaving(false)
-    if (error) {
-      alert(`Save failed: ${error.message}`)
+    if (error || nameError) {
+      alert(`Save failed: ${(error || nameError).message}`)
       return
     }
     onSaved()
@@ -72,8 +85,8 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
           <input className="input" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
         </Field>
         <Field
-          label="Display name"
-          hint="Shown instead of the full name wherever other people see it — Bulletin Board, Manage Roster, Leave Schedule, Learning Tracker. Leave blank to just use their first name."
+          label={`Display name at ${storeName}`}
+          hint="Shown instead of the full name wherever other people see it — Bulletin Board, Manage Roster, Leave Schedule, Learning Tracker. Specific to this store — someone working at more than one store can have a different display name at each (switch stores with the picker top right to edit the other one). Leave blank to just use their first name."
           span2
         >
           <input

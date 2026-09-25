@@ -4,11 +4,13 @@ import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 
-// Just "original name -> name shown on the roster" for everyone already
-// set up for this store, whether a real account or a Pending staff entry.
-// Adding, removing, or linking a Pending staff member to a real account
-// once they're formally invited all happens from User Management instead
-// — this tab only edits what shows on the roster grid/Excel.
+// NOTE: this tab is no longer wired into RosterSettingsPage — display-name
+// editing now lives in Shop Management > Staff Information
+// (StaffDetailModal.jsx for real staff, PendingStaffDetailModal.jsx for
+// Pending staff), which write directly to profiles.roster_display_name /
+// roster_pending_staff.roster_display_name. This file is kept only because
+// this session can't delete files on the device directly; it's safe to
+// delete by hand next time you're in the repo.
 export default function NameDisplayTab() {
   const { currentStoreId } = useAuth()
   const [staff, setStaff] = useState([])
@@ -17,23 +19,16 @@ export default function NameDisplayTab() {
 
   async function load() {
     setLoading(true)
-    // roster_display_name lives on user_stores (per store) rather than on
-    // profiles — that's the whole point: the same person can have a
-    // different display name at each store they belong to (e.g. two
-    // "Toms" across different branches). Fold it back onto the embedded
-    // profile below so it renders like any other staff field.
-    const [{ data: memberships }, { data: pendingRows }] = await Promise.all([
+    const [{ data: staffRows }, { data: pendingRows }] = await Promise.all([
       supabase
-        .from('user_stores')
-        .select('roster_display_name, profiles(id, first_name, last_name, is_active)')
-        .eq('store_id', currentStoreId),
+        .from('profiles')
+        .select('id, first_name, last_name, roster_display_name')
+        .eq('primary_store_id', currentStoreId)
+        .eq('is_active', true)
+        .order('first_name'),
       supabase.from('roster_pending_staff').select('*').eq('store_id', currentStoreId).order('created_at'),
     ])
-    const people = (memberships ?? [])
-      .filter((m) => m.profiles?.is_active)
-      .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
-      .sort((a, b) => (a.first_name ?? '').localeCompare(b.first_name ?? ''))
-    setStaff(people)
+    setStaff(staffRows ?? [])
     setPending(pendingRows ?? [])
     setLoading(false)
   }
@@ -43,7 +38,7 @@ export default function NameDisplayTab() {
   }, [currentStoreId])
 
   async function saveStaffName(profileId, name) {
-    await supabase.from('user_stores').update({ roster_display_name: name }).eq('profile_id', profileId).eq('store_id', currentStoreId)
+    await supabase.from('profiles').update({ roster_display_name: name }).eq('id', profileId)
     setStaff((prev) => prev.map((p) => (p.id === profileId ? { ...p, roster_display_name: name } : p)))
   }
 

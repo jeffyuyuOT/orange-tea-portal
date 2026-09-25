@@ -62,10 +62,11 @@ export default function ManageRosterPage() {
     // the old way too.
     supabase
       .from('user_stores')
-      // roster_display_name lives on user_stores now (per store), not on
-      // profiles — a sibling column alongside the embedded profile, folded
-      // back onto it below so every existing caller of rosterDisplayName()
-      // still just reads `.roster_display_name` off the staff object.
+      // roster_display_name lives on user_stores (per store, not on
+      // profiles) — someone working at more than one store can be shown
+      // under a different name at each, set from that store's Staff
+      // Information. Folded back onto the embedded profile below so
+      // rosterDisplayName() just reads `.roster_display_name` either way.
       .select('roster_display_name, profiles(id, first_name, last_name, email, is_active)')
       .eq('store_id', currentStoreId)
       .then(({ data }) => {
@@ -92,8 +93,8 @@ export default function ManageRosterPage() {
     if (!loadPeriodId) return
     ;(async () => {
       const { data: period } = await supabase.from('roster_periods').select('*').eq('id', loadPeriodId).single()
-      // roster_display_name is per-store now — fetch it separately for
-      // THIS period's store rather than embedding it off profiles.
+      // roster_display_name is per-store — fetch it for THIS period's
+      // store separately rather than embedding it off profiles.
       const [{ data: rows }, { data: nameRows }] = await Promise.all([
         supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', loadPeriodId),
         supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', period?.store_id ?? ''),

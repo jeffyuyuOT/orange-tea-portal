@@ -19,16 +19,24 @@ export default function StaffListPage() {
   async function load() {
     if (!currentStoreId) return
     setLoading(true)
-    const [{ data: staffRows }, { data: pendingRows }] = await Promise.all([
+    // Staff at THIS store, via user_stores rather than primary_store_id —
+    // someone assigned to more than one store shows up in Staff
+    // Information at each of them (switch stores with the picker top
+    // right), not just their primary one. roster_display_name lives on
+    // this membership row now (per store, not on profiles), so it comes
+    // back as a sibling of the embedded profile below.
+    const [{ data: memberships }, { data: pendingRows }] = await Promise.all([
       supabase
-        .from('profiles')
-        .select('*')
-        .eq('primary_store_id', currentStoreId)
-        .order('is_active', { ascending: false })
-        .order('first_name'),
+        .from('user_stores')
+        .select('roster_display_name, profiles(*)')
+        .eq('store_id', currentStoreId),
       supabase.from('roster_pending_staff').select('*').eq('store_id', currentStoreId).order('created_at'),
     ])
-    setStaff(staffRows ?? [])
+    const staffRows = (memberships ?? [])
+      .map((m) => (m.profiles ? { ...m.profiles, roster_display_name: m.roster_display_name } : null))
+      .filter(Boolean)
+      .sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0) || (a.first_name ?? '').localeCompare(b.first_name ?? ''))
+    setStaff(staffRows)
     setPendingStaff(pendingRows ?? [])
     setLoading(false)
   }

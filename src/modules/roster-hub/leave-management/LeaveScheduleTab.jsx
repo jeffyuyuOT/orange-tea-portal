@@ -33,19 +33,30 @@ export default function LeaveScheduleTab() {
     setLoading(true)
     const monthStart = new Date(viewYear, viewMonth, 1)
     const monthEndExclusive = new Date(viewYear, viewMonth + 1, 1)
-    supabase
-      .from('leave_requests')
-      .select('*, profiles(first_name,last_name,roster_display_name)')
-      .eq('store_id', currentStoreId)
-      .eq('status', 'active')
-      .lt('start_at', monthEndExclusive.toISOString())
-      .gt('end_at', monthStart.toISOString())
-      .order('start_at')
-      .then(({ data, error }) => {
-        if (error) console.error('load leave schedule failed', error)
-        setLeaves(data ?? [])
-        setLoading(false)
-      })
+    // roster_display_name is per-store — fetch it for this store separately
+    // and fold it onto each leave request's profile, since leave_requests
+    // itself only ever belongs to one store anyway.
+    Promise.all([
+      supabase
+        .from('leave_requests')
+        .select('*, profiles(first_name,last_name)')
+        .eq('store_id', currentStoreId)
+        .eq('status', 'active')
+        .lt('start_at', monthEndExclusive.toISOString())
+        .gt('end_at', monthStart.toISOString())
+        .order('start_at'),
+      supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', currentStoreId),
+    ]).then(([{ data, error }, { data: nameRows }]) => {
+      if (error) console.error('load leave schedule failed', error)
+      const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
+      setLeaves(
+        (data ?? []).map((l) => ({
+          ...l,
+          profiles: l.profiles ? { ...l.profiles, roster_display_name: nameByProfile.get(l.profile_id) } : l.profiles,
+        }))
+      )
+      setLoading(false)
+    })
   }, [currentStoreId, viewYear, viewMonth])
 
   function goToMonth(delta) {

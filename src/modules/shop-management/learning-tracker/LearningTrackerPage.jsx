@@ -16,17 +16,22 @@ export default function LearningTrackerPage() {
   useEffect(() => {
     if (!currentStoreId) return
     setLoading(true)
+    // Staff at THIS store via user_stores (not just primary_store_id), same
+    // as Manage Roster/Staff Information — someone working at more than one
+    // store shows up here at each of them, with that store's own display
+    // name (roster_display_name lives on the user_stores row, per store).
     supabase
-      .from('profiles')
-      .select('*')
-      .eq('primary_store_id', currentStoreId)
-      .eq('is_active', true)
-      .order('first_name')
+      .from('user_stores')
+      .select('roster_display_name, profiles(*)')
+      .eq('store_id', currentStoreId)
       .then(async ({ data }) => {
-        // Re-sort by the same Roster Hub > Setting display name shown below,
-        // so the list order matches what's actually on screen instead of
-        // each person's (possibly different) raw first name.
-        const sorted = [...(data ?? [])].sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
+        const rows = (data ?? [])
+          .map((m) => (m.profiles?.is_active ? { ...m.profiles, roster_display_name: m.roster_display_name } : null))
+          .filter(Boolean)
+        // Re-sort by the same display name shown below, so the list order
+        // matches what's actually on screen instead of each person's
+        // (possibly different) raw first name.
+        const sorted = rows.sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
         setStaff(sorted)
         // Qualified = has at least one Formal Quiz attempt a manager/admin
         // has ticked as a pass (see StaffStudyDetail's Quiz History tab) —

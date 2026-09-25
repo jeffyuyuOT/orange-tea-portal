@@ -27,14 +27,25 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     setLoading(true)
     let q = supabase
       .from('roster_entries')
-      .select('*, profiles(first_name, last_name, roster_display_name)')
+      .select('*, profiles(first_name, last_name)')
       .eq('roster_period_id', period.id)
     if (onlyProfileId) q = q.eq('profile_id', onlyProfileId)
-    q.order('work_date').then(({ data }) => {
-      if (active) {
-        setEntries(data ?? [])
-        setLoading(false)
-      }
+    // roster_display_name is per-store — fetch it for THIS period's store
+    // separately and fold it onto each entry's profile below, since a
+    // roster_entries row itself carries no store_id of its own.
+    Promise.all([
+      q.order('work_date'),
+      supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', period.store_id),
+    ]).then(([{ data }, { data: nameRows }]) => {
+      if (!active) return
+      const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
+      setEntries(
+        (data ?? []).map((e) => ({
+          ...e,
+          profiles: e.profiles ? { ...e.profiles, roster_display_name: nameByProfile.get(e.profile_id) } : e.profiles,
+        }))
+      )
+      setLoading(false)
     })
     return () => {
       active = false

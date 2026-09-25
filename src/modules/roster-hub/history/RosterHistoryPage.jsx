@@ -33,9 +33,9 @@ export default function RosterHistoryPage() {
 
   async function exportPeriod(period) {
     // roster_display_name is per-store (user_stores), not on profiles —
-    // fetch it alongside the membership row and fold it back onto each
-    // profile object so rosterDisplayName() (which just reads
-    // `.roster_display_name`) doesn't need to know where it came from.
+    // fold it back onto each profile object so rosterDisplayName() (which
+    // just reads `.roster_display_name`) doesn't need to know where it
+    // came from.
     const [{ data: rows }, { data: memberships }] = await Promise.all([
       supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
       supabase.from('user_stores').select('profile_id, roster_display_name, profiles(id, first_name, last_name, is_active)').eq('store_id', currentStoreId),
