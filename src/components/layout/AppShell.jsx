@@ -74,7 +74,18 @@ export default function AppShell() {
             </button>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6">
+        {/* overflow-x-hidden here is a safety net: if some element inside a
+            page is ever too wide for the screen (like the Study Log header
+            row Jeff hit on mobile, before it got its own flex-wrap fix),
+            this stops the whole content pane from turning into a
+            horizontal-scroll page — where scrolling to see the overflowing
+            thing also drags everything else out of view — and instead just
+            clips the offending element in place, which is a much easier bug
+            to spot and report. Anything that legitimately needs to scroll
+            sideways (the Progress Chart's SVG, wide tables) already wraps
+            itself in its own overflow-x-auto container, so this doesn't
+            affect those. */}
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
           <Outlet />
         </main>
       </div>
