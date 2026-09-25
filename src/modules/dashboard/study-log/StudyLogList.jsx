@@ -117,8 +117,18 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between gap-2 border-b border-brand-100">
-        <div className="flex gap-1">
+      {/* headerActions (Quick/Formal Quiz, Progress chart/Study summary) gets
+          its own row above the Drink/Tea/Toppings/Others tabs, instead of
+          sharing one row with them — on a phone-width screen, four tabs plus
+          two multi-button color blocks side by side don't fit, and with no
+          wrapping the overflow just pushed the quiz/chart buttons off
+          screen (looking like they weren't there at all) instead of showing
+          them on a second line. Both rows also get their own flex-wrap as a
+          second line of defense, so even a very narrow phone wraps onto
+          more lines instead of clipping anything. */}
+      <div className="mb-3">
+        {headerActions && <div className="mb-2 flex flex-wrap items-center gap-2">{headerActions}</div>}
+        <div className="flex flex-wrap gap-1 border-b border-brand-100">
           {GROUPS.map((g) => (
             <button
               key={g.key}
@@ -131,7 +141,6 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
             </button>
           ))}
         </div>
-        {headerActions && <div className="flex items-center gap-2 pb-2">{headerActions}</div>}
       </div>
 
       <div className="mb-3 flex items-center justify-between gap-2">
