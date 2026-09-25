@@ -21,17 +21,30 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
 
   async function save() {
     setSaving(true)
-    const payload = { ...form }
+    // date_of_birth/hire_date are DB `date` columns — an unset one loads
+    // into this form as '' (see useState above), and PostgREST rejects ''
+    // for a date column with a 400 ("invalid input syntax for type date"),
+    // which used to fail the WHOLE update (even just a name edit) whenever
+    // either date happened to be blank. Send null instead of '' for those.
+    const payload = { ...form, date_of_birth: form.date_of_birth || null, hire_date: form.hire_date || null }
     // Per spec: hire date is manager/admin editable, but only admin can
     // change it here from Shop Management (managers can still view it).
     if (!isAdmin) delete payload.hire_date
-    await supabase.from('profiles').update(payload).eq('id', staff.id)
+    const { error } = await supabase.from('profiles').update(payload).eq('id', staff.id)
     setSaving(false)
+    if (error) {
+      alert(`Save failed: ${error.message}`)
+      return
+    }
     onSaved()
   }
 
   async function deactivate() {
-    await supabase.from('profiles').update({ is_active: false }).eq('id', staff.id)
+    const { error } = await supabase.from('profiles').update({ is_active: false }).eq('id', staff.id)
+    if (error) {
+      alert(`Remove failed: ${error.message}`)
+      return
+    }
     onSaved()
   }
 
