@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import StudyLogList from '../../dashboard/study-log/StudyLogList'
+import ProgressChartModal from '../../dashboard/study-log/ProgressChartModal'
+import StudySummaryModal from '../../dashboard/study-log/StudySummaryModal'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Modal from '../../../components/ui/Modal'
 import Badge from '../../../components/ui/Badge'
@@ -15,6 +17,8 @@ export default function StaffStudyDetail({ staff, onBack }) {
   const [attempts, setAttempts] = useState([])
   const [loading, setLoading] = useState(true)
   const [openAttempt, setOpenAttempt] = useState(null)
+  const [showProgressChart, setShowProgressChart] = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
 
   function load() {
     setLoading(true)
@@ -60,19 +64,40 @@ export default function StaffStudyDetail({ staff, onBack }) {
         {qualified && <Badge color="green">Qualified</Badge>}
       </h1>
 
-      <div className="mb-4 inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
-        {[
-          { key: 'progress', label: 'Learning & Progress' },
-          { key: 'history', label: 'Quiz History' },
-        ].map((t) => (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
+          {[
+            { key: 'progress', label: 'Learning & Progress' },
+            { key: 'history', label: 'Quiz History' },
+          ].map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === t.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {/* Same Progress chart / Study summary buttons as "My Dashboard >
+            Study Log" (see StudyLogPage.jsx) — this is a manager/admin
+            looking at one specific staff member's own data instead of their
+            own, so both modals here take `staff.id`, not the logged-in
+            profile's id. */}
+        <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1">
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === t.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'}`}
+            onClick={() => setShowProgressChart(true)}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-white hover:shadow-sm"
           >
-            {t.label}
+            📈 Progress chart
           </button>
-        ))}
+          <button
+            onClick={() => setShowSummary(true)}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-white hover:shadow-sm"
+          >
+            📊 Study summary
+          </button>
+        </div>
       </div>
 
       {tab === 'progress' ? (
@@ -107,6 +132,8 @@ export default function StaffStudyDetail({ staff, onBack }) {
       )}
 
       {openAttempt && <AttemptDetailModal attempt={openAttempt} onClose={() => setOpenAttempt(null)} />}
+      {showProgressChart && <ProgressChartModal profileId={staff.id} onClose={() => setShowProgressChart(false)} />}
+      {showSummary && <StudySummaryModal profileId={staff.id} onClose={() => setShowSummary(false)} />}
     </div>
   )
 }
