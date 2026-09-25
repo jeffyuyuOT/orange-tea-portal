@@ -52,6 +52,12 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   const [selectedSizeIds, setSelectedSizeIds] = useState([])
   const [activeSizeTab, setActiveSizeTab] = useState(null)
   const [hasHotVersion, setHasHotVersion] = useState(item.has_hot_version ?? false)
+  // Drink-only: shows this item, on top of its own category, gathered
+  // together under a synthetic "Top 10" category on the staff Formula page
+  // and in the Study Log drink filter (see FormulaPage.jsx/StudyLogList.jsx).
+  // It's just this one boolean flag, not a real formula_categories row, so
+  // the item never actually leaves its own category.
+  const [topTen, setTopTen] = useState(item.top_10 ?? false)
   const [activeHot, setActiveHot] = useState(false) // which ingredient set is showing: false = Iced/Cold, true = Hot
   const [ingredients, setIngredients] = useState([])
   const [annotations, setAnnotations] = useState([]) // small notes shown just above/below the table on the Formula page
@@ -347,6 +353,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         notes: stripHtml(notes) ? notes : null,
         notes_image_path: notesImagePath || null,
         has_hot_version: isDrink ? hasHotVersion : false,
+        top_10: isDrink ? topTen : false,
       }
       if (isNew) {
         const { data, error } = await supabase
@@ -474,6 +481,16 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
               <input className="input font-zh" value={nameZh} onChange={(e) => setNameZh(e.target.value)} />
             </label>
           </div>
+
+          {isDrink && (
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input type="checkbox" checked={topTen} onChange={(e) => setTopTen(e.target.checked)} />
+              ⭐ Top 10
+              <span className="text-xs font-normal text-gray-400">
+                — also shows this drink under the Top 10 category, on top of its own category
+              </span>
+            </label>
+          )}
 
           <div>
             <span className="mb-1 block text-xs font-medium text-gray-500">Visible at stores (default: all)</span>

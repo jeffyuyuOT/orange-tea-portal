@@ -13,6 +13,16 @@ const GROUPS = [
   { key: 'others', label: 'Others' },
 ]
 
+// Same synthetic "Top 10" category as the staff Formula page (FormulaPage.jsx)
+// — a drink flagged Top 10 (Admin Center > Formula Database) shows up here
+// too, gathered together, without leaving its own category. Because both
+// views read/write the same `progress` map keyed by formula_item_id, ticking
+// "Memorized" while filtered to Top 10 and then switching the dropdown to
+// that drink's own category (or vice versa) already shows the same checked
+// state — there's only ever one study_progress row per item, so there's
+// nothing extra to keep in sync.
+const TOP10_CATEGORY_ID = '__top10__'
+
 // Shared between "My Dashboard > Study Log" (own progress) and
 // "Shop Management > Learning Tracker" (a manager/admin viewing + bulk
 // editing someone else's progress, per the spec's "admin可支援批量選取").
@@ -67,9 +77,12 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
 
   const filteredItems = useMemo(
     () =>
-      items.filter(
-        (i) => i.group_key === group && (group !== 'drink' || !categoryId || i.category_id === categoryId)
-      ),
+      items.filter((i) => {
+        if (i.group_key !== group) return false
+        if (group !== 'drink' || !categoryId) return true
+        if (categoryId === TOP10_CATEGORY_ID) return !!i.top_10
+        return i.category_id === categoryId
+      }),
     [items, group, categoryId]
   )
 
@@ -125,6 +138,7 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
               onChange={(e) => setCategoryId(e.target.value || null)}
             >
               <option value="">All categories</option>
+              <option value={TOP10_CATEGORY_ID}>⭐ Top 10</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}

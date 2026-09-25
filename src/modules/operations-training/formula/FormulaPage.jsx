@@ -15,6 +15,14 @@ const GROUPS = [
   { key: 'others', label: 'Others' },
 ]
 
+// A synthetic category, not a real `formula_categories` row — gathers every
+// drink flagged "Top 10" (Admin Center > Formula Database > edit a drink)
+// regardless of which real category it's in. Picking it doesn't move a
+// drink out of its own category; it's the same formula_items row shown a
+// second time. Always shown first, automatically, so admins never have to
+// create/maintain it themselves.
+const TOP10_CATEGORY = { id: '__top10__', name: '⭐ Top 10' }
+
 export default function FormulaPage() {
   const { currentStoreId } = useAuth()
   const [group, setGroup] = useState('drink')
@@ -52,7 +60,8 @@ export default function FormulaPage() {
       {group === 'drink' && category && (
         <ItemList
           groupKey="drink"
-          categoryId={category.id}
+          categoryId={category.id === TOP10_CATEGORY.id ? null : category.id}
+          topTen={category.id === TOP10_CATEGORY.id}
           storeId={currentStoreId}
           onBack={() => setCategory(null)}
           backLabel={`← ${category.name}`}
@@ -93,10 +102,20 @@ function DrinkCategories({ onSelect, onTips }) {
   }, [])
 
   if (loading) return <LoadingSpinner />
-  if (!categories.length) return <EmptyState label="No drink categories yet — add some in Admin Center > Formula Database." />
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <button
+        onClick={() => onSelect(TOP10_CATEGORY)}
+        className="flex items-center justify-between rounded-xl border border-brand-100 bg-white p-4 text-left shadow-sm hover:border-brand-300"
+      >
+        <div className="font-medium text-gray-800">{TOP10_CATEGORY.name}</div>
+      </button>
+      {!categories.length && (
+        <div className="sm:col-span-2 lg:col-span-3">
+          <EmptyState label="No drink categories yet — add some in Admin Center > Formula Database." />
+        </div>
+      )}
       {categories.map((cat) => (
         <div
           key={cat.id}
@@ -114,7 +133,7 @@ function DrinkCategories({ onSelect, onTips }) {
   )
 }
 
-function ItemList({ groupKey, categoryId, storeId, onBack, backLabel, onOpenItem }) {
+function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, onOpenItem }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -123,7 +142,7 @@ function ItemList({ groupKey, categoryId, storeId, onBack, backLabel, onOpenItem
     setLoading(true)
     async function load() {
       let query = supabase.from('formula_items').select('*').eq('group_key', groupKey).eq('is_active', true)
-      query = categoryId ? query.eq('category_id', categoryId) : query.is('category_id', null)
+      query = topTen ? query.eq('top_10', true) : categoryId ? query.eq('category_id', categoryId) : query.is('category_id', null)
       const { data: itemRows } = await query.order('sort_order').order('id')
       const ids = (itemRows ?? []).map((i) => i.id)
       let restrictionRows = []
@@ -140,7 +159,7 @@ function ItemList({ groupKey, categoryId, storeId, onBack, backLabel, onOpenItem
     return () => {
       active = false
     }
-  }, [groupKey, categoryId, storeId])
+  }, [groupKey, categoryId, topTen, storeId])
 
   return (
     <div>
@@ -162,10 +181,7 @@ function ItemList({ groupKey, categoryId, storeId, onBack, backLabel, onOpenItem
               className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50"
             >
               <span className="flex items-center gap-2">
-                <span className="flex items-center gap-1 font-medium text-gray-800">
-                  {item.name_en}
-                  <PronounceButton text={item.name_en} lang="en-AU" />
-                </span>
+                <span className="font-medium text-gray-800">{item.name_en}</span>
                 {item.name_zh && (
                   <span className="flex items-center gap-1 text-sm text-brand-600 font-zh">
                     {item.name_zh}
