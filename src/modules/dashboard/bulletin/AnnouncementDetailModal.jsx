@@ -3,9 +3,20 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import Badge from '../../../components/ui/Badge'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
 import { rosterDisplayName } from '../../../lib/excelRoster'
+
+// Only two categories exist in the DB (`announcements_category_check`) —
+// "Important" isn't a category, it's the separate is_important flag below,
+// so an announcement can be an important Store Announcement *or* an
+// important Customer Complaint at the same time (BulletinPage renders both
+// badges independently).
+const CATEGORIES = [
+  { key: 'normal', label: 'Store Announcement' },
+  { key: 'customer_complaint', label: 'Customer Complaint' },
+]
 
 export default function AnnouncementDetailModal({ announcementId, storeId, onClose, onSaved }) {
   const { profile } = useAuth()
@@ -15,6 +26,9 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [isImportant, setIsImportant] = useState(false)
+  const [category, setCategory] = useState('normal')
+  const [solved, setSolved] = useState(false)
+  const [initialSolved, setInitialSolved] = useState(false)
   const [history, setHistory] = useState([])
   const [saving, setSaving] = useState(false)
 
@@ -30,6 +44,9 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           setTitle(data.title)
           setContent(data.content_html ?? '')
           setIsImportant(data.is_important)
+          setCategory(data.category ?? 'normal')
+          setSolved(data.solved ?? false)
+          setInitialSolved(data.solved ?? false)
         }
       })
     supabase
@@ -43,10 +60,30 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   async function save() {
     setSaving(true)
     try {
+      const isComplaint = category === 'customer_complaint'
+      // Only stamp solved_by/solved_at when the Solved checkbox actually
+      // changed this save — otherwise re-saving an already-solved complaint
+      // (e.g. just fixing a typo in the title) would silently reassign
+      // "solved by" to whoever happened to edit it next.
+      const solvedPayload = !isComplaint
+        ? { solved: false, solved_by: null, solved_at: null }
+        : solved !== initialSolved
+          ? { solved, solved_by: solved ? profile.id : null, solved_at: solved ? new Date().toISOString() : null }
+          : { solved }
+
       if (isNew) {
         const { data, error } = await supabase
           .from('announcements')
-          .insert({ store_id: storeId, title, content_html: content, is_important: isImportant, created_by: profile.id, updated_by: profile.id })
+          .insert({
+            store_id: storeId,
+            title,
+            content_html: content,
+            is_important: isImportant,
+            category,
+            ...solvedPayload,
+            created_by: profile.id,
+            updated_by: profile.id,
+          })
           .select()
           .single()
         if (error) throw error
@@ -54,7 +91,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       } else {
         const { error } = await supabase
           .from('announcements')
-          .update({ title, content_html: content, is_important: isImportant, updated_by: profile.id })
+          .update({ title, content_html: content, is_important: isImportant, category, ...solvedPayload, updated_by: profile.id })
           .eq('id', announcementId)
         if (error) throw error
         await supabase.from('announcement_history').insert({ announcement_id: announcementId, action: 'edited', actor_id: profile.id })
@@ -97,14 +134,40 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             placeholder="Title"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
           />
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setCategory(c.key)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                  category === c.key ? 'border-brand-400 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500'
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
           <SimpleRichTextEditor value={content} onChange={setContent} placeholder="Announcement content…" />
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} />
             Mark as important
           </label>
+          {category === 'customer_complaint' && (
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" checked={solved} onChange={(e) => setSolved(e.target.checked)} />
+              Solved
+            </label>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {category === 'customer_complaint' && <Badge color="red">Customer Complaint</Badge>}
+            {isImportant && <Badge color="red">Important</Badge>}
+            {category === 'customer_complaint' &&
+              (solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
+          </div>
           <RichTextViewer html={content} />
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase text-gray-400">History</h4>
