@@ -6,32 +6,45 @@ import { useDragReorder, DragHandle } from '../../../lib/useDragReorder'
 import ItemEditModal from './ItemEditModal'
 
 // Lists formula_items for a given group (+ optional category), with
-// add / sort / edit — used for Drink items inside a category, and for the
-// flat Tea / Toppings / Others lists.
-export default function ItemManager({ groupKey, categoryId, onBack, backLabel }) {
+// add / sort / edit — used for Drink items inside a category, for the
+// flat Tea / Toppings / Others lists, and (via `topTen`) for the synthetic
+// "Top 10" category (see CategoryManager.jsx's TOP10_CATEGORY /
+// IngredientInventoryTab.jsx).
+//
+// `topTen`: lists every drink flagged top_10 = true, across every real
+// category, instead of filtering by categoryId — and orders/reorders them
+// by their own `top_10_sort_order` instead of `sort_order`, so arranging
+// the Top 10 list never touches a drink's position in its real category
+// (and vice versa). New items can't be created from here (they belong to a
+// real category first), and Copy/Delete are hidden too — deleting a drink
+// from here would delete it everywhere, not just remove it from Top 10;
+// that's done from the drink's own Edit (uncheck "Top 10" there instead).
+export default function ItemManager({ groupKey, categoryId, topTen = false, onBack, backLabel }) {
   const [items, setItems] = useState([])
   const [editing, setEditing] = useState(null)
+  const sortField = topTen ? 'top_10_sort_order' : 'sort_order'
 
   async function load() {
     let q = supabase.from('formula_items').select('*').eq('group_key', groupKey)
-    q = categoryId ? q.eq('category_id', categoryId) : q.is('category_id', null)
+    q = topTen ? q.eq('top_10', true) : categoryId ? q.eq('category_id', categoryId) : q.is('category_id', null)
     // Secondary "id" tiebreak: bulk-imported items used to all share the
     // same sort_order, and Postgres doesn't promise a stable order among
     // tied rows — without this, the list (and the ↑↓ buttons) could
     // reshuffle itself on every reload.
-    const { data } = await q.order('sort_order').order('id')
+    const { data } = await q.order(sortField).order('id')
     setItems(data ?? [])
   }
   useEffect(() => {
     load()
-  }, [groupKey, categoryId])
+  }, [groupKey, categoryId, topTen])
 
   // Dragging a row can move it several places in one go, so — unlike the
   // old ↑↓ buttons, which only ever swapped two adjacent sort_order values —
-  // a drop rewrites every item's sort_order to match its new position.
+  // a drop rewrites every item's sort_order (or, in Top 10 mode,
+  // top_10_sort_order) to match its new position.
   async function persistOrder(next) {
     setItems(next)
-    await Promise.all(next.map((it, idx) => supabase.from('formula_items').update({ sort_order: idx }).eq('id', it.id)))
+    await Promise.all(next.map((it, idx) => supabase.from('formula_items').update({ [sortField]: idx }).eq('id', it.id)))
   }
   const { handleProps, rowProps } = useDragReorder(items, persistOrder)
 
@@ -138,11 +151,18 @@ export default function ItemManager({ groupKey, categoryId, onBack, backLabel })
           {backLabel}
         </button>
       )}
-      <div className="mb-3 flex justify-end">
-        <Button onClick={() => setEditing({ group_key: groupKey, category_id: categoryId })}>+ New Item</Button>
-      </div>
+      {topTen ? (
+        <p className="mb-3 text-sm text-gray-500">
+          Drag to reorder how these drinks appear in the Formula page's Top 10 category — this doesn't change their
+          order in their own category. Click a drink to edit it or un-check "Top 10".
+        </p>
+      ) : (
+        <div className="mb-3 flex justify-end">
+          <Button onClick={() => setEditing({ group_key: groupKey, category_id: categoryId })}>+ New Item</Button>
+        </div>
+      )}
       {!items.length ? (
-        <EmptyState label="No items yet." />
+        <EmptyState label={topTen ? 'No drinks marked Top 10 yet — check "Top 10" when editing a drink.' : 'No items yet.'} />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {items.map((item) => {
@@ -159,14 +179,16 @@ export default function ItemManager({ groupKey, categoryId, onBack, backLabel })
                 <button onClick={() => setEditing(item)} className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600">
                   {item.name_en} {item.name_zh && <span className="font-zh text-brand-500">· {item.name_zh}</span>}
                 </button>
-                <div className="flex items-center gap-2">
-                  <Button variant="secondary" onClick={() => copy(item)}>
-                    Copy
-                  </Button>
-                  <Button variant="danger" onClick={() => remove(item.id)}>
-                    Delete
-                  </Button>
-                </div>
+                {!topTen && (
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" onClick={() => copy(item)}>
+                      Copy
+                    </Button>
+                    <Button variant="danger" onClick={() => remove(item.id)}>
+                      Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             )
           })}

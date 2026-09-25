@@ -75,16 +75,21 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
     setCategoryId(null)
   }
 
-  const filteredItems = useMemo(
-    () =>
-      items.filter((i) => {
-        if (i.group_key !== group) return false
-        if (group !== 'drink' || !categoryId) return true
-        if (categoryId === TOP10_CATEGORY_ID) return !!i.top_10
-        return i.category_id === categoryId
-      }),
-    [items, group, categoryId]
-  )
+  const filteredItems = useMemo(() => {
+    const filtered = items.filter((i) => {
+      if (i.group_key !== group) return false
+      if (group !== 'drink' || !categoryId) return true
+      if (categoryId === TOP10_CATEGORY_ID) return !!i.top_10
+      return i.category_id === categoryId
+    })
+    // Top 10 has its own order (top_10_sort_order, set in Admin Center >
+    // Formula Database > Top 10), independent of `sort_order` — match it
+    // here too instead of falling back to each item's normal list position.
+    if (categoryId === TOP10_CATEGORY_ID) {
+      return [...filtered].sort((a, b) => (a.top_10_sort_order ?? 0) - (b.top_10_sort_order ?? 0) || a.id - b.id)
+    }
+    return filtered
+  }, [items, group, categoryId])
 
   async function toggle(itemId, value) {
     if (senior) return // locked — senior status covers every item automatically

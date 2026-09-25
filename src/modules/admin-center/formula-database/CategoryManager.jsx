@@ -6,6 +6,12 @@ import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { useDragReorder, DragHandle } from '../../../lib/useDragReorder'
 
+// Same synthetic "Top 10" category as the staff Formula page
+// (operations-training/formula/FormulaPage.jsx) — not a real
+// formula_categories row, so it has no Tips/Edit/Delete, just a way in to
+// ItemManager's `topTen` mode (see IngredientInventoryTab.jsx).
+export const TOP10_CATEGORY = { id: '__top10__', name: '⭐ Top 10' }
+
 // Drink-group sub-categories (Fruit Tea, Milk Tea, ...): add / edit / sort /
 // delete, each with its own Tips rich-text content shown in Operations &
 // Training via the "Tips" button.
@@ -43,11 +49,21 @@ export default function CategoryManager({ onSelect }) {
       <div className="mb-3 flex justify-end">
         <Button onClick={() => setEditing({})}>+ New Category</Button>
       </div>
-      {!categories.length ? (
-        <EmptyState label="No drink categories yet." />
-      ) : (
-        <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {categories.map((c) => {
+      <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+        <div className="flex items-center px-2 py-2.5">
+          <button
+            onClick={() => onSelect(TOP10_CATEGORY)}
+            className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600"
+          >
+            {TOP10_CATEGORY.name}
+          </button>
+        </div>
+        {!categories.length ? (
+          <div className="px-2 py-4">
+            <EmptyState label="No drink categories yet." />
+          </div>
+        ) : (
+          categories.map((c) => {
             const { isDragging, isDropTarget, ...dragRowProps } = rowProps(c.id)
             return (
               <div
@@ -71,9 +87,9 @@ export default function CategoryManager({ onSelect }) {
                 </div>
               </div>
             )
-          })}
-        </div>
-      )}
+          })
+        )}
+      </div>
 
       {editing && (
         <CategoryEditModal

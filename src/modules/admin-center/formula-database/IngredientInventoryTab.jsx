@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import CategoryManager from './CategoryManager'
+import CategoryManager, { TOP10_CATEGORY } from './CategoryManager'
 import ItemManager from './ItemManager'
 
 const GROUPS = [
@@ -34,7 +34,13 @@ export default function IngredientInventoryTab() {
 
       {group === 'drink' && !category && <CategoryManager onSelect={setCategory} />}
       {group === 'drink' && category && (
-        <ItemManager groupKey="drink" categoryId={category.id} onBack={() => setCategory(null)} backLabel={`← ${category.name}`} />
+        <ItemManager
+          groupKey="drink"
+          categoryId={category.id === TOP10_CATEGORY.id ? null : category.id}
+          topTen={category.id === TOP10_CATEGORY.id}
+          onBack={() => setCategory(null)}
+          backLabel={`← ${category.name}`}
+        />
       )}
       {group !== 'drink' && <ItemManager groupKey={group} categoryId={null} />}
     </div>

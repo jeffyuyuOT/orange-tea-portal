@@ -10,6 +10,7 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 export default function ShopTrainingDatabasePage() {
   const { profile } = useAuth()
   const [items, setItems] = useState([])
+  const [restrictedIds, setRestrictedIds] = useState(new Set()) // item ids with at least one shop_training_item_stores row
   const [editing, setEditing] = useState(null)
   // Locks BOTH ↑/↓ buttons for every row while a reorder is in flight —
   // not just the one clicked — since a reorder is a two-step swap
@@ -20,6 +21,8 @@ export default function ShopTrainingDatabasePage() {
   async function load() {
     const { data } = await supabase.from('shop_training_items').select('*').order('sort_order')
     setItems(data ?? [])
+    const { data: storeRows } = await supabase.from('shop_training_item_stores').select('shop_training_item_id')
+    setRestrictedIds(new Set((storeRows ?? []).map((r) => r.shop_training_item_id)))
   }
   useEffect(() => {
     load()
@@ -64,6 +67,7 @@ export default function ShopTrainingDatabasePage() {
               <button onClick={() => setEditing(item)} className="flex flex-1 items-center gap-2 text-left">
                 <span className="font-medium text-gray-800">{item.title}</span>
                 {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
+                {restrictedIds.has(item.id) && <Badge color="gray">Limited stores</Badge>}
               </button>
               <div className="flex items-center gap-1">
                 <button
@@ -107,10 +111,15 @@ export default function ShopTrainingDatabasePage() {
 }
 
 function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSaved }) {
+  const { accessibleStores } = useAuth()
   const isNew = !item.id
   const [title, setTitle] = useState(item.title ?? '')
   const [content, setContent] = useState(item.content_html ?? '')
   const [visible, setVisible] = useState(item.visible_to_training ?? false)
+  // null = visible at every store (the default — matches formula_item_stores'
+  // convention: no restriction rows means no restriction). Same "Visible at
+  // stores" checkbox pattern as Formula Database's ItemEditModal.jsx.
+  const [visibleStoreIds, setVisibleStoreIds] = useState(null)
   // Attached files staff can download alongside the content — same
   // "upload immediately, only link it to the item at Save" pattern Formula
   // Database's videos use, since a brand-new item has no id yet for a
@@ -127,6 +136,11 @@ function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSav
       .eq('shop_training_item_id', item.id)
       .order('sort_order')
       .then(({ data }) => setFiles(data ?? []))
+    supabase
+      .from('shop_training_item_stores')
+      .select('store_id')
+      .eq('shop_training_item_id', item.id)
+      .then(({ data }) => setVisibleStoreIds(data?.length ? data.map((r) => r.store_id) : null))
   }, [isNew, item.id])
 
   async function addFiles(fileList) {
@@ -179,6 +193,7 @@ function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSav
         .update({ title, content_html: content, visible_to_training: visible, updated_by: profileId, updated_by_name: profileName })
         .eq('id', item.id)
       await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', itemId)
+      await supabase.from('shop_training_item_stores').delete().eq('shop_training_item_id', itemId)
     }
     const nonEmptyFiles = files.filter((f) => f.file_path)
     if (nonEmptyFiles.length) {
@@ -191,6 +206,11 @@ function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSav
           uploaded_by: profileId,
         }))
       )
+    }
+    if (visibleStoreIds && visibleStoreIds.length) {
+      await supabase
+        .from('shop_training_item_stores')
+        .insert(visibleStoreIds.map((storeId) => ({ shop_training_item_id: itemId, store_id: storeId })))
     }
     setSaving(false)
     onSaved()
@@ -215,6 +235,27 @@ function EditModal({ item, nextSortOrder, profileId, profileName, onClose, onSav
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
           Visible to Training-role logins
         </label>
+
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">Visible at stores (default: all)</span>
+          <div className="flex flex-wrap gap-3">
+            {accessibleStores.map((s) => (
+              <label key={s.id} className="flex items-center gap-1.5 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={visibleStoreIds === null || visibleStoreIds.includes(s.id)}
+                  onChange={(e) => {
+                    setVisibleStoreIds((prev) => {
+                      const current = prev === null ? accessibleStores.map((x) => x.id) : prev
+                      return e.target.checked ? [...current, s.id] : current.filter((id) => id !== s.id)
+                    })
+                  }}
+                />
+                {s.name}
+              </label>
+            ))}
+          </div>
+        </div>
 
         <div>
           <div className="mb-1 flex items-center justify-between">

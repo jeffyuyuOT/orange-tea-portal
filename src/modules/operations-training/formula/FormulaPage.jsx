@@ -143,7 +143,7 @@ function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, on
     async function load() {
       let query = supabase.from('formula_items').select('*').eq('group_key', groupKey).eq('is_active', true)
       query = topTen ? query.eq('top_10', true) : categoryId ? query.eq('category_id', categoryId) : query.is('category_id', null)
-      const { data: itemRows } = await query.order('sort_order').order('id')
+      const { data: itemRows } = await query.order(topTen ? 'top_10_sort_order' : 'sort_order').order('id')
       const ids = (itemRows ?? []).map((i) => i.id)
       let restrictionRows = []
       if (ids.length) {

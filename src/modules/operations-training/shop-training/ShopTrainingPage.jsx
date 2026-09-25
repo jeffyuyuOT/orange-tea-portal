@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
+import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Modal from '../../../components/ui/Modal'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
 
 export default function ShopTrainingPage() {
-  const { profile } = useAuth()
+  const { profile, currentStoreId } = useAuth()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [openItem, setOpenItem] = useState(null)
@@ -14,19 +15,27 @@ export default function ShopTrainingPage() {
 
   useEffect(() => {
     let active = true
-    let query = supabase.from('shop_training_items').select('*').order('sort_order')
-    // Training-role accounts only ever see content an admin marked visible.
-    if (profile?.role === 'training') query = query.eq('visible_to_training', true)
-    query.then(({ data }) => {
-      if (active) {
-        setItems(data ?? [])
-        setLoading(false)
+    async function load() {
+      let query = supabase.from('shop_training_items').select('*').order('sort_order')
+      // Training-role accounts only ever see content an admin marked visible.
+      if (profile?.role === 'training') query = query.eq('visible_to_training', true)
+      const { data: itemRows } = await query
+      const ids = (itemRows ?? []).map((i) => i.id)
+      let restrictionRows = []
+      if (ids.length) {
+        const { data } = await supabase.from('shop_training_item_stores').select('*').in('shop_training_item_id', ids)
+        restrictionRows = data ?? []
       }
-    })
+      if (!active) return
+      const visible = filterVisibleForStore(itemRows ?? [], restrictionRows, 'shop_training_item_id', currentStoreId)
+      setItems(visible)
+      setLoading(false)
+    }
+    load()
     return () => {
       active = false
     }
-  }, [profile])
+  }, [profile, currentStoreId])
 
   // Fetched per item as it's opened rather than bulk-loaded upfront with
   // the list, since most items are never opened in a given visit.
