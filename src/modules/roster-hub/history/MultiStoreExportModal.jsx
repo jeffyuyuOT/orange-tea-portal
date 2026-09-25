@@ -32,18 +32,26 @@ export default function MultiStoreExportModal({ onClose }) {
           .order('submitted_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase.from('user_stores').select('profiles(id, first_name, last_name, roster_display_name, is_active)').eq('store_id', storeId),
+        // roster_display_name is per-store (user_stores), not on profiles —
+        // fold it back onto each profile below so rosterDisplayName() can
+        // keep just reading `.roster_display_name` either way.
+        supabase.from('user_stores').select('profile_id, roster_display_name, profiles(id, first_name, last_name, is_active)').eq('store_id', storeId),
       ])
-      const staffList = (memberships ?? []).map((m) => m.profiles).filter((p) => p && p.is_active)
+      const nameByProfile = new Map((memberships ?? []).map((m) => [m.profile_id, m.roster_display_name]))
+      const staffList = (memberships ?? [])
+        .filter((m) => m.profiles?.is_active)
+        .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
       let entries = []
       if (period) {
         const { data: rows } = await supabase
           .from('roster_entries')
-          .select('*, profiles(first_name, last_name, roster_display_name)')
+          .select('*, profiles(first_name, last_name)')
           .eq('roster_period_id', period.id)
         entries = (rows ?? []).map((r) => ({
           profileId: r.profile_id ?? '',
-          staffName: r.profiles ? rosterDisplayName(r.profiles) : r.staff_name_raw ?? '',
+          staffName: r.profiles
+            ? rosterDisplayName({ ...r.profiles, roster_display_name: nameByProfile.get(r.profile_id) })
+            : r.staff_name_raw ?? '',
           date: r.work_date,
           startTime: timeToDecimal(r.start_time),
           endTime: timeToDecimal(r.end_time),

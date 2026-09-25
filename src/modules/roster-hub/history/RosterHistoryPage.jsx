@@ -32,15 +32,24 @@ export default function RosterHistoryPage() {
   }, [currentStoreId])
 
   async function exportPeriod(period) {
+    // roster_display_name is per-store (user_stores), not on profiles —
+    // fetch it alongside the membership row and fold it back onto each
+    // profile object so rosterDisplayName() (which just reads
+    // `.roster_display_name`) doesn't need to know where it came from.
     const [{ data: rows }, { data: memberships }] = await Promise.all([
-      supabase.from('roster_entries').select('*, profiles(first_name, last_name, roster_display_name)').eq('roster_period_id', period.id),
-      supabase.from('user_stores').select('profiles(id, first_name, last_name, roster_display_name, is_active)').eq('store_id', currentStoreId),
+      supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
+      supabase.from('user_stores').select('profile_id, roster_display_name, profiles(id, first_name, last_name, is_active)').eq('store_id', currentStoreId),
     ])
-    const staffList = (memberships ?? []).map((m) => m.profiles).filter((p) => p && p.is_active)
+    const nameByProfile = new Map((memberships ?? []).map((m) => [m.profile_id, m.roster_display_name]))
+    const staffList = (memberships ?? [])
+      .filter((m) => m.profiles?.is_active)
+      .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
     const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(period.week_start_date), i), 'yyyy-MM-dd'))
     const entries = (rows ?? []).map((r) => ({
       profileId: r.profile_id ?? '',
-      staffName: r.profiles ? rosterDisplayName(r.profiles) : r.staff_name_raw ?? '',
+      staffName: r.profiles
+        ? rosterDisplayName({ ...r.profiles, roster_display_name: nameByProfile.get(r.profile_id) })
+        : r.staff_name_raw ?? '',
       date: r.work_date,
       startTime: timeToDecimal(r.start_time),
       endTime: timeToDecimal(r.end_time),

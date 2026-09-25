@@ -6,7 +6,6 @@ import Button from '../../../components/ui/Button'
 import Badge from '../../../components/ui/Badge'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
-import { rosterDisplayName } from '../../../lib/excelRoster'
 
 // The category dropdown is really just a friendlier front end over two
 // independent fields: `category` (Normal vs Customer Complaint — a real
@@ -15,14 +14,17 @@ import { rosterDisplayName } from '../../../lib/excelRoster'
 // announcement can still be flipped on/off at any time later, on its own,
 // regardless of category). Picking "Important" here is just a shortcut
 // that pre-checks "Mark as important" for you; the checkbox below stays
-// the actual source of truth (and can still be toggled independently at
-// any time), so the dropdown's shown value is always derived FROM
-// category+isImportant, never stored on its own.
+// the actual source of truth, so the dropdown's shown value is always
+// derived FROM category+isImportant, never stored on its own.
 const CATEGORY_OPTIONS = [
   { value: 'normal', label: 'Normal' },
   { value: 'important', label: 'Important' },
   { value: 'customer_complaint', label: 'Customer Complaint' },
 ]
+
+function nameOf(profile) {
+  return `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email
+}
 
 export default function AnnouncementDetailModal({ announcementId, storeId, onClose, onSaved }) {
   const { profile } = useAuth()
@@ -35,6 +37,11 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [category, setCategory] = useState('normal')
   const [createdBy, setCreatedBy] = useState(null)
   const [solved, setSolved] = useState(false)
+  // The checkbox itself only edits this draft — nothing is written until
+  // Submit is clicked, so ticking it by accident (or while still reading
+  // the complaint) can't silently mark it solved. Reset back to whatever
+  // was actually loaded/saved whenever that changes underneath it.
+  const [draftSolved, setDraftSolved] = useState(false)
   const [solvedByName, setSolvedByName] = useState(null)
   const [solvedAt, setSolvedAt] = useState(null)
   const [solving, setSolving] = useState(false)
@@ -69,13 +76,14 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           setCategory(data.category ?? 'normal')
           setCreatedBy(data.created_by)
           setSolved(data.solved ?? false)
+          setDraftSolved(data.solved ?? false)
           setSolvedByName(data.solved_by_name ?? null)
           setSolvedAt(data.solved_at ?? null)
         }
       })
     supabase
       .from('announcement_history')
-      .select('*, actor:actor_id(first_name,last_name,roster_display_name)')
+      .select('*, actor:actor_id(first_name,last_name)')
       .eq('announcement_id', announcementId)
       .order('acted_at', { ascending: false })
       .then(({ data }) => setHistory(data ?? []))
@@ -96,7 +104,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       // created_by_name/actor_name are permanent text snapshots (not a
       // live join) — so "who posted this" still shows correctly even
       // after that person's account is later removed.
-      const actorName = rosterDisplayName(profile)
+      const actorName = nameOf(profile)
       if (isNew) {
         const { data, error } = await supabase
           .from('announcements')
@@ -140,20 +148,20 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     }
   }
 
-  // Marking a complaint solved/reopened writes immediately, independent
-  // of the Edit/Save flow — so solved_at reflects the moment it was
-  // actually resolved, not whenever an unrelated edit happens to be saved.
-  async function toggleSolved(next) {
+  // Writes the staged Solved/Unsolved change — independent of the Edit/Save
+  // flow, so solved_at reflects the moment Submit was actually clicked, not
+  // whenever some unrelated edit happens to be saved.
+  async function submitSolved() {
     setSolving(true)
-    const actorName = rosterDisplayName(profile)
-    const payload = next
+    const actorName = nameOf(profile)
+    const payload = draftSolved
       ? { solved: true, solved_by: profile.id, solved_by_name: actorName, solved_at: new Date().toISOString() }
       : { solved: false, solved_by: null, solved_by_name: null, solved_at: null }
     const { error } = await supabase.from('announcements').update(payload).eq('id', announcementId)
     if (!error) {
       await supabase
         .from('announcement_history')
-        .insert({ announcement_id: announcementId, action: next ? 'solved' : 'reopened', actor_id: profile.id, actor_name: actorName })
+        .insert({ announcement_id: announcementId, action: draftSolved ? 'solved' : 'reopened', actor_id: profile.id, actor_name: actorName })
     }
     setSolving(false)
     if (error) {
@@ -161,6 +169,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       return
     }
     setSolved(payload.solved)
+    setDraftSolved(payload.solved)
     setSolvedByName(payload.solved_by_name)
     setSolvedAt(payload.solved_at)
   }
@@ -215,7 +224,11 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           />
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-500">Category</span>
-            <select className="input max-w-xs" value={categorySelectValue} onChange={(e) => onCategorySelect(e.target.value)}>
+            <select
+              className="input max-w-xs"
+              value={categorySelectValue}
+              onChange={(e) => onCategorySelect(e.target.value)}
+            >
               {CATEGORY_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -244,10 +257,22 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
 
           {isComplaint && (
             <div className="rounded-lg border border-brand-100 bg-brand-50 p-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input type="checkbox" checked={solved} disabled={solving} onChange={(e) => toggleSolved(e.target.checked)} />
-                Solved
-              </label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={draftSolved}
+                    disabled={solving}
+                    onChange={(e) => setDraftSolved(e.target.checked)}
+                  />
+                  Solved
+                </label>
+                {draftSolved !== solved && (
+                  <Button onClick={submitSolved} disabled={solving} className="!px-3 !py-1 !text-xs">
+                    {solving ? 'Submitting…' : 'Submit'}
+                  </Button>
+                )}
+              </div>
               {solved && solvedAt && (
                 <p className="mt-1 text-xs text-gray-500">
                   Marked solved {new Date(solvedAt).toLocaleString()}
@@ -264,7 +289,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               {history.map((h) => (
                 <li key={h.id}>
                   {new Date(h.acted_at).toLocaleString()} — {h.action.replace('_', ' ')} by{' '}
-                  {h.actor_name || (h.actor ? rosterDisplayName(h.actor) : 'Unknown')}
+                  {h.actor_name || (h.actor ? `${h.actor.first_name ?? ''} ${h.actor.last_name ?? ''}`.trim() : 'Unknown')}
                 </li>
               ))}
             </ul>

@@ -27,11 +27,6 @@ export default function ManageRosterPage() {
   const [notes, setNotes] = useState('')
   const [staff, setStaff] = useState([])
   const [pendingStaff, setPendingStaff] = useState([])
-  // Staff/Pending people hidden from just THIS store+week's grid via the ✕
-  // next to their auto-populated row (their profile / Pending staff entry
-  // is untouched — see roster_hidden_staff, migration 0030). Each item:
-  // { id (the hidden-row id, for restoring), profileId, pendingStaffId, name }.
-  const [hiddenStaff, setHiddenStaff] = useState([])
   const [rules, setRules] = useState([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -67,26 +62,23 @@ export default function ManageRosterPage() {
     // the old way too.
     supabase
       .from('user_stores')
-      .select('profiles(id, first_name, last_name, email, roster_display_name, is_active)')
+      // roster_display_name lives on user_stores now (per store), not on
+      // profiles — a sibling column alongside the embedded profile, folded
+      // back onto it below so every existing caller of rosterDisplayName()
+      // still just reads `.roster_display_name` off the staff object.
+      .select('roster_display_name, profiles(id, first_name, last_name, email, is_active)')
       .eq('store_id', currentStoreId)
       .then(({ data }) => {
-        const list = (data ?? []).map((r) => r.profiles).filter((p) => p && p.is_active)
-        // The query itself has no defined order, so without sorting here the
-        // row order in the grid below would just be whatever order Supabase
-        // happened to return — alphabetical by the same display name shown
-        // on the grid is what Bulletin Board's Roster view now matches too
-        // (see RosterWeekTable.jsx), so both need to agree on this rule.
-        list.sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
+        const list = (data ?? [])
+          .filter((r) => r.profiles?.is_active)
+          .map((r) => ({ ...r.profiles, roster_display_name: r.roster_display_name }))
         setStaff(list)
       })
     supabase
       .from('roster_pending_staff')
       .select('*')
       .eq('store_id', currentStoreId)
-      .then(({ data }) => {
-        const list = (data ?? []).sort((a, b) => pendingRosterName(a).localeCompare(pendingRosterName(b)))
-        setPendingStaff(list)
-      })
+      .then(({ data }) => setPendingStaff(data ?? []))
     supabase
       .from('roster_staffing_rules')
       .select('*')
@@ -94,44 +86,19 @@ export default function ManageRosterPage() {
       .then(({ data }) => setRules(data ?? []))
   }, [currentStoreId])
 
-  // Who's hidden from THIS store+week's grid — reloads whenever either
-  // changes, same as the staff/pendingStaff/rules loads above.
-  useEffect(() => {
-    if (!currentStoreId || !weekStart) {
-      setHiddenStaff([])
-      return
-    }
-    supabase
-      .from('roster_hidden_staff')
-      .select('id, profile_id, pending_staff_id, profiles(first_name, last_name, roster_display_name), roster_pending_staff(display_name, roster_display_name)')
-      .eq('store_id', currentStoreId)
-      .eq('week_start_date', weekStart)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error('load roster_hidden_staff failed', error)
-          return
-        }
-        setHiddenStaff(
-          (data ?? []).map((h) => ({
-            id: h.id,
-            profileId: h.profile_id,
-            pendingStaffId: h.pending_staff_id,
-            name: h.profile_id ? rosterDisplayName(h.profiles) : pendingRosterName(h.roster_pending_staff),
-          }))
-        )
-      })
-  }, [currentStoreId, weekStart])
-
   // "Load" a period passed via History page navigation state.
   useEffect(() => {
     const loadPeriodId = location.state?.loadPeriodId
     if (!loadPeriodId) return
     ;(async () => {
       const { data: period } = await supabase.from('roster_periods').select('*').eq('id', loadPeriodId).single()
-      const { data: rows } = await supabase
-        .from('roster_entries')
-        .select('*, profiles(first_name, last_name, roster_display_name)')
-        .eq('roster_period_id', loadPeriodId)
+      // roster_display_name is per-store now — fetch it separately for
+      // THIS period's store rather than embedding it off profiles.
+      const [{ data: rows }, { data: nameRows }] = await Promise.all([
+        supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', loadPeriodId),
+        supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', period?.store_id ?? ''),
+      ])
+      const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
       if (period) {
         setWeekStart(period.week_start_date)
         setNotes(period.notes ?? '')
@@ -139,7 +106,9 @@ export default function ManageRosterPage() {
       setEntries(
         (rows ?? []).map((r) => ({
           profileId: r.profile_id ?? '',
-          staffName: r.profiles ? rosterDisplayName(r.profiles) : r.staff_name_raw ?? '',
+          staffName: r.profiles
+            ? rosterDisplayName({ ...r.profiles, roster_display_name: nameByProfile.get(r.profile_id) })
+            : r.staff_name_raw ?? '',
           date: r.work_date,
           startTime: timeToDecimal(r.start_time),
           endTime: timeToDecimal(r.end_time),
@@ -154,48 +123,7 @@ export default function ManageRosterPage() {
   // Pending staff show up in the downloadable template and "current grid"
   // export too, same as on-screen, so a not-yet-formal hire can be
   // scheduled ahead of time whichever way the roster gets filled in.
-  // Template/export/import-matching still use the FULL staff/pendingStaff —
-  // hiding someone from this week's grid shouldn't also hide them from the
-  // Excel template or stop an uploaded name from matching them. Only the
-  // on-screen grid rows are filtered down to `visible*`.
   const templateStaff = [...staff, ...pendingAsStaff(pendingStaff)]
-  const hiddenProfileIds = new Set(hiddenStaff.filter((h) => h.profileId).map((h) => h.profileId))
-  const hiddenPendingIds = new Set(hiddenStaff.filter((h) => h.pendingStaffId).map((h) => h.pendingStaffId))
-  const visibleStaff = staff.filter((s) => !hiddenProfileIds.has(s.id))
-  const visiblePendingStaff = pendingStaff.filter((p) => !hiddenPendingIds.has(p.id))
-
-  // Called from the grid's ✕ on an auto-populated staff/pending row — hides
-  // them from just this store+week (their profile / Pending staff entry is
-  // untouched).
-  async function hideStaffRow(row) {
-    if (!currentStoreId || !weekStart) return
-    const { data, error } = await supabase
-      .from('roster_hidden_staff')
-      .insert({
-        store_id: currentStoreId,
-        week_start_date: weekStart,
-        profile_id: row.kind === 'staff' ? row.profileId : null,
-        pending_staff_id: row.kind === 'pending' ? row.pendingId : null,
-      })
-      .select()
-      .single()
-    if (error) {
-      console.error('hide staff failed', error)
-      return
-    }
-    setHiddenStaff((prev) => [...prev, { id: data.id, profileId: data.profile_id, pendingStaffId: data.pending_staff_id, name: row.name }])
-  }
-
-  // "+ <name>" in the "N staff not on this week's roster" list — brings
-  // them back onto the grid for this week.
-  async function restoreStaffRow(hidden) {
-    const { error } = await supabase.from('roster_hidden_staff').delete().eq('id', hidden.id)
-    if (error) {
-      console.error('restore staff failed', error)
-      return
-    }
-    setHiddenStaff((prev) => prev.filter((h) => h.id !== hidden.id))
-  }
 
   function knownNames() {
     return [
@@ -303,6 +231,7 @@ export default function ManageRosterPage() {
             status,
             notes,
             created_by: profile.id,
+            created_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
             submitted_at: status === 'submitted' ? new Date().toISOString() : null,
           },
           { onConflict: 'store_id,week_start_date' }
@@ -386,16 +315,7 @@ export default function ManageRosterPage() {
         </Button>
       </div>
 
-      <RosterEntryGrid
-        staff={visibleStaff}
-        pendingStaff={visiblePendingStaff}
-        weekDates={weekDates}
-        entries={entries}
-        setEntries={setEntries}
-        hiddenStaff={hiddenStaff}
-        onHideStaff={hideStaffRow}
-        onRestoreStaff={restoreStaffRow}
-      />
+      <RosterEntryGrid staff={staff} pendingStaff={pendingStaff} weekDates={weekDates} entries={entries} setEntries={setEntries} />
       <UnderstaffedWarnings entries={entries} rules={rules} />
 
       <label className="mt-4 block">

@@ -151,7 +151,11 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
 
   return (
     <div className="rounded-lg border border-gray-300 focus-within:border-brand-400">
-      <div className="flex gap-1 border-b border-gray-200 bg-gray-50 px-2 py-1 rounded-t-lg">
+      {/* flex-wrap: with Camera/Library added, this toolbar has 6 buttons —
+          on a phone-width modal that no longer fits on one line, and
+          without wrapping it silently overflowed the editor's rounded
+          border instead of just running onto a second row. */}
+      <div className="flex flex-wrap gap-1 border-b border-gray-200 bg-gray-50 px-2 py-1 rounded-t-lg">
         <ToolbarButton onClick={() => exec('bold')}><b>B</b></ToolbarButton>
         <ToolbarButton onClick={() => exec('italic')}><i>I</i></ToolbarButton>
         <ToolbarButton onClick={() => exec('insertUnorderedList')}>• List</ToolbarButton>

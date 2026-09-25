@@ -3,6 +3,8 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
+import NameDisplayTab from './NameDisplayTab'
+import LeaveLimitsTab from './LeaveLimitsTab'
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -70,6 +72,10 @@ function buildTicks(open, close) {
 
 export default function RosterSettingsPage() {
   const { currentStoreId } = useAuth()
+  // Split into two tabs: Labour allocation (the staffing-rules timeline
+  // below, unchanged) and Name display (a separate concern — what to call
+  // each person on the roster — that got crowded onto the same page).
+  const [tab, setTab] = useState('labour')
   const [rules, setRules] = useState([])
   // weekdayFrom === weekdayTo means a single day — same as before; picking
   // a wider range adds the same time slot/staffing rule to every weekday
@@ -194,83 +200,116 @@ export default function RosterSettingsPage() {
     <div>
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Setting</h1>
 
-      <p className="mb-4 text-sm text-gray-500">
-        Minimum staffing per weekday + time slot — used for the understaffed warning in Manage Roster. For multiple
-        acceptable levels, separate numbers with commas (e.g. "2,3"). Pick a day range (e.g. Mon–Wed) to add the same
-        rule to every day in between at once, instead of one at a time.
-      </p>
-
-      <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-brand-100 bg-white p-4">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Store opens</span>
-          <input
-            type="time"
-            className="input"
-            value={storeHours.open}
-            onChange={(e) => setStoreHours({ ...storeHours, open: e.target.value })}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Store closes</span>
-          <input
-            type="time"
-            className="input"
-            value={storeHours.close}
-            onChange={(e) => setStoreHours({ ...storeHours, close: e.target.value })}
-          />
-        </label>
-        <Button variant="secondary" onClick={saveHours} disabled={hoursSaving}>
-          {hoursSaving ? 'Saving…' : 'Save hours'}
-        </Button>
-        <span className="text-xs text-gray-400">
-          Scales the timeline below to this store's actual hours instead of the full 24 hours. Leave blank to show
-          the full day.
-        </span>
+      <div className="mb-4 flex gap-1 border-b border-brand-100">
+        <TabButton active={tab === 'labour'} onClick={() => setTab('labour')}>
+          Labour allocation
+        </TabButton>
+        <TabButton active={tab === 'leave'} onClick={() => setTab('leave')}>
+          Leave limits
+        </TabButton>
+        <TabButton active={tab === 'name'} onClick={() => setTab('name')}>
+          Name display
+        </TabButton>
       </div>
 
-      <div className="mb-2 grid grid-cols-2 gap-2 rounded-xl border border-brand-100 bg-white p-4 sm:grid-cols-5">
-        <div className="flex items-center gap-1" title="Pick the same day twice for a single weekday, or a range to apply this rule to every day in between">
-          <select className="input" value={form.weekdayFrom} onChange={(e) => setForm({ ...form, weekdayFrom: e.target.value })}>
-            {WEEKDAYS_SHORT.map((d, i) => (
-              <option key={i} value={i}>
-                {d}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-gray-400">–</span>
-          <select className="input" value={form.weekdayTo} onChange={(e) => setForm({ ...form, weekdayTo: e.target.value })}>
-            {WEEKDAYS_SHORT.map((d, i) => (
-              <option key={i} value={i}>
-                {d}
-              </option>
-            ))}
-          </select>
-        </div>
-        <input className="input" placeholder="Label e.g. Morning" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
-        <input type="time" className="input" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
-        <input type="time" className="input" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} />
-        <div className="flex gap-1">
-          <input className="input" placeholder="2,3" value={form.counts} onChange={(e) => setForm({ ...form, counts: e.target.value })} />
-          <Button onClick={addRule}>Add</Button>
-        </div>
-      </div>
-      {error && <p className="mb-4 text-xs text-red-600">{error}</p>}
-      {!error && <div className="mb-3" />}
-
-      {!rules.length ? (
-        <EmptyState label="No staffing rules set yet." />
+      {tab === 'name' ? (
+        <NameDisplayTab />
+      ) : tab === 'leave' ? (
+        <LeaveLimitsTab />
       ) : (
-        <WeeklyTimelineView
-          rules={rules}
-          removingId={removingId}
-          onRemove={removeRule}
-          savingId={savingId}
-          onSave={updateRule}
-          windowStart={windowStart}
-          windowEnd={windowEnd}
-        />
+        <>
+          <p className="mb-4 text-sm text-gray-500">
+            Minimum staffing per weekday + time slot — used for the understaffed warning in Manage Roster. For
+            multiple acceptable levels, separate numbers with commas (e.g. "2,3"). Pick a day range (e.g. Mon–Wed) to
+            add the same rule to every day in between at once, instead of one at a time.
+          </p>
+
+          <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-brand-100 bg-white p-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Store opens</span>
+              <input
+                type="time"
+                className="input"
+                value={storeHours.open}
+                onChange={(e) => setStoreHours({ ...storeHours, open: e.target.value })}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Store closes</span>
+              <input
+                type="time"
+                className="input"
+                value={storeHours.close}
+                onChange={(e) => setStoreHours({ ...storeHours, close: e.target.value })}
+              />
+            </label>
+            <Button variant="secondary" onClick={saveHours} disabled={hoursSaving}>
+              {hoursSaving ? 'Saving…' : 'Save hours'}
+            </Button>
+            <span className="text-xs text-gray-400">
+              Scales the timeline below to this store's actual hours instead of the full 24 hours. Leave blank to
+              show the full day.
+            </span>
+          </div>
+
+          <div className="mb-2 grid grid-cols-2 gap-2 rounded-xl border border-brand-100 bg-white p-4 sm:grid-cols-5">
+            <div className="flex items-center gap-1" title="Pick the same day twice for a single weekday, or a range to apply this rule to every day in between">
+              <select className="input" value={form.weekdayFrom} onChange={(e) => setForm({ ...form, weekdayFrom: e.target.value })}>
+                {WEEKDAYS_SHORT.map((d, i) => (
+                  <option key={i} value={i}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-gray-400">–</span>
+              <select className="input" value={form.weekdayTo} onChange={(e) => setForm({ ...form, weekdayTo: e.target.value })}>
+                {WEEKDAYS_SHORT.map((d, i) => (
+                  <option key={i} value={i}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <input className="input" placeholder="Label e.g. Morning" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+            <input type="time" className="input" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
+            <input type="time" className="input" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} />
+            <div className="flex gap-1">
+              <input className="input" placeholder="2,3" value={form.counts} onChange={(e) => setForm({ ...form, counts: e.target.value })} />
+              <Button onClick={addRule}>Add</Button>
+            </div>
+          </div>
+          {error && <p className="mb-4 text-xs text-red-600">{error}</p>}
+          {!error && <div className="mb-3" />}
+
+          {!rules.length ? (
+            <EmptyState label="No staffing rules set yet." />
+          ) : (
+            <WeeklyTimelineView
+              rules={rules}
+              removingId={removingId}
+              onRemove={removeRule}
+              savingId={savingId}
+              onSave={updateRule}
+              windowStart={windowStart}
+              windowEnd={windowEnd}
+            />
+          )}
+        </>
       )}
     </div>
+  )
+}
+
+function TabButton({ active, children, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+        active ? 'border-brand-500 text-brand-700' : 'border-transparent text-gray-400 hover:text-gray-600'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 
