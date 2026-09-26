@@ -6,6 +6,7 @@ import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { isAnswerAccepted } from '../../../lib/answerMatching'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
+import { weightedSample } from '../../../lib/quizSelection'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -14,20 +15,6 @@ function shuffle(arr) {
     ;[a[i], a[j]] = [a[j], a[i]]
   }
   return a
-}
-
-// Weighted random sampling without replacement (Efraimidis-Spirakis: each
-// item gets a random key raised to 1/weight, then take the top `count` by
-// key) — used so ⭐ Top 10 drinks show up more often in the fill-in-the-blank
-// pool (see formal_quiz_settings.top10_fill_blank_weight, migration 0046)
-// without ever risking the exact same question twice in one quiz, which a
-// simpler "duplicate the item N times before shuffling" approach could do.
-function weightedSample(items, weightOf, count) {
-  return items
-    .map((item) => ({ item, key: Math.pow(Math.random(), 1 / Math.max(weightOf(item), 0.0001)) }))
-    .sort((a, b) => b.key - a.key)
-    .slice(0, count)
-    .map((x) => x.item)
 }
 
 // Formal Quiz mixes question sources: curated Single/Multi choice and
@@ -87,13 +74,22 @@ async function buildFormalQuizSet(profileId, storeId) {
   // Hot-serving variant (see QuickQuizModal.jsx's buildFormulaQuestions for
   // the same exclusion + rationale) — only an item's normal ingredient rows
   // become questions here. ---
-  const { data: ingredientRows } = await supabase
-    .from('formula_item_ingredients')
-    .select('id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh)')
-    .in('formula_item_id', memorizedIds)
-    .not('ingredient_id', 'is', null)
+  const [{ data: ingredientRows }, { data: excludedRows }] = await Promise.all([
+    supabase
+      .from('formula_item_ingredients')
+      .select('id, ingredient_id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh)')
+      .in('formula_item_id', memorizedIds)
+      .not('ingredient_id', 'is', null),
+    // Same admin-curated exclusion list Quick Quiz's buildFormulaQuestions
+    // already used (e.g. water, ice — quantity isn't meaningful to quiz on)
+    // — shared across both quiz types, see the "Formula fill-in-the-blank
+    // questions" settings section in QuizBankPage.jsx. Formal Quiz didn't
+    // apply this before, so an excluded ingredient could still turn up here.
+    supabase.from('quiz_excluded_ingredients').select('ingredient_id'),
+  ])
+  const excludedIngredientIds = new Set((excludedRows ?? []).map((r) => r.ingredient_id))
   const fillBlankCandidates = (ingredientRows ?? [])
-    .filter((r) => r.quantity_text?.trim() && r.ingredient_master?.name && !r.is_hot)
+    .filter((r) => r.quantity_text?.trim() && r.ingredient_master?.name && !r.is_hot && !excludedIngredientIds.has(r.ingredient_id))
     .map((r) => ({
       type: 'fill_blank',
       localId: r.id,

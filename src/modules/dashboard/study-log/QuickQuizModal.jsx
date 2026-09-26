@@ -6,6 +6,7 @@ import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { isAnswerAccepted } from '../../../lib/answerMatching'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
+import { weightedSample } from '../../../lib/quizSelection'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -58,7 +59,14 @@ function itemLabel(item) {
 // game. Wrong answers are, first choice, other real quantities recorded for
 // that same ingredient elsewhere (still plausible-looking), and only
 // synthesized (scaled up/down) when there isn't enough real variety.
-async function buildFormulaQuestions(memorizedIds, targetCount) {
+// `top10Ids`/`top10Weight`: same ⭐ Top 10 boost Formal Quiz already applied
+// to its fill-in-the-blank pool (formal_quiz_settings.top10_fill_blank_weight)
+// — now shared across both quiz types, see the "Formula fill-in-the-blank
+// questions" settings section in QuizBankPage.jsx. Picking with
+// weightedSample (not a plain shuffle) means a Top 10 drink's questions
+// come up top10Weight times as often as everything else, without risking
+// the same question twice in one quiz.
+async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new Set(), top10Weight = 1) {
   if (!targetCount || !memorizedIds.length) return []
 
   const [{ data: rows }, { data: allRows }, { data: excludedRows }, { data: sizedItemRows }] = await Promise.all([
@@ -105,8 +113,7 @@ async function buildFormulaQuestions(memorizedIds, targetCount) {
     ;(byIngredient[r.ingredient_id] ??= new Set()).add(r.quantity_text)
   })
 
-  return shuffle(candidates)
-    .slice(0, targetCount)
+  return weightedSample(candidates, (c) => (top10Ids.has(c.formula_item_id) ? top10Weight : 1), targetCount)
     .map((row) => {
       const realPool = [...(byIngredient[row.ingredient_id] ?? [])].filter((v) => v !== row.quantity_text)
       const distractors = shuffle(realPool).slice(0, 3)
@@ -213,8 +220,21 @@ async function buildQuizSet(profile, storeId) {
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
   const formulaRatio = settings?.formula_question_ratio ?? 0
 
+  // Top 10 weighting for the formula questions below is a setting shared
+  // with Formal Quiz — read from the same formal_quiz_settings row so a ⭐
+  // Top 10 drink gets boosted consistently in both quiz types, not just one.
+  let top10Ids = new Set()
+  let top10Weight = 1
   const formulaTarget = Math.round((questionCount * formulaRatio) / 100)
-  const formulaQuestions = formulaTarget > 0 ? await buildFormulaQuestions(memorizedIds, formulaTarget) : []
+  if (formulaTarget > 0) {
+    const [{ data: formalSettings }, { data: top10Rows }] = await Promise.all([
+      supabase.from('formal_quiz_settings').select('top10_fill_blank_weight').eq('store_id', storeId).maybeSingle(),
+      supabase.from('formula_items').select('id, top_10').in('id', memorizedIds),
+    ])
+    top10Weight = formalSettings?.top10_fill_blank_weight ?? 3
+    top10Ids = new Set((top10Rows ?? []).filter((r) => r.top_10).map((r) => r.id))
+  }
+  const formulaQuestions = formulaTarget > 0 ? await buildFormulaQuestions(memorizedIds, formulaTarget, top10Ids, top10Weight) : []
 
   const bankTarget = questionCount - formulaQuestions.length
   const bankQuestions = bankTarget > 0 ? await buildBankQuestions(memorizedIds, storeId, bankTarget, ratio) : []
