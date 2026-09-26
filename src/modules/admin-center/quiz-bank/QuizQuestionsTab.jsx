@@ -92,7 +92,14 @@ export default function QuizQuestionsTab() {
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {questions.map((q) => (
             <div key={q.id} className="flex items-center justify-between px-4 py-2.5">
-              <button onClick={() => setEditing(q)} className="flex-1 text-left">
+              <button onClick={() => setEditing(q)} className="flex flex-1 items-center gap-2 text-left">
+                {q.image_path && (
+                  <img
+                    src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
+                    alt=""
+                    className="h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
+                  />
+                )}
                 <span className="text-sm text-gray-800">{q.question}</span>
                 <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'} className="ml-2">
                   {TYPE_LABEL[q.question_type] ?? 'Single choice'}

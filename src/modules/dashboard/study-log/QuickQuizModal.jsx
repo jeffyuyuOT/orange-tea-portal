@@ -5,6 +5,7 @@ import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { isAnswerAccepted } from '../../../lib/answerMatching'
+import { filterVisibleForStore } from '../../../lib/storeVisibility'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -186,6 +187,23 @@ async function buildQuizSet(profile, storeId) {
   }
   if (!memorizedIds.length) return { questions: [], reason: 'no_memorized' }
 
+  // A drink this store doesn't carry (per Formula Database's own per-item
+  // store list, formula_item_stores) is dropped before anything else below
+  // — this takes priority over a quiz question's own separate store
+  // restriction (quiz_question_stores, checked further down): the Formula
+  // Database's per-drink store assignment is authoritative.
+  const { data: drinkStoreRows } = await supabase
+    .from('formula_item_stores')
+    .select('*')
+    .in('formula_item_id', memorizedIds)
+  memorizedIds = filterVisibleForStore(
+    memorizedIds.map((id) => ({ id })),
+    drinkStoreRows ?? [],
+    'formula_item_id',
+    storeId
+  ).map((i) => i.id)
+  if (!memorizedIds.length) return { questions: [], reason: 'no_questions' }
+
   const { data: settings } = await supabase.from('quiz_settings').select('*').eq('store_id', storeId).maybeSingle()
   const questionCount = settings?.question_count ?? 10
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
@@ -347,6 +365,13 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
                 <p className="mb-2 text-sm font-medium text-gray-800">
                   {idx + 1}. {q.question}
                 </p>
+                {q.image_path && (
+                  <img
+                    src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
+                    alt=""
+                    className="mb-2 max-h-48 rounded-lg border border-gray-200 object-contain"
+                  />
+                )}
                 {qType === 'fill_blank' ? (
                   <input
                     type="text"

@@ -5,6 +5,7 @@ import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { isAnswerAccepted } from '../../../lib/answerMatching'
+import { filterVisibleForStore } from '../../../lib/storeVisibility'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -13,6 +14,20 @@ function shuffle(arr) {
     ;[a[i], a[j]] = [a[j], a[i]]
   }
   return a
+}
+
+// Weighted random sampling without replacement (Efraimidis-Spirakis: each
+// item gets a random key raised to 1/weight, then take the top `count` by
+// key) — used so ⭐ Top 10 drinks show up more often in the fill-in-the-blank
+// pool (see formal_quiz_settings.top10_fill_blank_weight, migration 0046)
+// without ever risking the exact same question twice in one quiz, which a
+// simpler "duplicate the item N times before shuffling" approach could do.
+function weightedSample(items, weightOf, count) {
+  return items
+    .map((item) => ({ item, key: Math.pow(Math.random(), 1 / Math.max(weightOf(item), 0.0001)) }))
+    .sort((a, b) => b.key - a.key)
+    .slice(0, count)
+    .map((x) => x.item)
 }
 
 // Formal Quiz mixes question sources: curated Single/Multi choice and
@@ -28,13 +43,43 @@ async function buildFormalQuizSet(profileId, storeId) {
     .select('formula_item_id')
     .eq('profile_id', profileId)
     .eq('memorized', true)
-  const memorizedIds = (memorized ?? []).map((m) => m.formula_item_id)
+  let memorizedIds = (memorized ?? []).map((m) => m.formula_item_id)
   if (!memorizedIds.length) return { questions: [], reason: 'no_memorized' }
+
+  // A drink this store doesn't carry (per Formula Database's own per-item
+  // store list, formula_item_stores) is dropped before anything else below
+  // — this takes priority over a quiz question's own separate store
+  // restriction (quiz_question_stores, checked further down) and applies to
+  // BOTH the auto-generated ingredient-based fill-blank questions and the
+  // Quiz Bank questions pulled below, since both are drawn from
+  // memorizedIds: the Formula Database's per-drink store assignment is
+  // authoritative.
+  const { data: drinkStoreRows } = await supabase
+    .from('formula_item_stores')
+    .select('*')
+    .in('formula_item_id', memorizedIds)
+  memorizedIds = filterVisibleForStore(
+    memorizedIds.map((id) => ({ id })),
+    drinkStoreRows ?? [],
+    'formula_item_id',
+    storeId
+  ).map((i) => i.id)
+  if (!memorizedIds.length) return { questions: [], reason: 'no_questions' }
 
   const { data: settings } = await supabase.from('formal_quiz_settings').select('*').eq('store_id', storeId).maybeSingle()
   const questionCount = settings?.question_count ?? 30
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
   const fillBlankRatio = settings?.fill_in_blank_ratio ?? 20
+  // How many times more likely a fill-blank candidate linked to a ⭐ Top 10
+  // drink is to be picked below, versus any other memorized item (1 = no
+  // boost). See FormalQuizSettingsTab.jsx + migration 0046.
+  const top10Weight = settings?.top10_fill_blank_weight ?? 3
+
+  // Which of the memorized items are ⭐ Top 10 — used to weight both kinds
+  // of fill-blank candidate below (the auto-generated ones and any Quiz
+  // Bank fill-blank question linked to a formula item).
+  const { data: top10Rows } = await supabase.from('formula_items').select('id, top_10').in('id', memorizedIds)
+  const top10Ids = new Set((top10Rows ?? []).filter((r) => r.top_10).map((r) => r.id))
 
   // --- Fill-in-the-blank candidates: one per ingredient line that has both
   // an ingredient name and a typed quantity (a custom-image-only line with
@@ -51,6 +96,8 @@ async function buildFormalQuizSet(profileId, storeId) {
       localId: r.id,
       question: `${r.formula_items.name_en}${r.formula_items.name_zh ? ` · ${r.formula_items.name_zh}` : ''} — how much ${r.ingredient_master.name}?`,
       correctAnswer: r.quantity_text.trim(),
+      topTen: top10Ids.has(r.formula_items.id),
+      formulaItemId: r.formula_items.id,
     }))
 
   // --- Choice-type candidates (single or multi) + bank-authored fill-blank
@@ -78,6 +125,9 @@ async function buildFormalQuizSet(profileId, storeId) {
         question: q.question,
         correctAnswer: q.answer_text,
         acceptedAnswers: q.accepted_answers ?? [],
+        image_path: q.image_path,
+        topTen: top10Ids.has(q.formula_item_id),
+        formulaItemId: q.formula_item_id,
       }))
   }
 
@@ -91,27 +141,43 @@ async function buildFormalQuizSet(profileId, storeId) {
   fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
   let mcTarget = questionCount - fillBlankTarget
 
+  // Fill-blank questions are picked FIRST (not after MC, like before) so we
+  // know up front which drinks they already cover. Picked with
+  // weightedSample (not a plain shuffle) so ⭐ Top 10-linked candidates come
+  // up top10Weight times as often as everything else.
+  const fillBlankWeight = (c) => (c.topTen ? top10Weight : 1)
+  let fillBlankSelected = weightedSample(allFillBlankCandidates, fillBlankWeight, fillBlankTarget)
+
+  // A drink that already has a fill-in-the-blank question in this quiz
+  // (whether auto-generated from its recipe, or a Quiz Bank fill-blank
+  // question linked to it) is dropped from the multiple-choice pool below —
+  // Jeff asked that the same drink never gets quizzed twice, once via a
+  // fill-in-the-blank question and again via an unrelated Quiz Bank
+  // question about it.
+  const fillBlankDrinkIds = new Set(fillBlankSelected.map((c) => c.formulaItemId).filter(Boolean))
+  const mcPool = mcVisible.filter((q) => !fillBlankDrinkIds.has(q.formula_item_id))
+
   const byImportance = { 1: [], 2: [], 3: [] }
-  mcVisible.forEach((q) => byImportance[q.importance]?.push(q))
+  mcPool.forEach((q) => byImportance[q.importance]?.push(q))
   let mcSelected = []
   for (const level of [1, 2, 3]) {
     const target = Math.round((mcTarget * (ratio[level] ?? 0)) / 100)
     mcSelected.push(...shuffle(byImportance[level]).slice(0, target))
   }
   if (mcSelected.length < mcTarget) {
-    const remaining = shuffle(mcVisible.filter((q) => !mcSelected.includes(q))).slice(0, mcTarget - mcSelected.length)
+    const remaining = shuffle(mcPool.filter((q) => !mcSelected.includes(q))).slice(0, mcTarget - mcSelected.length)
     mcSelected.push(...remaining)
   }
   mcSelected = mcSelected.slice(0, mcTarget)
 
-  // If there weren't enough MC questions to fill mcTarget, top the quiz up
+  // If there weren't enough MC questions to fill mcTarget (which is more
+  // likely now that mcPool is narrower than mcVisible), top the quiz up
   // with more fill-blank candidates instead (and vice versa isn't needed —
   // fillBlankTarget was already capped to what's available above).
-  let fillBlankSelected = shuffle(allFillBlankCandidates).slice(0, fillBlankTarget)
   const shortfall = questionCount - mcSelected.length - fillBlankSelected.length
   if (shortfall > 0) {
     const usedIds = new Set(fillBlankSelected.map((f) => f.localId))
-    const extra = shuffle(allFillBlankCandidates.filter((f) => !usedIds.has(f.localId))).slice(0, shortfall)
+    const extra = weightedSample(allFillBlankCandidates.filter((f) => !usedIds.has(f.localId)), fillBlankWeight, shortfall)
     fillBlankSelected = [...fillBlankSelected, ...extra]
   }
 
@@ -214,6 +280,13 @@ export default function FormalQuizModal({ onClose }) {
               <p className="mb-2 text-sm font-medium text-gray-800">
                 {idx + 1}. {q.question}
               </p>
+              {q.image_path && (
+                <img
+                  src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
+                  alt=""
+                  className="mb-2 max-h-48 rounded-lg border border-gray-200 object-contain"
+                />
+              )}
               {q.type === 'choice' || q.type === 'multi' ? (
                 <div className="space-y-1.5">
                   {(q.choices ?? []).map((c) => {

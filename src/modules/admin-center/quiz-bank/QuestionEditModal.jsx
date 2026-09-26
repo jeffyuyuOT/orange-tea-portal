@@ -3,8 +3,16 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import QuizImagePicker from './QuizImagePicker'
 
 const CHOICE_KEYS = ['A', 'B', 'C', 'D']
+
+// Fixed id seeded by migration 0045 — so a brand new image uploaded from
+// here files straight into File Repository under its own category (kept
+// separate from TFN/Super forms etc.) without needing a category picker,
+// and can then be reused by any other question via "Choose from File
+// Repository" instead of being uploaded again.
+const QUIZ_IMAGE_CATEGORY_ID = '00000000-0000-0000-0000-000000000007'
 
 export default function QuestionEditModal({ question, groupKey, categoryId, onClose, onSaved }) {
   const { profile, accessibleStores } = useAuth()
@@ -29,7 +37,33 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
   const [acceptedAnswers, setAcceptedAnswers] = useState(question.accepted_answers?.length ? question.accepted_answers : [])
   const [importance, setImportance] = useState(question.importance ?? 2)
   const [storeIds, setStoreIds] = useState(null)
+  const [imagePath, setImagePath] = useState(question.image_path ?? '')
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [pickingImage, setPickingImage] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // Shared with File Repository rather than a quiz-only upload, so the same
+  // picture (e.g. a drink photo used by several questions) is only ever
+  // stored once — see FileRepositoryPage.jsx's upload() for the pattern
+  // this mirrors.
+  async function uploadImage(file) {
+    setUploadingImage(true)
+    const path = `repository/${QUIZ_IMAGE_CATEGORY_ID}/${Date.now()}-${file.name}`
+    const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+    if (!error) {
+      await supabase.from('file_repository').insert({
+        category_id: QUIZ_IMAGE_CATEGORY_ID,
+        display_name: file.name,
+        file_path: path,
+        uploaded_by: profile.id,
+        uploaded_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
+      })
+      setImagePath(path)
+    } else {
+      alert(error.message)
+    }
+    setUploadingImage(false)
+  }
 
   useEffect(() => {
     if (groupKey === 'shop_training') {
@@ -77,6 +111,7 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
         answer_text: questionType === 'fill_blank' ? answerText.trim() : null,
         accepted_answers: questionType === 'fill_blank' ? acceptedAnswers.map((a) => a.trim()).filter(Boolean) : null,
         importance,
+        image_path: imagePath || null,
       }
       let id = question.id
       if (isNew) {
@@ -108,6 +143,7 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
   }
 
   return (
+    <>
     <Modal
       open
       onClose={onClose}
@@ -146,6 +182,39 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
           <span className="mb-1 block text-xs font-medium text-gray-500">Question</span>
           <textarea className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
+
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">Question image (optional)</span>
+          <div className="flex items-center gap-3">
+            {imagePath && (
+              <img
+                src={supabase.storage.from('documents').getPublicUrl(imagePath).data.publicUrl}
+                alt=""
+                className="h-16 w-16 rounded-lg border border-gray-200 object-contain"
+              />
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => setPickingImage(true)}>
+                Choose from File Repository
+              </Button>
+              <label className="cursor-pointer rounded-lg border border-brand-300 px-3.5 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50">
+                {uploadingImage ? 'Uploading…' : 'Upload new image'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={uploadingImage}
+                  onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
+                />
+              </label>
+              {imagePath && (
+                <button onClick={() => setImagePath('')} className="text-sm text-gray-400 hover:text-red-500">
+                  Remove image
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
 
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Question type</span>
@@ -250,5 +319,15 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
         </div>
       </div>
     </Modal>
+    {pickingImage && (
+      <QuizImagePicker
+        onSelect={(path) => {
+          setImagePath(path)
+          setPickingImage(false)
+        }}
+        onClose={() => setPickingImage(false)}
+      />
+    )}
+    </>
   )
 }

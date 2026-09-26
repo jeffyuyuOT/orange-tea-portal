@@ -149,7 +149,7 @@ function AttemptDetailModal({ attempt, onClose }) {
   useEffect(() => {
     supabase
       .from('quiz_attempt_answers')
-      .select('*, quiz_questions(question, correct_choice, correct_choices, choices)')
+      .select('*, quiz_questions(question, correct_choice, correct_choices, choices, image_path)')
       .eq('attempt_id', attempt.id)
       .then(({ data }) => setRows(data ?? []))
   }, [attempt.id])
@@ -177,6 +177,13 @@ function AttemptDetailModal({ attempt, onClose }) {
             ) : r.question_type === 'multi' ? (
               <>
                 <p className="font-medium text-gray-800">{r.quiz_questions?.question}</p>
+                {r.quiz_questions?.image_path && (
+                  <img
+                    src={supabase.storage.from('documents').getPublicUrl(r.quiz_questions.image_path).data.publicUrl}
+                    alt=""
+                    className="my-1 max-h-32 rounded-lg border border-gray-200 object-contain"
+                  />
+                )}
                 <p className="text-xs text-gray-500">
                   Selected: {formatChoiceKeys(r.selected_choices)} · Correct: {formatChoiceKeys(r.quiz_questions?.correct_choices)}
                 </p>
@@ -184,6 +191,13 @@ function AttemptDetailModal({ attempt, onClose }) {
             ) : (
               <>
                 <p className="font-medium text-gray-800">{r.quiz_questions?.question}</p>
+                {r.quiz_questions?.image_path && (
+                  <img
+                    src={supabase.storage.from('documents').getPublicUrl(r.quiz_questions.image_path).data.publicUrl}
+                    alt=""
+                    className="my-1 max-h-32 rounded-lg border border-gray-200 object-contain"
+                  />
+                )}
                 <p className="text-xs text-gray-500">
                   Selected: {r.selected_choice ?? '—'} · Correct: {r.quiz_questions?.correct_choice}
                 </p>
