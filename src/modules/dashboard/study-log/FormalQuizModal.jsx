@@ -208,11 +208,27 @@ export default function FormalQuizModal({ onClose }) {
   async function submit() {
     setSubmitting(true)
     let correct = 0
+    // Every branch returns the same full set of keys (see the matching
+    // comment in QuickQuizModal.jsx's submit()) so a future NOT NULL column
+    // can never silently fail the whole bulk insert just because one
+    // question type's row happens to omit a key another type's row sets —
+    // PostgREST fills a row's missing key with NULL, not the column
+    // default, when any other row in the same batch has that key.
+    const BLANK_ANSWER_ROW = {
+      question_id: null,
+      question_type: 'choice',
+      selected_choice: null,
+      selected_choices: null,
+      question_text: null,
+      correct_answer_text: null,
+      answer_text: null,
+      is_correct: false,
+    }
     const answerRows = questions.map((q) => {
       if (q.type === 'choice') {
         const isCorrect = answers[q.localId] === q.correct_choice
         if (isCorrect) correct += 1
-        return { question_id: q.id, question_type: 'choice', selected_choice: answers[q.localId] ?? null, is_correct: isCorrect }
+        return { ...BLANK_ANSWER_ROW, question_id: q.id, question_type: 'choice', selected_choice: answers[q.localId] ?? null, is_correct: isCorrect }
       }
       if (q.type === 'multi') {
         const selected = answers[q.localId] ?? []
@@ -220,12 +236,13 @@ export default function FormalQuizModal({ onClose }) {
         const selectedSet = new Set(selected)
         const isCorrect = correctSet.size === selectedSet.size && [...correctSet].every((c) => selectedSet.has(c))
         if (isCorrect) correct += 1
-        return { question_id: q.id, question_type: 'multi', selected_choices: selected, is_correct: isCorrect }
+        return { ...BLANK_ANSWER_ROW, question_id: q.id, question_type: 'multi', selected_choices: selected, is_correct: isCorrect }
       }
       const typed = answers[q.localId] ?? ''
       const isCorrect = isAnswerAccepted(typed, q.correctAnswer, q.acceptedAnswers)
       if (isCorrect) correct += 1
       return {
+        ...BLANK_ANSWER_ROW,
         question_id: q.id ?? null,
         question_type: 'fill_blank',
         question_text: q.question,
