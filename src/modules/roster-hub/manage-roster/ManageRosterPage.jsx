@@ -54,6 +54,36 @@ export default function ManageRosterPage() {
     return () => document.removeEventListener('click', handleOutsideClick)
   }, [actionMenuOpen])
 
+  // Staff/Pending-staff ids hidden from THIS week's grid — RosterEntryGrid's
+  // ✕ button (`removeRow`) already clears a staff/pending row's hours and
+  // calls `onHideStaff`, but this page never passed that prop (nor
+  // `hiddenStaff`/`onRestoreStaff`), so the call silently did nothing and
+  // the row just came right back on the next render, still listed with its
+  // hours blanked out — looking exactly like "can't delete this person".
+  // This is scoped to the currently-selected week only (reset whenever
+  // `weekStart` changes, including via "Load period" from History) — it
+  // doesn't persist once you leave/reopen this page, so reopening the same
+  // saved week later still starts from the full current staff list, same
+  // as before.
+  const [hiddenStaffIds, setHiddenStaffIds] = useState(new Set())
+  useEffect(() => {
+    setHiddenStaffIds(new Set())
+  }, [weekStart])
+
+  function hideStaffRow(row) {
+    const id = row.profileId || row.pendingId
+    if (!id) return
+    setHiddenStaffIds((prev) => new Set(prev).add(id))
+  }
+
+  function restoreStaffRow(h) {
+    setHiddenStaffIds((prev) => {
+      const next = new Set(prev)
+      next.delete(h.id)
+      return next
+    })
+  }
+
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
 
   // Default: the week after the most recently saved period for this store.
@@ -429,7 +459,19 @@ export default function ManageRosterPage() {
         </div>
       </div>
 
-      <RosterEntryGrid staff={staff} pendingStaff={pendingStaff} weekDates={weekDates} entries={entries} setEntries={setEntries} />
+      <RosterEntryGrid
+        staff={staff.filter((s) => !hiddenStaffIds.has(s.id))}
+        pendingStaff={pendingStaff.filter((p) => !hiddenStaffIds.has(p.id))}
+        weekDates={weekDates}
+        entries={entries}
+        setEntries={setEntries}
+        hiddenStaff={[
+          ...staff.filter((s) => hiddenStaffIds.has(s.id)).map((s) => ({ id: s.id, name: rosterDisplayName(s) })),
+          ...pendingStaff.filter((p) => hiddenStaffIds.has(p.id)).map((p) => ({ id: p.id, name: pendingRosterName(p) })),
+        ]}
+        onHideStaff={hideStaffRow}
+        onRestoreStaff={restoreStaffRow}
+      />
       <UnderstaffedWarnings entries={entries} rules={rules} />
 
       <label className="mt-4 block">
