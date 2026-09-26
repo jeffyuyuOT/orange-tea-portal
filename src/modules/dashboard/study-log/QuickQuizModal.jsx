@@ -4,6 +4,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { isAnswerAccepted } from '../../../lib/answerMatching'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -237,6 +238,34 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
     setSubmitting(true)
     let correct = 0
     const answerRows = questions.map((q) => {
+      // Every auto-generated "formula" question is single-choice (see
+      // buildFormulaQuestions) — only a curated Quiz Bank question can be
+      // 'multi' or 'fill_blank'.
+      const qType = q.question_type ?? 'single'
+
+      if (qType === 'multi') {
+        const selected = answers[q.id] ?? []
+        const correctSet = new Set(q.correct_choices ?? [])
+        const selectedSet = new Set(selected)
+        const isCorrect = correctSet.size === selectedSet.size && [...correctSet].every((k) => selectedSet.has(k))
+        if (isCorrect) correct += 1
+        return { question_id: q.id, question_type: 'multi', selected_choices: selected, is_correct: isCorrect }
+      }
+
+      if (qType === 'fill_blank') {
+        const typed = answers[q.id] ?? ''
+        const isCorrect = isAnswerAccepted(typed, q.answer_text, q.accepted_answers)
+        if (isCorrect) correct += 1
+        return {
+          question_id: q.id,
+          question_type: 'fill_blank',
+          question_text: q.question,
+          correct_answer_text: q.answer_text,
+          answer_text: typed,
+          is_correct: isCorrect,
+        }
+      }
+
       const isCorrect = answers[q.id] === q.correct_choice
       if (isCorrect) correct += 1
       // Generated questions have no quiz_questions row to reference, so they
@@ -245,6 +274,7 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
       return q.isGenerated
         ? {
             question_id: null,
+            question_type: 'choice',
             selected_choice: answers[q.id] ?? null,
             is_correct: isCorrect,
             is_generated: true,
@@ -252,7 +282,7 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
             generated_choices: q.choices,
             generated_correct_choice: q.correct_choice,
           }
-        : { question_id: q.id, selected_choice: answers[q.id] ?? null, is_correct: isCorrect }
+        : { question_id: q.id, question_type: 'choice', selected_choice: answers[q.id] ?? null, is_correct: isCorrect }
     })
     const { data: attempt } = await supabase
       .from('quiz_attempts')
@@ -310,31 +340,56 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
         </div>
       ) : (
         <div className="space-y-5">
-          {questions.map((q, idx) => (
-            <div key={q.id}>
-              <p className="mb-2 text-sm font-medium text-gray-800">
-                {idx + 1}. {q.question}
-              </p>
-              <div className="space-y-1.5">
-                {(q.choices ?? []).map((c) => (
-                  <label
-                    key={c.key}
-                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
-                      answers[q.id] === c.key ? 'border-brand-400 bg-brand-50' : 'border-gray-200'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name={q.id}
-                      checked={answers[q.id] === c.key}
-                      onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: c.key }))}
-                    />
-                    {c.text}
-                  </label>
-                ))}
+          {questions.map((q, idx) => {
+            const qType = q.question_type ?? 'single'
+            return (
+              <div key={q.id}>
+                <p className="mb-2 text-sm font-medium text-gray-800">
+                  {idx + 1}. {q.question}
+                </p>
+                {qType === 'fill_blank' ? (
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Type your answer…"
+                    value={answers[q.id] ?? ''}
+                    onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                  />
+                ) : (
+                  <div className="space-y-1.5">
+                    {(q.choices ?? []).map((c) => {
+                      const checked = qType === 'multi' ? (answers[q.id] ?? []).includes(c.key) : answers[q.id] === c.key
+                      return (
+                        <label
+                          key={c.key}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
+                            checked ? 'border-brand-400 bg-brand-50' : 'border-gray-200'
+                          }`}
+                        >
+                          <input
+                            type={qType === 'multi' ? 'checkbox' : 'radio'}
+                            name={qType === 'multi' ? undefined : q.id}
+                            checked={checked}
+                            onChange={(e) =>
+                              setAnswers((prev) => {
+                                if (qType !== 'multi') return { ...prev, [q.id]: c.key }
+                                const current = prev[q.id] ?? []
+                                return {
+                                  ...prev,
+                                  [q.id]: e.target.checked ? [...current, c.key] : current.filter((k) => k !== c.key),
+                                }
+                              })
+                            }
+                          />
+                          {c.text}
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
           <Button onClick={submit} disabled={submitting} className="w-full">
             {submitting ? 'Submitting…' : 'Submit Quiz'}
           </Button>

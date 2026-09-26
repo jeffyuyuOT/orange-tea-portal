@@ -12,10 +12,21 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
   const [items, setItems] = useState([]) // formula_items or shop_training_items to link to
   const [linkedId, setLinkedId] = useState(question.formula_item_id ?? question.shop_training_item_id ?? '')
   const [text, setText] = useState(question.question ?? '')
+  // 'single' (one correct choice, the original/only kind before this),
+  // 'multi' (more than one correct choice), or 'fill_blank' (typed answer,
+  // graded with typo/abbreviation tolerance — see src/lib/answerMatching.js).
+  const [questionType, setQuestionType] = useState(question.question_type ?? 'single')
   const [choices, setChoices] = useState(
     question.choices?.length ? question.choices : CHOICE_KEYS.map((k) => ({ key: k, text: '' }))
   )
-  const [correct, setCorrect] = useState(question.correct_choice ?? 'A')
+  const [correct, setCorrect] = useState(question.correct_choice ?? 'A') // 'single'
+  const [correctChoices, setCorrectChoices] = useState(question.correct_choices ?? []) // 'multi'
+  const [answerText, setAnswerText] = useState(question.answer_text ?? '') // 'fill_blank'
+  // Extra accepted answers for the same fill-blank question — an
+  // abbreviation or alternate name that means the same thing (e.g. "OT"
+  // for "Orange Tea"). Kept as a list of plain text inputs the admin can
+  // add/remove, same idea as Leave Limits' custom-period rows.
+  const [acceptedAnswers, setAcceptedAnswers] = useState(question.accepted_answers?.length ? question.accepted_answers : [])
   const [importance, setImportance] = useState(question.importance ?? 2)
   const [storeIds, setStoreIds] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -43,6 +54,10 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
       .then(({ data }) => setStoreIds(data?.length ? data.map((r) => r.store_id) : null))
   }, [question.id])
 
+  function toggleCorrectChoice(key) {
+    setCorrectChoices((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
+  }
+
   async function save() {
     setSaving(true)
     try {
@@ -52,8 +67,15 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
         formula_item_id: groupKey === 'shop_training' ? null : linkedId || null,
         shop_training_item_id: groupKey === 'shop_training' ? linkedId || null : null,
         question: text,
-        choices,
-        correct_choice: correct,
+        question_type: questionType,
+        // Only the fields the chosen type actually uses are set — the rest
+        // stay null, which is what the DB's quiz_questions_type_fields_chk
+        // constraint expects (see migration 0043).
+        choices: questionType === 'fill_blank' ? [] : choices,
+        correct_choice: questionType === 'single' ? correct : null,
+        correct_choices: questionType === 'multi' ? correctChoices : null,
+        answer_text: questionType === 'fill_blank' ? answerText.trim() : null,
+        accepted_answers: questionType === 'fill_blank' ? acceptedAnswers.map((a) => a.trim()).filter(Boolean) : null,
         importance,
       }
       let id = question.id
@@ -92,7 +114,15 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
       wide
       title={isNew ? 'New Quiz Question' : 'Edit Quiz Question'}
       footer={
-        <Button onClick={save} disabled={saving || !text}>
+        <Button
+          onClick={save}
+          disabled={
+            saving ||
+            !text ||
+            (questionType === 'multi' && !correctChoices.length) ||
+            (questionType === 'fill_blank' && !answerText.trim())
+          }
+        >
           {saving ? 'Saving…' : 'Save'}
         </Button>
       }
@@ -117,22 +147,76 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
           <textarea className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
 
-        <div>
-          <span className="mb-1 block text-xs font-medium text-gray-500">Choices (mark the correct one)</span>
-          <div className="space-y-1.5">
-            {choices.map((c, idx) => (
-              <div key={c.key} className="flex items-center gap-2">
-                <input type="radio" checked={correct === c.key} onChange={() => setCorrect(c.key)} />
-                <span className="w-5 text-sm font-medium text-gray-500">{c.key}</span>
-                <input
-                  className="input"
-                  value={c.text}
-                  onChange={(e) => setChoices((prev) => prev.map((x, i) => (i === idx ? { ...x, text: e.target.value } : x)))}
-                />
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Question type</span>
+          <select className="input max-w-xs" value={questionType} onChange={(e) => setQuestionType(e.target.value)}>
+            <option value="single">Single choice — one correct answer</option>
+            <option value="multi">Multiple choice — more than one correct answer</option>
+            <option value="fill_blank">Fill in the blank — typed answer</option>
+          </select>
+        </label>
+
+        {questionType === 'fill_blank' ? (
+          <div className="space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Correct answer</span>
+              <input className="input" value={answerText} onChange={(e) => setAnswerText(e.target.value)} />
+            </label>
+            <div>
+              <span className="mb-1 block text-xs font-medium text-gray-500">
+                Accepted alternate answers (optional) — an abbreviation or alternate name that means the same thing,
+                e.g. "OT" for "Orange Tea". Minor typos/spacing differences from any of these are accepted
+                automatically; this list is only for answers that are genuinely worded differently.
+              </span>
+              <div className="space-y-1.5">
+                {acceptedAnswers.map((a, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      className="input"
+                      value={a}
+                      onChange={(e) => setAcceptedAnswers((prev) => prev.map((x, i) => (i === idx ? e.target.value : x)))}
+                    />
+                    <button
+                      onClick={() => setAcceptedAnswers((prev) => prev.filter((_, i) => i !== idx))}
+                      className="shrink-0 text-gray-400 hover:text-red-500"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+              <button
+                onClick={() => setAcceptedAnswers((prev) => [...prev, ''])}
+                className="mt-1.5 text-xs font-medium text-brand-600 hover:underline"
+              >
+                + Add alternate answer
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div>
+            <span className="mb-1 block text-xs font-medium text-gray-500">
+              {questionType === 'multi' ? 'Choices (check every correct answer)' : 'Choices (mark the correct one)'}
+            </span>
+            <div className="space-y-1.5">
+              {choices.map((c, idx) => (
+                <div key={c.key} className="flex items-center gap-2">
+                  {questionType === 'multi' ? (
+                    <input type="checkbox" checked={correctChoices.includes(c.key)} onChange={() => toggleCorrectChoice(c.key)} />
+                  ) : (
+                    <input type="radio" checked={correct === c.key} onChange={() => setCorrect(c.key)} />
+                  )}
+                  <span className="w-5 text-sm font-medium text-gray-500">{c.key}</span>
+                  <input
+                    className="input"
+                    value={c.text}
+                    onChange={(e) => setChoices((prev) => prev.map((x, i) => (i === idx ? { ...x, text: e.target.value } : x)))}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block">

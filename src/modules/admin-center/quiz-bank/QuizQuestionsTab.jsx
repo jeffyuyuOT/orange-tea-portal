@@ -5,6 +5,8 @@ import Badge from '../../../components/ui/Badge'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import QuestionEditModal from './QuestionEditModal'
 
+const TYPE_LABEL = { single: 'Single choice', multi: 'Multi choice', fill_blank: 'Fill in the blank' }
+
 const GROUPS = [
   { key: 'drink', label: 'Drink' },
   { key: 'tea', label: 'Tea' },
@@ -92,7 +94,10 @@ export default function QuizQuestionsTab() {
             <div key={q.id} className="flex items-center justify-between px-4 py-2.5">
               <button onClick={() => setEditing(q)} className="flex-1 text-left">
                 <span className="text-sm text-gray-800">{q.question}</span>
-                <Badge color="gray" className="ml-2">
+                <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'} className="ml-2">
+                  {TYPE_LABEL[q.question_type] ?? 'Single choice'}
+                </Badge>
+                <Badge color="gray" className="ml-1">
                   Importance {q.importance}
                 </Badge>
               </button>

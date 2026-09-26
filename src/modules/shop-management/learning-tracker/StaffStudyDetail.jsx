@@ -11,6 +11,12 @@ import { rosterDisplayName } from '../../../lib/excelRoster'
 
 const QUIZ_TYPE_LABEL = { quick: 'Quick Quiz', formal: 'Formal Quiz' }
 
+// Multi-choice review just shows the answer keys picked (e.g. "A, C"), same
+// as single-choice review shows the one key — no need to look up choice text.
+function formatChoiceKeys(keys) {
+  return keys && keys.length ? keys.join(', ') : '—'
+}
+
 export default function StaffStudyDetail({ staff, onBack }) {
   const { profile } = useAuth()
   const [tab, setTab] = useState('progress')
@@ -143,7 +149,7 @@ function AttemptDetailModal({ attempt, onClose }) {
   useEffect(() => {
     supabase
       .from('quiz_attempt_answers')
-      .select('*, quiz_questions(question, correct_choice, choices)')
+      .select('*, quiz_questions(question, correct_choice, correct_choices, choices)')
       .eq('attempt_id', attempt.id)
       .then(({ data }) => setRows(data ?? []))
   }, [attempt.id])
@@ -166,6 +172,13 @@ function AttemptDetailModal({ attempt, onClose }) {
                 <p className="font-medium text-gray-800">{r.question_text}</p>
                 <p className="text-xs text-gray-500">
                   Answered: {r.answer_text || '—'} · Correct: {r.correct_answer_text}
+                </p>
+              </>
+            ) : r.question_type === 'multi' ? (
+              <>
+                <p className="font-medium text-gray-800">{r.quiz_questions?.question}</p>
+                <p className="text-xs text-gray-500">
+                  Selected: {formatChoiceKeys(r.selected_choices)} · Correct: {formatChoiceKeys(r.quiz_questions?.correct_choices)}
                 </p>
               </>
             ) : (

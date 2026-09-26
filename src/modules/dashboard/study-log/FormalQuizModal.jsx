@@ -4,6 +4,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { isAnswerAccepted } from '../../../lib/answerMatching'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -14,19 +15,13 @@ function shuffle(arr) {
   return a
 }
 
-// Loose match for fill-in-the-blank answers: quantity_text is free text
-// typed by an admin in Formula Database (e.g. "30g", "2 pumps"), so an
-// exact-string requirement would fail a correct answer typed with
-// different spacing/case ("30 G" vs "30g"). Trim + lowercase + collapse
-// whitespace before comparing.
-function normalizeAnswer(s) {
-  return (s ?? '').toString().trim().toLowerCase().replace(/\s+/g, '')
-}
-
-// Formal Quiz mixes two question sources: curated multiple-choice from the
-// Quiz Bank (same pool Quick Quiz draws from) plus fill-in-the-blank
-// questions generated on the fly from Formula Database recipes
-// (formula_item_ingredients) — no separate authoring needed for those.
+// Formal Quiz mixes question sources: curated Single/Multi choice and
+// Fill-in-the-blank questions from the Quiz Bank (same pool Quick Quiz
+// draws from), plus fill-in-the-blank questions generated on the fly from
+// Formula Database recipes (formula_item_ingredients) — no separate
+// authoring needed for those. Both kinds of fill-blank question are pooled
+// together below and graded the same lenient way — see
+// src/lib/answerMatching.js.
 async function buildFormalQuizSet(profileId, storeId) {
   const { data: memorized } = await supabase
     .from('study_progress')
@@ -58,23 +53,42 @@ async function buildFormalQuizSet(profileId, storeId) {
       correctAnswer: r.quantity_text.trim(),
     }))
 
-  // --- Multiple-choice candidates: same source/filtering as Quick Quiz. ---
+  // --- Choice-type candidates (single or multi) + bank-authored fill-blank
+  // candidates: same source/filtering as Quick Quiz, split by question_type.
+  // A question authored as 'single' renders/grades as the original 'choice'
+  // type; 'multi' and 'fill_blank' are new. ---
   const { data: candidateQuestions } = await supabase.from('quiz_questions').select('*').in('formula_item_id', memorizedIds)
   let mcVisible = []
+  let bankFillBlankVisible = []
   if (candidateQuestions?.length) {
     const ids = candidateQuestions.map((q) => q.id)
     const { data: restrictionRows } = await supabase.from('quiz_question_stores').select('*').in('question_id', ids)
     const restrictedIds = new Set((restrictionRows ?? []).map((r) => r.question_id))
     const allowedPairs = new Set((restrictionRows ?? []).map((r) => `${r.question_id}:${r.store_id}`))
-    mcVisible = candidateQuestions
-      .filter((q) => !restrictedIds.has(q.id) || allowedPairs.has(`${q.id}:${storeId}`))
-      .map((q) => ({ type: 'choice', localId: q.id, ...q }))
+    const visible = candidateQuestions.filter((q) => !restrictedIds.has(q.id) || allowedPairs.has(`${q.id}:${storeId}`))
+    mcVisible = visible
+      .filter((q) => (q.question_type ?? 'single') !== 'fill_blank')
+      .map((q) => ({ type: q.question_type === 'multi' ? 'multi' : 'choice', localId: q.id, ...q }))
+    bankFillBlankVisible = visible
+      .filter((q) => q.question_type === 'fill_blank')
+      .map((q) => ({
+        type: 'fill_blank',
+        localId: q.id,
+        id: q.id,
+        question: q.question,
+        correctAnswer: q.answer_text,
+        acceptedAnswers: q.accepted_answers ?? [],
+      }))
   }
 
-  if (!fillBlankCandidates.length && !mcVisible.length) return { questions: [], reason: 'no_questions' }
+  // Bank-authored fill-blank questions are pooled together with the
+  // auto-generated "ingredient quantity" ones — both graded the same way.
+  const allFillBlankCandidates = [...fillBlankCandidates, ...bankFillBlankVisible]
+
+  if (!allFillBlankCandidates.length && !mcVisible.length) return { questions: [], reason: 'no_questions' }
 
   let fillBlankTarget = Math.round((questionCount * fillBlankRatio) / 100)
-  fillBlankTarget = Math.min(fillBlankTarget, fillBlankCandidates.length)
+  fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
   let mcTarget = questionCount - fillBlankTarget
 
   const byImportance = { 1: [], 2: [], 3: [] }
@@ -93,11 +107,11 @@ async function buildFormalQuizSet(profileId, storeId) {
   // If there weren't enough MC questions to fill mcTarget, top the quiz up
   // with more fill-blank candidates instead (and vice versa isn't needed —
   // fillBlankTarget was already capped to what's available above).
-  let fillBlankSelected = shuffle(fillBlankCandidates).slice(0, fillBlankTarget)
+  let fillBlankSelected = shuffle(allFillBlankCandidates).slice(0, fillBlankTarget)
   const shortfall = questionCount - mcSelected.length - fillBlankSelected.length
   if (shortfall > 0) {
     const usedIds = new Set(fillBlankSelected.map((f) => f.localId))
-    const extra = shuffle(fillBlankCandidates.filter((f) => !usedIds.has(f.localId))).slice(0, shortfall)
+    const extra = shuffle(allFillBlankCandidates.filter((f) => !usedIds.has(f.localId))).slice(0, shortfall)
     fillBlankSelected = [...fillBlankSelected, ...extra]
   }
 
@@ -131,11 +145,19 @@ export default function FormalQuizModal({ onClose }) {
         if (isCorrect) correct += 1
         return { question_id: q.id, question_type: 'choice', selected_choice: answers[q.localId] ?? null, is_correct: isCorrect }
       }
+      if (q.type === 'multi') {
+        const selected = answers[q.localId] ?? []
+        const correctSet = new Set(q.correct_choices ?? [])
+        const selectedSet = new Set(selected)
+        const isCorrect = correctSet.size === selectedSet.size && [...correctSet].every((c) => selectedSet.has(c))
+        if (isCorrect) correct += 1
+        return { question_id: q.id, question_type: 'multi', selected_choices: selected, is_correct: isCorrect }
+      }
       const typed = answers[q.localId] ?? ''
-      const isCorrect = !!typed && normalizeAnswer(typed) === normalizeAnswer(q.correctAnswer)
+      const isCorrect = isAnswerAccepted(typed, q.correctAnswer, q.acceptedAnswers)
       if (isCorrect) correct += 1
       return {
-        question_id: null,
+        question_id: q.id ?? null,
         question_type: 'fill_blank',
         question_text: q.question,
         correct_answer_text: q.correctAnswer,
@@ -192,30 +214,46 @@ export default function FormalQuizModal({ onClose }) {
               <p className="mb-2 text-sm font-medium text-gray-800">
                 {idx + 1}. {q.question}
               </p>
-              {q.type === 'choice' ? (
+              {q.type === 'choice' || q.type === 'multi' ? (
                 <div className="space-y-1.5">
-                  {(q.choices ?? []).map((c) => (
-                    <label
-                      key={c.key}
-                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
-                        answers[q.localId] === c.key ? 'border-brand-400 bg-brand-50' : 'border-gray-200'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={q.localId}
-                        checked={answers[q.localId] === c.key}
-                        onChange={() => setAnswers((prev) => ({ ...prev, [q.localId]: c.key }))}
-                      />
-                      {c.text}
-                    </label>
-                  ))}
+                  {(q.choices ?? []).map((c) => {
+                    const isMulti = q.type === 'multi'
+                    const checked = isMulti ? (answers[q.localId] ?? []).includes(c.key) : answers[q.localId] === c.key
+                    return (
+                      <label
+                        key={c.key}
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
+                          checked ? 'border-brand-400 bg-brand-50' : 'border-gray-200'
+                        }`}
+                      >
+                        <input
+                          type={isMulti ? 'checkbox' : 'radio'}
+                          name={q.localId}
+                          checked={checked}
+                          onChange={() => {
+                            if (isMulti) {
+                              setAnswers((prev) => {
+                                const current = prev[q.localId] ?? []
+                                const next = current.includes(c.key)
+                                  ? current.filter((k) => k !== c.key)
+                                  : [...current, c.key]
+                                return { ...prev, [q.localId]: next }
+                              })
+                            } else {
+                              setAnswers((prev) => ({ ...prev, [q.localId]: c.key }))
+                            }
+                          }}
+                        />
+                        {c.text}
+                      </label>
+                    )
+                  })}
                 </div>
               ) : (
                 <input
                   type="text"
                   className="input"
-                  placeholder="Type the amount…"
+                  placeholder="Type your answer…"
                   value={answers[q.localId] ?? ''}
                   onChange={(e) => setAnswers((prev) => ({ ...prev, [q.localId]: e.target.value }))}
                 />
