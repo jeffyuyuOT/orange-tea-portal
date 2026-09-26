@@ -2,10 +2,33 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import Modal from '../../../components/ui/Modal'
 
-// Multi-choice review just shows the answer keys picked (e.g. "A, C"), same
-// as single-choice review shows the one key — no need to look up choice text.
-function formatChoiceKeys(keys) {
-  return keys && keys.length ? keys.join(', ') : '—'
+// Full option list for a 'choice' or 'multi' question — every A/B/C/D with
+// its actual text (not just the letter), so the review reads like the quiz
+// itself instead of a bare "Selected: A · Correct: B". Each row is tagged
+// with what the person picked vs. what was actually correct.
+function ChoiceOptionsList({ choices, selectedKeys, correctKeys }) {
+  if (!choices || !choices.length) return null
+  return (
+    <ul className="mt-1.5 space-y-1">
+      {choices.map((c) => {
+        const isSelected = selectedKeys.includes(c.key)
+        const isCorrect = correctKeys.includes(c.key)
+        return (
+          <li
+            key={c.key}
+            className={`flex items-start gap-1.5 rounded-md px-2 py-1 text-xs ${
+              isCorrect ? 'bg-green-100 text-green-800' : isSelected ? 'bg-red-100 text-red-700' : 'bg-white text-gray-600'
+            }`}
+          >
+            <span className="font-semibold">{c.key}.</span>
+            <span className="flex-1">{c.text}</span>
+            {isCorrect && <span className="shrink-0 font-medium">✓{isSelected ? ' your answer' : ''}</span>}
+            {isSelected && !isCorrect && <span className="shrink-0 font-medium">✕ your answer</span>}
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 // One quiz attempt's full breakdown — every question asked, what the
@@ -86,10 +109,11 @@ export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) 
                       className="my-1 max-h-32 rounded-lg border border-gray-200 object-contain"
                     />
                   )}
-                  <p className="text-xs text-gray-500">
-                    Selected: {formatChoiceKeys(r.selected_choices)} · Correct: {formatChoiceKeys(r.quiz_questions?.correct_choices)}
-                    {!r.is_correct && <span className="ml-1.5 font-medium text-red-500">✕ wrong</span>}
-                  </p>
+                  <ChoiceOptionsList
+                    choices={r.quiz_questions?.choices}
+                    selectedKeys={r.selected_choices ?? []}
+                    correctKeys={r.quiz_questions?.correct_choices ?? []}
+                  />
                 </>
               ) : (
                 <>
@@ -104,10 +128,15 @@ export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) 
                       className="my-1 max-h-32 rounded-lg border border-gray-200 object-contain"
                     />
                   )}
-                  <p className="text-xs text-gray-500">
-                    Selected: {r.selected_choice ?? '—'} · Correct: {r.quiz_questions?.correct_choice ?? r.generated_correct_choice}
-                    {!r.is_correct && <span className="ml-1.5 font-medium text-red-500">✕ wrong</span>}
-                  </p>
+                  <ChoiceOptionsList
+                    choices={r.quiz_questions?.choices ?? r.generated_choices}
+                    selectedKeys={r.selected_choice ? [r.selected_choice] : []}
+                    correctKeys={
+                      r.quiz_questions?.correct_choice ?? r.generated_correct_choice
+                        ? [r.quiz_questions?.correct_choice ?? r.generated_correct_choice]
+                        : []
+                    }
+                  />
                 </>
               )}
             </li>
