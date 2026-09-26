@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
+import { useAuth } from '../../../lib/AuthContext'
+import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Button from '../../../components/ui/Button'
 import FormulaItemDetail from '../../operations-training/formula/FormulaItemDetail'
@@ -38,6 +40,7 @@ const TOP10_CATEGORY_ID = '__top10__'
 // Quiz buttons) rendered at the right end of the group-tabs row, so a
 // caller isn't stuck putting its own controls below the whole list.
 export default function StudyLogList({ profileId, allowBulkSelect = false, senior = false, onProgressChange, headerActions }) {
+  const { currentStoreId } = useAuth()
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([]) // drink-group sub-categories, for the filter dropdown
   const [progress, setProgress] = useState({}) // formula_item_id -> row
@@ -48,7 +51,7 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
 
   async function load() {
     setLoading(true)
-    const [{ data: itemRows }, { data: progressRows }, { data: categoryRows }] = await Promise.all([
+    const [{ data: itemRows }, { data: progressRows }, { data: categoryRows }, { data: storeRows }] = await Promise.all([
       supabase
         .from('formula_items')
         .select('*, formula_categories(name)')
@@ -57,8 +60,14 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
         .order('sort_order'),
       supabase.from('study_progress').select('*').eq('profile_id', profileId),
       supabase.from('formula_categories').select('*').eq('group_key', 'drink').order('sort_order').order('id'),
+      supabase.from('formula_item_stores').select('*'),
     ])
-    setItems(itemRows ?? [])
+    // An item this store doesn't carry (per Formula Database's own per-item
+    // store list) shouldn't show up in this store's Study Log at all — same
+    // rule Quick Quiz/Formal Quiz already use when picking which memorized
+    // items to quiz on (see storeVisibility.js / point 37).
+    const visibleItems = filterVisibleForStore(itemRows ?? [], storeRows ?? [], 'formula_item_id', currentStoreId)
+    setItems(visibleItems)
     setCategories(categoryRows ?? [])
     const map = {}
     ;(progressRows ?? []).forEach((p) => (map[p.formula_item_id] = p))
@@ -68,7 +77,7 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
 
   useEffect(() => {
     if (profileId) load()
-  }, [profileId])
+  }, [profileId, currentStoreId])
 
   function selectGroup(key) {
     setGroup(key)
