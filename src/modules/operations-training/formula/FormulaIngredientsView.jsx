@@ -26,6 +26,16 @@ export default function FormulaIngredientsView({
   videos = [], // titled videos — a drink or shop-training item can have more than one
 }) {
   const visibleIngredients = hasHotVersion ? ingredients.filter((ing) => !!ing.is_hot === showHot) : ingredients
+  const hasCustomImage = displayMode === 'custom' && !!customImagePath
+  // Some items (e.g. a machine-operation how-to) are pure description/Method
+  // with no ingredients recorded at all — for those, showing an "Ingredients"
+  // heading above a "No ingredients recorded." placeholder is just noise, so
+  // the whole section is skipped. This only fires when there is truly nothing
+  // to show for the item as a whole (`ingredients`, unfiltered by hot state);
+  // an item with a hot version where just one of the two states happens to
+  // have no ingredients still shows the heading/toggle/placeholder as before,
+  // since that's a real "this variant has none" case, not "no ingredients at all".
+  const showIngredientsSection = hasCustomImage || ingredients.length > 0
 
   // The table/chips only have room for each ingredient's abbreviation —
   // hovering it with a mouse, or tapping it on mobile (where there's no
@@ -44,27 +54,29 @@ export default function FormulaIngredientsView({
 
   return (
     <div ref={containerRef}>
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-brand-700">Ingredients</h4>
-        {hasHotVersion && (
-          <div className="flex w-fit gap-1 rounded-lg border border-orange-200 bg-orange-50 p-1">
-            <button
-              type="button"
-              onClick={() => onToggleHot?.(false)}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${!showHot ? 'bg-white text-orange-700 shadow-sm' : 'text-orange-500'}`}
-            >
-              Iced/Cold
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleHot?.(true)}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${showHot ? 'bg-white text-orange-700 shadow-sm' : 'text-orange-500'}`}
-            >
-              Hot
-            </button>
-          </div>
-        )}
-      </div>
+      {showIngredientsSection && (
+        <div className="mb-2 flex items-center justify-between">
+          <h4 className="text-sm font-semibold text-brand-700">Ingredients</h4>
+          {hasHotVersion && (
+            <div className="flex w-fit gap-1 rounded-lg border border-orange-200 bg-orange-50 p-1">
+              <button
+                type="button"
+                onClick={() => onToggleHot?.(false)}
+                className={`rounded-md px-3 py-1 text-xs font-medium ${!showHot ? 'bg-white text-orange-700 shadow-sm' : 'text-orange-500'}`}
+              >
+                Iced/Cold
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleHot?.(true)}
+                className={`rounded-md px-3 py-1 text-xs font-medium ${showHot ? 'bg-white text-orange-700 shadow-sm' : 'text-orange-500'}`}
+              >
+                Hot
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {annotationsAbove.length > 0 && (
         <ul className="mb-2 space-y-0.5 text-xs text-gray-500">
@@ -74,10 +86,14 @@ export default function FormulaIngredientsView({
         </ul>
       )}
 
-      {displayMode === 'custom' && customImagePath ? (
+      {hasCustomImage ? (
         <img src={customImagePath} alt="" className="max-w-sm rounded-lg border border-gray-200" />
       ) : visibleIngredients.length === 0 ? (
-        <p className="text-sm text-gray-400">No ingredients recorded.</p>
+        // Only say "No ingredients recorded." when the section is actually
+        // showing (this item has ingredients for its OTHER hot/cold state) —
+        // when there's nothing at all, showIngredientsSection is false and
+        // the heading above is already hidden, so stay silent here too.
+        showIngredientsSection && <p className="text-sm text-gray-400">No ingredients recorded.</p>
       ) : sizes.length > 0 ? (
         <IngredientMatrix ingredients={visibleIngredients} sizes={sizes} openTooltip={openTooltip} setOpenTooltip={setOpenTooltip} />
       ) : (

@@ -20,7 +20,7 @@ import {
 } from '../../../lib/excelRoster'
 
 export default function ManageRosterPage() {
-  const { currentStoreId, accessibleStores, profile } = useAuth()
+  const { currentStoreId, accessibleStores, profile, refreshRosterUpdates } = useAuth()
   const location = useLocation()
   const [weekStart, setWeekStart] = useState('')
   const [entries, setEntries] = useState([])
@@ -296,13 +296,26 @@ export default function ManageRosterPage() {
           if (prevByKey.get(key) !== newByKey.get(key)) changedProfileIds.add(key.split('|')[0])
         })
         if (changedProfileIds.size) {
-          await supabase.from('roster_change_events').insert(
+          const { error: changeEventError } = await supabase.from('roster_change_events').insert(
             Array.from(changedProfileIds).map((profileId) => ({
               store_id: currentStoreId,
               profile_id: profileId,
               roster_period_id: period.id,
             }))
           )
+          if (changeEventError) {
+            // Don't fail the whole publish over the badge bookkeeping — the
+            // roster itself already saved fine above.
+            console.error('Failed to log roster_change_events:', changeEventError)
+          } else {
+            // AuthContext's rosterUpdates is otherwise only recomputed on
+            // login/store-switch (or by My Roster/Bulletin right after they
+            // mark themselves as viewed) — without this, a manager who is
+            // also affected by their own change (or just stays on this page)
+            // would never see the Sidebar badge light up until they reload
+            // or log back in. This makes it show immediately in this tab.
+            await refreshRosterUpdates()
+          }
         }
       }
 
