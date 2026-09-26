@@ -7,6 +7,16 @@ import Button from '../../../components/ui/Button'
 
 export default function UserDetailModal({ user, onClose, onSaved }) {
   const { profile: me, accessibleStores } = useAuth()
+  // First/last name live on `profiles` directly (not per-store), so they're
+  // editable here regardless of whether this person is on any store's
+  // roster at all — Staff Information can only edit a name once the person
+  // shows up on a store's staff list, which requires a Store (or an "Also
+  // on the roster at" checkbox) to be set first. An admin/user with no
+  // store assigned (Store left at "—") never appears there, so without
+  // this, the only way to give them a name was to temporarily assign a
+  // store, rename them, then unassign it again.
+  const [firstName, setFirstName] = useState(user.first_name ?? '')
+  const [lastName, setLastName] = useState(user.last_name ?? '')
   const [role, setRole] = useState(user.role)
   const [storeId, setStoreId] = useState(user.primary_store_id ?? '')
   const [isActive, setIsActive] = useState(user.is_active)
@@ -60,7 +70,10 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
 
   async function save() {
     setSaving(true)
-    await supabase.from('profiles').update({ role, primary_store_id: storeId || null, is_active: isActive }).eq('id', user.id)
+    await supabase
+      .from('profiles')
+      .update({ first_name: firstName.trim(), last_name: lastName.trim(), role, primary_store_id: storeId || null, is_active: isActive })
+      .eq('id', user.id)
     await supabase.from('permission_overrides').delete().eq('profile_id', user.id)
     const meName = `${me.first_name ?? ''} ${me.last_name ?? ''}`.trim() || me.email
     const rows = Object.entries(overrides).map(([page_key, allowed]) => ({
@@ -116,6 +129,23 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         </>
       }
     >
+      <div className="mb-5 grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">First name</span>
+          <input className="input" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Last name</span>
+          <input className="input" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </label>
+        <p className="col-span-2 -mt-1 text-xs text-gray-400">
+          Sets this person's name directly — works even if they're not assigned to any Store below, unlike Shop
+          Management &gt; Staff Information (which needs them on a store's roster first). A per-store "Display
+          name" (shown instead of this on Bulletin Board, Manage Roster, etc.) can still be set from Staff
+          Information once they're on a store.
+        </p>
+      </div>
+
       <div className="mb-5 grid grid-cols-3 gap-3">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Role</span>
@@ -166,7 +196,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
 
       {confirmRemove && (
         <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          Remove {user.first_name || user.email} from active staff? This sets them inactive rather than
+          Remove {firstName || user.email} from active staff? This sets them inactive rather than
           permanently deleting their history — they'll stop being able to sign in, but their roster, leave,
           and quiz records are kept.
           <div className="mt-2 flex gap-2">
