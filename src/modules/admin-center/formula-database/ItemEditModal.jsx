@@ -266,45 +266,31 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   function removeIngredient(key) {
     setIngredients((prev) => prev.filter((r) => (r._key ?? r.id) !== key))
   }
-  // M/L etc. are the same drink, so ingredient order should stay in sync
-  // across sizes — moving a row in one size's tab swaps that same position
-  // in every other size's list too, not just the tab you're looking at.
-  // Hot and Cold are kept independent, though (they're often genuinely
-  // different formulas, e.g. Hot Water instead of Ice Water) — so the sync
-  // group is (size, hot/cold) together, not size alone.
+  // Unlike picking an ingredient (updateIngredient, above) — which
+  // deliberately mirrors into every other size, since M/L/XL almost always
+  // share the same ingredient list — reordering is kept per-size only
+  // (Jeff's request): moving a row up/down in one size's tab only changes
+  // that size's own order, not any other size's. A size can genuinely want
+  // its own display order (e.g. a step that matters more at one size than
+  // another), so this no longer swaps the equivalent position in sibling
+  // sizes the way it used to.
   function moveIngredient(key, direction) {
     setIngredients((prev) => {
       const row = prev.find((r) => (r._key ?? r.id) === key) || {}
       const rowGroupKey = `${row.size_id || ''}|${row.is_hot ? '1' : '0'}`
-      const rowsBySize = new Map()
+      const groupIndices = []
       prev.forEach((r, i) => {
         const gk = `${r.size_id || ''}|${r.is_hot ? '1' : '0'}`
-        if (!rowsBySize.has(gk)) rowsBySize.set(gk, [])
-        rowsBySize.get(gk).push(i)
+        if (gk === rowGroupKey) groupIndices.push(i)
       })
-      const groupIndices = rowsBySize.get(rowGroupKey) || []
       const posInGroup = groupIndices.findIndex((i) => (prev[i]._key ?? prev[i].id) === key)
       const swapWith = posInGroup + direction
       if (posInGroup === -1 || swapWith < 0 || swapWith >= groupIndices.length) return prev
 
-      const rowIsHot = row.is_hot ? '1' : '0'
       const next = [...prev]
-      for (const [gk, indices] of rowsBySize.entries()) {
-        // Only sync within the same hot/cold state — a different size at
-        // the same temperature (e.g. Cold-L when dragging Cold-M), not
-        // across into Hot's own ordering. Also only a size that actually
-        // has a row at both positions — if one size/temperature has fewer
-        // ingredients it's left alone rather than swapping the wrong thing
-        // in. Both bounds must be checked: checking swapWith alone let a
-        // shorter group's last valid index get overwritten with undefined
-        // whenever posInGroup pointed one past its end, which then crashed
-        // the page the next time ingredients were rendered.
-        if (gk.endsWith(`|${rowIsHot}`) && posInGroup < indices.length && swapWith < indices.length) {
-          const a = indices[posInGroup]
-          const b = indices[swapWith]
-          ;[next[a], next[b]] = [next[b], next[a]]
-        }
-      }
+      const a = groupIndices[posInGroup]
+      const b = groupIndices[swapWith]
+      ;[next[a], next[b]] = [next[b], next[a]]
       return next
     })
   }
