@@ -26,14 +26,18 @@ export function AuthProvider({ children }) {
   // Training-role users must additionally verify a weekly 4-digit code
   // before the session is treated as "fully signed in".
   const [needsTrainingCode, setNeedsTrainingCode] = useState(false)
-  // "Update" badges — see roster_change_events/roster_view_state (migration
-  // 0047): `myRoster` is true when THIS person's own shift changed since
-  // they last opened My Roster; `bulletin` is true when anyone's shift on
-  // this store's roster changed since they last looked at the Bulletin
-  // Board's Roster tab. Lives here (rather than in each page) so the
-  // Sidebar — a separate component that's always mounted — can show the
-  // My Roster badge too.
-  const [rosterUpdates, setRosterUpdates] = useState({ myRoster: false, bulletin: false })
+  // "Update" badge for My Roster — see roster_change_events/roster_view_state
+  // (migration 0047): true when THIS person's own shift changed since they
+  // last opened My Roster. Lives here (rather than in the page itself) so
+  // the Sidebar — a separate component that's always mounted — can show it.
+  // (The Bulletin Board's Roster feed used to have an equivalent `bulletin`
+  // flag here too, but that was a single per-store "have they looked at the
+  // Roster tab at all" timestamp — clearing every week's badge at once just
+  // from switching tabs, even for weeks never actually opened. Migration
+  // 0048 replaced that with per-week view tracking that BulletinPage.jsx
+  // now computes and owns entirely on its own, so there's nothing for this
+  // context to track for it any more.)
+  const [rosterUpdates, setRosterUpdates] = useState({ myRoster: false })
 
   const loadProfileData = useCallback(async (userId) => {
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
@@ -107,38 +111,34 @@ export function AuthProvider({ children }) {
     if (id) localStorage.setItem('ot_current_store_id', id)
   }
 
-  // Recomputes both roster "Update" badges for the current person + store.
-  // Called on login/store-switch, and again by My Roster / the Bulletin
-  // Board's Roster tab right after they mark themselves as viewed, so the
-  // badge disappears immediately without needing a full page reload.
+  // Recomputes the My Roster "Update" badge for the current person + store.
+  // Called on login/store-switch, and again by My Roster right after they
+  // mark themselves as viewed, so the badge disappears immediately without
+  // needing a full page reload.
   const refreshRosterUpdates = useCallback(async () => {
     if (!profile?.id || !currentStoreId) {
-      setRosterUpdates({ myRoster: false, bulletin: false })
+      setRosterUpdates({ myRoster: false })
       return
     }
     const [{ data: viewState }, { data: changeRows }] = await Promise.all([
       supabase
         .from('roster_view_state')
-        .select('my_roster_viewed_at, bulletin_roster_viewed_at')
+        .select('my_roster_viewed_at')
         .eq('profile_id', profile.id)
         .eq('store_id', currentStoreId)
         .maybeSingle(),
-      supabase.from('roster_change_events').select('profile_id, changed_at').eq('store_id', currentStoreId),
+      supabase.from('roster_change_events').select('changed_at').eq('store_id', currentStoreId).eq('profile_id', profile.id),
     ])
     // Reduce with '' (not null) as the seed — `changed_at` is always a
     // string, and comparing a string to null with `>` coerces null to 0 and
     // the string to NaN (Number("2026-...") is NaN), so `str > null` is
     // ALWAYS false and the reduce would never advance past the seed. '' as
     // the seed keeps this a plain string-vs-string comparison, which sorts
-    // ISO timestamps correctly, and is still falsy for the `!!myLatest`/
-    // `!!storeLatest` checks below when there are genuinely no rows.
-    const myLatest = (changeRows ?? [])
-      .filter((r) => r.profile_id === profile.id)
-      .reduce((max, r) => (r.changed_at > max ? r.changed_at : max), '')
-    const storeLatest = (changeRows ?? []).reduce((max, r) => (r.changed_at > max ? r.changed_at : max), '')
+    // ISO timestamps correctly, and is still falsy for the `!!myLatest`
+    // check below when there are genuinely no rows.
+    const myLatest = (changeRows ?? []).reduce((max, r) => (r.changed_at > max ? r.changed_at : max), '')
     setRosterUpdates({
       myRoster: !!myLatest && (!viewState?.my_roster_viewed_at || myLatest > viewState.my_roster_viewed_at),
-      bulletin: !!storeLatest && (!viewState?.bulletin_roster_viewed_at || storeLatest > viewState.bulletin_roster_viewed_at),
     })
   }, [profile?.id, currentStoreId])
 

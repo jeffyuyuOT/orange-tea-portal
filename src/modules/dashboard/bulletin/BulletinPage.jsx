@@ -34,7 +34,7 @@ const TYPE_BADGE = {
 // person actually takes the quiz, since they describe current status, not a
 // one-off posting.
 export default function BulletinPage() {
-  const { currentStoreId, profile, rosterUpdates, refreshRosterUpdates } = useAuth()
+  const { currentStoreId, profile } = useAuth()
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
@@ -51,7 +51,7 @@ export default function BulletinPage() {
 
     const oneMonthAgo = addMonths(new Date(), -1).toISOString()
 
-    const [{ data: announcementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }] = await Promise.all([
+    const [{ data: announcementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }] = await Promise.all([
       supabase
         .from('announcements')
         .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
@@ -77,6 +77,13 @@ export default function BulletinPage() {
         .gte('submitted_at', oneMonthAgo)
         .order('submitted_at', { ascending: false }),
       supabase.from('quiz_settings').select('reminder_period_months').eq('store_id', currentStoreId).maybeSingle(),
+      // Per-period "Update" badges on individual Roster feed items (see
+      // below) — each specific "Roster posted" row shows its own badge for
+      // whichever weeks actually changed since THIS PERSON actually opened
+      // THAT week (not just switched to the Roster tab — see
+      // roster_period_views, migration 0048).
+      supabase.from('roster_change_events').select('roster_period_id, changed_at').eq('store_id', currentStoreId),
+      supabase.from('roster_period_views').select('roster_period_id, viewed_at').eq('profile_id', profile.id),
     ])
 
     const reminderMonths = settingsRow?.reminder_period_months ?? 3
@@ -166,14 +173,40 @@ export default function BulletinPage() {
       }
     })
 
+    // Latest change_events timestamp per roster_period_id — a period with
+    // no rows at all just means nobody's shift on it changed since it was
+    // first published (a brand-new period counts as "changed" too, via the
+    // insert in ManageRosterPage's doPersist, so this covers both cases the
+    // same way). Seeded with '' rather than null/undefined: `changed_at` is
+    // always a string, and comparing a string to null/undefined with `>`
+    // coerces both sides to Number (the string becomes NaN), so that
+    // comparison is always false — see AuthContext.jsx's refreshRosterUpdates
+    // for the same bug, already fixed there the same way.
+    const periodLatestChange = new Map()
+    ;(changeEventRows ?? []).forEach((r) => {
+      const cur = periodLatestChange.get(r.roster_period_id) ?? ''
+      if (r.changed_at > cur) periodLatestChange.set(r.roster_period_id, r.changed_at)
+    })
+    // This person's own "last opened THIS specific week" timestamp, per
+    // roster_period_id (migration 0048) — unlike the old single per-store
+    // bulletin_roster_viewed_at, switching to the Roster tab never touches
+    // this; only actually opening that week's roster (see openItem below)
+    // does, so a still-unopened week keeps its badge even after the tab's
+    // been visited.
+    const periodViewedAt = new Map((periodViewRows ?? []).map((r) => [r.roster_period_id, r.viewed_at]))
+
     const rosterItems = (rosterRows ?? []).map((r) => {
       const creatorName = r.created_by_name || (r.creator ? `${r.creator.first_name ?? ''} ${r.creator.last_name ?? ''}`.trim() : '')
+      const latestChange = periodLatestChange.get(r.id)
+      const viewedAt = periodViewedAt.get(r.id)
       return {
         id: `roster-${r.id}`,
         type: 'roster',
         date: new Date(r.submitted_at),
         title: `Roster posted: ${r.week_start_date} – ${r.week_end_date}`,
         subtitle: `${new Date(r.submitted_at).toLocaleString()}${creatorName ? ` · ${creatorName}` : ''}`,
+        // This specific week's own "Update" badge — see the comment above.
+        hasUpdate: !!latestChange && (!viewedAt || latestChange > viewedAt),
         raw: r,
       }
     })
@@ -188,26 +221,31 @@ export default function BulletinPage() {
   }, [currentStoreId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const visible = useMemo(() => (filter ? items.filter((i) => i.type === filter) : items), [items, filter])
+  // The Roster tab's small dot (see below) stays lit as long as ANY roster
+  // row in the (unfiltered) list still has an unopened update — switching
+  // filters never affects this, only actually opening a week does (openItem
+  // below), so it only goes out once every week's been opened.
+  const hasUnviewedRoster = useMemo(() => items.some((i) => i.type === 'roster' && i.hasUpdate), [items])
 
   function toggleFilter(key) {
     setFilter((prev) => (prev === key ? null : key))
-    // Clicking into the Roster tab is "having looked at it" — clears the
-    // "Update" badge on it (see migration 0047) for everyone else at this
-    // store the next time they check, and for this person right away.
-    if (key === 'roster' && currentStoreId && profile?.id) {
-      supabase
-        .from('roster_view_state')
-        .upsert(
-          { profile_id: profile.id, store_id: currentStoreId, bulletin_roster_viewed_at: new Date().toISOString() },
-          { onConflict: 'profile_id,store_id' }
-        )
-        .then(() => refreshRosterUpdates())
-    }
   }
 
   function openItem(item) {
     if (item.type === 'announcement' || item.type === 'customer_complaint') setOpenAnnouncementId(item.raw.id)
-    else if (item.type === 'roster') setOpenRosterPeriod(item.raw)
+    else if (item.type === 'roster') {
+      setOpenRosterPeriod(item.raw)
+      // Opening THIS specific week is "having looked at it" — clears its own
+      // Update badge (migration 0048), independent of every other week's.
+      // Other people's own copies of this same week's badge are unaffected;
+      // this is deliberately per-person, not "everyone who opens the tab".
+      if (item.hasUpdate && profile?.id) {
+        supabase
+          .from('roster_period_views')
+          .upsert({ profile_id: profile.id, roster_period_id: item.raw.id, viewed_at: new Date().toISOString() }, { onConflict: 'profile_id,roster_period_id' })
+          .then(() => setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, hasUpdate: false } : i))))
+      }
+    }
   }
 
   return (
@@ -223,7 +261,14 @@ export default function BulletinPage() {
               }`}
             >
               {f.label}
-              {f.key === 'roster' && rosterUpdates.bulletin && <Badge color="red">Update</Badge>}
+              {/* A light "something in here is still unopened" hint at the
+                  tab level — the detail lives on each affected Roster row
+                  itself (see below), so this stays a small raised dot
+                  rather than repeating an "Update" pill here too. Stays lit
+                  until every week in the list has actually been opened. */}
+              {f.key === 'roster' && hasUnviewedRoster && (
+                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
+              )}
             </button>
           ))}
         </div>
@@ -256,11 +301,17 @@ export default function BulletinPage() {
                 <div className="flex items-center gap-2">
                   <Badge color={badge.color}>{badge.label}</Badge>
                   {item.isImportant && <Badge color="red">Important</Badge>}
-                  {item.type === 'customer_complaint' &&
-                    (item.solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
                   <span className="font-medium text-gray-800">{item.title}</span>
                 </div>
                 <div className="flex items-center gap-3">
+                  {/* Status/notification badges sit here, immediately left of
+                      the date/editor text, instead of crowding the category
+                      tag + title on the left — same slot for both: which
+                      week's roster just changed, and whether a complaint's
+                      been solved. */}
+                  {item.type === 'roster' && item.hasUpdate && <Badge color="red">Update</Badge>}
+                  {item.type === 'customer_complaint' &&
+                    (item.solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
                   <span className="shrink-0 text-xs text-gray-400">{item.subtitle}</span>
                   {item.type === 'quiz_reminder' && (
                     <Link
