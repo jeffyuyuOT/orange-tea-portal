@@ -83,14 +83,17 @@ async function buildFormalQuizSet(profileId, storeId) {
 
   // --- Fill-in-the-blank candidates: one per ingredient line that has both
   // an ingredient name and a typed quantity (a custom-image-only line with
-  // no ingredient_id can't be turned into a text question). ---
+  // no ingredient_id can't be turned into a text question). Excludes the
+  // Hot-serving variant (see QuickQuizModal.jsx's buildFormulaQuestions for
+  // the same exclusion + rationale) — only an item's normal ingredient rows
+  // become questions here. ---
   const { data: ingredientRows } = await supabase
     .from('formula_item_ingredients')
-    .select('id, quantity_text, ingredient_master(name), formula_items!inner(id, name_en, name_zh)')
+    .select('id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh)')
     .in('formula_item_id', memorizedIds)
     .not('ingredient_id', 'is', null)
   const fillBlankCandidates = (ingredientRows ?? [])
-    .filter((r) => r.quantity_text?.trim() && r.ingredient_master?.name)
+    .filter((r) => r.quantity_text?.trim() && r.ingredient_master?.name && !r.is_hot)
     .map((r) => ({
       type: 'fill_blank',
       localId: r.id,
@@ -243,7 +246,12 @@ export default function FormalQuizModal({ onClose }) {
       .select()
       .single()
     if (attempt) {
-      await supabase.from('quiz_attempt_answers').insert(answerRows.map((r) => ({ ...r, attempt_id: attempt.id })))
+      const { error } = await supabase.from('quiz_attempt_answers').insert(answerRows.map((r) => ({ ...r, attempt_id: attempt.id })))
+      // See the same check in QuickQuizModal.jsx's submit() — this insert
+      // used to fail silently and leave Quiz History showing a score with
+      // no question detail underneath, with nothing in the UI explaining
+      // why. At least log it now so a repeat isn't invisible.
+      if (error) console.error('Failed to save quiz answer detail:', error)
     }
     setResult({ correct, total: questions.length })
     setSubmitting(false)

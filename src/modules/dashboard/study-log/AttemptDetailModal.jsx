@@ -23,12 +23,17 @@ function formatChoiceKeys(keys) {
 // ..." instead of the generic "Quiz on ..." title.
 export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) {
   const [rows, setRows] = useState([])
+  const [loaded, setLoaded] = useState(false)
   useEffect(() => {
+    setLoaded(false)
     supabase
       .from('quiz_attempt_answers')
       .select('*, quiz_questions(question, correct_choice, correct_choices, choices, image_path)')
       .eq('attempt_id', attempt.id)
-      .then(({ data }) => setRows(data ?? []))
+      .then(({ data }) => {
+        setRows(data ?? [])
+        setLoaded(true)
+      })
   }, [attempt.id])
 
   return (
@@ -36,6 +41,17 @@ export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) 
       <p className="mb-3 text-sm text-gray-500">
         Score: {attempt.correct_count} out of {attempt.total_questions}
       </p>
+      {/* This should only ever be empty if saving the per-question detail
+          failed at submit time (see the error check now added to both
+          QuickQuizModal.jsx and FormalQuizModal.jsx's submit()) — the score
+          above still comes from quiz_attempts, which is a separate insert,
+          so it can show up even when this detail never got saved. Telling
+          them plainly beats a silently blank modal that looks broken. */}
+      {loaded && !rows.length && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          No question detail was saved for this attempt.
+        </p>
+      )}
       <ul className="space-y-2">
         {rows.map((r) => {
           const qType = r.question_type ?? 'choice'

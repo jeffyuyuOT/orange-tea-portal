@@ -88,8 +88,13 @@ async function buildFormulaQuestions(memorizedIds, targetCount) {
   // mentioned even though the item genuinely has more than one, which reads
   // as wrong/ambiguous — so skip null-size rows on any item that has sizes.
   const sizedItemIds = new Set((sizedItemRows ?? []).map((r) => r.formula_item_id))
+  // Jeff: don't quiz on the Hot-serving variant at all (FormulaIngredientsView
+  // shows these as a separate "Hot" tab on items that have one) — only the
+  // item's normal/default ingredient rows become fill-in-the-blank
+  // questions, same convention menuExport.js already uses for "the"
+  // ingredient list of an item (`!ing.is_hot`).
   const candidates = (rows ?? []).filter(
-    (r) => !excludedIds.has(r.ingredient_id) && !(sizedItemIds.has(r.formula_item_id) && !r.size_id)
+    (r) => !excludedIds.has(r.ingredient_id) && !(sizedItemIds.has(r.formula_item_id) && !r.size_id) && !r.is_hot
   )
   if (!candidates.length) return []
 
@@ -115,7 +120,6 @@ async function buildFormulaQuestions(memorizedIds, targetCount) {
       const choices = shuffle([row.quantity_text, ...distractors]).map((text, i) => ({ key: CHOICE_KEYS[i], text }))
       const correctKey = choices.find((c) => c.text === row.quantity_text).key
       const sizeSuffix = row.drink_sizes?.name ? ` (${row.drink_sizes.name})` : ''
-      const hotSuffix = row.is_hot ? ' (Hot)' : ''
       // The recipe's recorded quantity for the plain "Sugar" ingredient is
       // the full-sugar (100%) amount — customer sugar-level requests are a
       // % of this at order time, not a separately recorded formula value —
@@ -131,7 +135,7 @@ async function buildFormulaQuestions(memorizedIds, targetCount) {
       return {
         id: `formula-${row.id}`,
         isGenerated: true,
-        question: `How much ${row.ingredient_master?.name ?? 'this ingredient'}${groupSuffix} goes in ${itemLabel(row.formula_items)}${sizeSuffix}${hotSuffix}${sugarSuffix}?`,
+        question: `How much ${row.ingredient_master?.name ?? 'this ingredient'}${groupSuffix} goes in ${itemLabel(row.formula_items)}${sizeSuffix}${sugarSuffix}?`,
         choices,
         correct_choice: correctKey,
       }
@@ -314,7 +318,14 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
       .select()
       .single()
     if (attempt) {
-      await supabase.from('quiz_attempt_answers').insert(answerRows.map((r) => ({ ...r, attempt_id: attempt.id })))
+      const { error } = await supabase.from('quiz_attempt_answers').insert(answerRows.map((r) => ({ ...r, attempt_id: attempt.id })))
+      // This insert used to fail silently (no error check at all) — a bad
+      // row anywhere in the batch fails the whole thing atomically, so one
+      // insert going wrong meant Quiz History would forever show a score
+      // with zero question detail underneath, no error, nothing in the UI
+      // to explain why. Logging it at least makes a repeat of that visible
+      // in the browser console instead of just vanishing.
+      if (error) console.error('Failed to save quiz answer detail:', error)
     }
     setResult({ correct, total: questions.length })
     setSubmitting(false)
