@@ -105,11 +105,14 @@ export default function FormulaItemDetail({ item, onClose }) {
             />
           </section>
 
-          <section>
-            <h4 className="mb-2 text-sm font-semibold text-brand-700">Method</h4>
-            {visibleSteps.length === 0 ? (
-              <p className="text-sm text-gray-400">No steps recorded.</p>
-            ) : (
+          {/* Same rule as FormulaIngredientsView's Ingredients section (see
+              its showIngredientsSection comment) — an item with genuinely no
+              steps at all doesn't need a "Method" heading over a "No steps
+              recorded." placeholder; that's just noise for e.g. a pure-
+              ingredients item with no method written yet. */}
+          {visibleSteps.length > 0 && (
+            <section>
+              <h4 className="mb-2 text-sm font-semibold text-brand-700">Method</h4>
               <ol className="space-y-3">
                 {visibleSteps.map((s) => (
                   <li key={s.id} className="flex gap-3">
@@ -129,8 +132,8 @@ export default function FormulaItemDetail({ item, onClose }) {
                   </li>
                 ))}
               </ol>
-            )}
-          </section>
+            </section>
+          )}
         </div>
       )}
     </Modal>
