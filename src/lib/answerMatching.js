@@ -19,6 +19,17 @@ export function normalizeAnswer(s) {
   return (s ?? '').toString().trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+// Strips punctuation that's only ever used to SEPARATE list items (comma,
+// semicolon, slash) and all whitespace — so "b, d, f, g" and "b/d/f/g" both
+// collapse down to just "bdfg", matching a correct answer written either
+// way. This deliberately leaves other punctuation (a decimal point, "%",
+// etc.) untouched, since that can change what a number actually means
+// ("1.5" vs "15") — only separators between otherwise-identical list items
+// are safe to ignore.
+function stripListSeparators(s) {
+  return s.replace(/[,;/]/g, '').replace(/\s+/g, '')
+}
+
 // Standard Levenshtein edit distance (insertions/deletions/substitutions).
 function editDistance(a, b) {
   if (a === b) return 0
@@ -55,8 +66,14 @@ export function isAnswerAccepted(answer, correct, acceptedAnswers = []) {
   const normAnswer = normalizeAnswer(answer)
   if (!normAnswer) return false
   const candidates = [correct, ...(acceptedAnswers ?? [])].map(normalizeAnswer).filter(Boolean)
+  const strippedAnswer = stripListSeparators(normAnswer)
   return candidates.some((c) => {
     if (c === normAnswer) return true
+    // Same letters/numbers, just written with different list punctuation or
+    // spacing — e.g. "b, d, f, g" vs "bdfg", or "160, 240" vs "160 240".
+    // Case is already handled above by normalizeAnswer; this is the same
+    // idea for separator symbols in between.
+    if (strippedAnswer && stripListSeparators(c) === strippedAnswer) return true
     const tolerance = typoTolerance(Math.max(normAnswer.length, c.length))
     return tolerance > 0 && editDistance(normAnswer, c) <= tolerance
   })
