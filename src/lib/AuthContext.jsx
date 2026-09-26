@@ -125,10 +125,17 @@ export function AuthProvider({ children }) {
         .maybeSingle(),
       supabase.from('roster_change_events').select('profile_id, changed_at').eq('store_id', currentStoreId),
     ])
+    // Reduce with '' (not null) as the seed — `changed_at` is always a
+    // string, and comparing a string to null with `>` coerces null to 0 and
+    // the string to NaN (Number("2026-...") is NaN), so `str > null` is
+    // ALWAYS false and the reduce would never advance past the seed. '' as
+    // the seed keeps this a plain string-vs-string comparison, which sorts
+    // ISO timestamps correctly, and is still falsy for the `!!myLatest`/
+    // `!!storeLatest` checks below when there are genuinely no rows.
     const myLatest = (changeRows ?? [])
       .filter((r) => r.profile_id === profile.id)
-      .reduce((max, r) => (r.changed_at > max ? r.changed_at : max), null)
-    const storeLatest = (changeRows ?? []).reduce((max, r) => (r.changed_at > max ? r.changed_at : max), null)
+      .reduce((max, r) => (r.changed_at > max ? r.changed_at : max), '')
+    const storeLatest = (changeRows ?? []).reduce((max, r) => (r.changed_at > max ? r.changed_at : max), '')
     setRosterUpdates({
       myRoster: !!myLatest && (!viewState?.my_roster_viewed_at || myLatest > viewState.my_roster_viewed_at),
       bulletin: !!storeLatest && (!viewState?.bulletin_roster_viewed_at || storeLatest > viewState.bulletin_roster_viewed_at),
