@@ -241,6 +241,18 @@ export default function ManageRosterPage() {
         .single()
       if (error) throw error
 
+      // Snapshot whichever entries are there right now (empty for a
+      // brand-new period) so we can tell, per staff member, whether their
+      // own date/start/end/break actually changed once we overwrite this
+      // below — used to raise the "Update" badge (migration 0047). Only
+      // linked profiles matter here; an unmatched raw name has no account
+      // to notify.
+      const { data: prevRows } = await supabase
+        .from('roster_entries')
+        .select('profile_id, work_date, start_time, end_time, break_half_hours')
+        .eq('roster_period_id', period.id)
+        .not('profile_id', 'is', null)
+
       // Replace this period's entries wholesale rather than trying to
       // diff/upsert per row — the grid may have added or removed rows
       // since the last save.
@@ -263,6 +275,37 @@ export default function ManageRosterPage() {
         const { error: entriesError } = await supabase.from('roster_entries').insert(rows)
         if (entriesError) throw entriesError
       }
+
+      // A publish (not a draft save — drafts aren't visible to staff at
+      // all) that actually changed someone's own shift(s) logs a change
+      // event for them, which is what makes their My Roster badge (and
+      // everyone's Bulletin Roster tab badge) light up.
+      if (status === 'submitted') {
+        const sigOf = (r) => `${r.work_date}|${r.start_time}|${r.end_time}|${r.break_half_hours ?? ''}`
+        const prevByKey = new Map((prevRows ?? []).map((r) => [`${r.profile_id}|${r.work_date}`, sigOf(r)]))
+        const newRowsWithProfile = rows.filter((r) => r.profile_id)
+        const newByKey = new Map(
+          newRowsWithProfile.map((r) => [
+            `${r.profile_id}|${r.work_date}`,
+            sigOf({ work_date: r.work_date, start_time: r.start_time, end_time: r.end_time, break_half_hours: r.break_half_hours }),
+          ])
+        )
+        const allKeys = new Set([...prevByKey.keys(), ...newByKey.keys()])
+        const changedProfileIds = new Set()
+        allKeys.forEach((key) => {
+          if (prevByKey.get(key) !== newByKey.get(key)) changedProfileIds.add(key.split('|')[0])
+        })
+        if (changedProfileIds.size) {
+          await supabase.from('roster_change_events').insert(
+            Array.from(changedProfileIds).map((profileId) => ({
+              store_id: currentStoreId,
+              profile_id: profileId,
+              roster_period_id: period.id,
+            }))
+          )
+        }
+      }
+
       setMessage(status === 'submitted' ? 'Roster submitted and published.' : 'Roster saved as draft.')
     } catch (err) {
       setMessage(`Error: ${err.message}`)

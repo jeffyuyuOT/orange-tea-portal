@@ -4,18 +4,12 @@ import { useAuth } from '../../../lib/AuthContext'
 import StudyLogList from '../../dashboard/study-log/StudyLogList'
 import ProgressChartModal from '../../dashboard/study-log/ProgressChartModal'
 import StudySummaryModal from '../../dashboard/study-log/StudySummaryModal'
+import AttemptDetailModal from '../../dashboard/study-log/AttemptDetailModal'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
-import Modal from '../../../components/ui/Modal'
 import Badge from '../../../components/ui/Badge'
 import { rosterDisplayName } from '../../../lib/excelRoster'
 
 const QUIZ_TYPE_LABEL = { quick: 'Quick Quiz', formal: 'Formal Quiz' }
-
-// Multi-choice review just shows the answer keys picked (e.g. "A, C"), same
-// as single-choice review shows the one key — no need to look up choice text.
-function formatChoiceKeys(keys) {
-  return keys && keys.length ? keys.join(', ') : '—'
-}
 
 export default function StaffStudyDetail({ staff, onBack }) {
   const { profile } = useAuth()
@@ -137,75 +131,15 @@ export default function StaffStudyDetail({ staff, onBack }) {
         </div>
       )}
 
-      {openAttempt && <AttemptDetailModal attempt={openAttempt} onClose={() => setOpenAttempt(null)} />}
+      {openAttempt && (
+        <AttemptDetailModal
+          attempt={openAttempt}
+          onClose={() => setOpenAttempt(null)}
+          quizTypeLabel={QUIZ_TYPE_LABEL[openAttempt.quiz_type] ?? 'Quick Quiz'}
+        />
+      )}
       {showProgressChart && <ProgressChartModal profileId={staff.id} onClose={() => setShowProgressChart(false)} />}
       {showSummary && <StudySummaryModal profileId={staff.id} onClose={() => setShowSummary(false)} />}
     </div>
-  )
-}
-
-function AttemptDetailModal({ attempt, onClose }) {
-  const [rows, setRows] = useState([])
-  useEffect(() => {
-    supabase
-      .from('quiz_attempt_answers')
-      .select('*, quiz_questions(question, correct_choice, correct_choices, choices, image_path)')
-      .eq('attempt_id', attempt.id)
-      .then(({ data }) => setRows(data ?? []))
-  }, [attempt.id])
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      wide
-      title={`${QUIZ_TYPE_LABEL[attempt.quiz_type] ?? 'Quick Quiz'} on ${new Date(attempt.taken_at).toLocaleString()}`}
-    >
-      <p className="mb-3 text-sm text-gray-500">
-        Score: {attempt.correct_count} / {attempt.total_questions}
-      </p>
-      <ul className="space-y-2">
-        {rows.map((r) => (
-          <li key={r.id} className={`rounded-lg border px-3 py-2 text-sm ${r.is_correct ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-            {r.question_type === 'fill_blank' ? (
-              <>
-                <p className="font-medium text-gray-800">{r.question_text}</p>
-                <p className="text-xs text-gray-500">
-                  Answered: {r.answer_text || '—'} · Correct: {r.correct_answer_text}
-                </p>
-              </>
-            ) : r.question_type === 'multi' ? (
-              <>
-                <p className="font-medium text-gray-800">{r.quiz_questions?.question}</p>
-                {r.quiz_questions?.image_path && (
-                  <img
-                    src={supabase.storage.from('documents').getPublicUrl(r.quiz_questions.image_path).data.publicUrl}
-                    alt=""
-                    className="my-1 max-h-32 rounded-lg border border-gray-200 object-contain"
-                  />
-                )}
-                <p className="text-xs text-gray-500">
-                  Selected: {formatChoiceKeys(r.selected_choices)} · Correct: {formatChoiceKeys(r.quiz_questions?.correct_choices)}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium text-gray-800">{r.quiz_questions?.question}</p>
-                {r.quiz_questions?.image_path && (
-                  <img
-                    src={supabase.storage.from('documents').getPublicUrl(r.quiz_questions.image_path).data.publicUrl}
-                    alt=""
-                    className="my-1 max-h-32 rounded-lg border border-gray-200 object-contain"
-                  />
-                )}
-                <p className="text-xs text-gray-500">
-                  Selected: {r.selected_choice ?? '—'} · Correct: {r.quiz_questions?.correct_choice}
-                </p>
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
-    </Modal>
   )
 }

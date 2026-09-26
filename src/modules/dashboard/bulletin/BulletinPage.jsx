@@ -34,7 +34,7 @@ const TYPE_BADGE = {
 // person actually takes the quiz, since they describe current status, not a
 // one-off posting.
 export default function BulletinPage() {
-  const { currentStoreId, profile } = useAuth()
+  const { currentStoreId, profile, rosterUpdates, refreshRosterUpdates } = useAuth()
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
@@ -191,6 +191,18 @@ export default function BulletinPage() {
 
   function toggleFilter(key) {
     setFilter((prev) => (prev === key ? null : key))
+    // Clicking into the Roster tab is "having looked at it" — clears the
+    // "Update" badge on it (see migration 0047) for everyone else at this
+    // store the next time they check, and for this person right away.
+    if (key === 'roster' && currentStoreId && profile?.id) {
+      supabase
+        .from('roster_view_state')
+        .upsert(
+          { profile_id: profile.id, store_id: currentStoreId, bulletin_roster_viewed_at: new Date().toISOString() },
+          { onConflict: 'profile_id,store_id' }
+        )
+        .then(() => refreshRosterUpdates())
+    }
   }
 
   function openItem(item) {
@@ -206,11 +218,12 @@ export default function BulletinPage() {
             <button
               key={f.key}
               onClick={() => toggleFilter(f.key)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${
                 filter === f.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
               }`}
             >
               {f.label}
+              {f.key === 'roster' && rosterUpdates.bulletin && <Badge color="red">Update</Badge>}
             </button>
           ))}
         </div>

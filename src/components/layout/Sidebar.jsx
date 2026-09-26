@@ -1,13 +1,14 @@
 import { NavLink } from 'react-router-dom'
 import { SECTIONS, canAccessSection, canAccessPage } from '../../lib/permissions'
 import { useAuth } from '../../lib/AuthContext'
+import Badge from '../ui/Badge'
 
 // The link list itself, shared between the permanent desktop sidebar below
 // and the slide-out mobile drawer (AppShell) — one place decides which
 // sections/pages a role can see, so the two never disagree. `onNavigate`
 // closes the mobile drawer after a tap; the desktop sidebar doesn't need it.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages } = useAuth()
+  const { effectivePages, rosterUpdates } = useAuth()
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -26,12 +27,17 @@ export function SidebarNavLinks({ onNavigate }) {
                     to={`/${sectionKey.replace(/_/g, '-')}/${pageKey.replace(/_/g, '-')}`}
                     onClick={onNavigate}
                     className={({ isActive }) =>
-                      `block rounded-lg px-3 py-1.5 text-sm ${
+                      `flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${
                         isActive ? 'bg-brand-500 text-white font-medium' : 'text-gray-600 hover:bg-brand-100 hover:text-brand-800'
                       }`
                     }
                   >
                     {pageLabel}
+                    {/* Someone's shift changed on this store's roster since
+                        this person last opened My Roster — see migration
+                        0047. Only ever shown on their own "My Roster" link,
+                        never someone else's. */}
+                    {fullKey === 'roster_hub.my_roster' && rosterUpdates.myRoster && <Badge color="red">Update</Badge>}
                   </NavLink>
                 )
               })}

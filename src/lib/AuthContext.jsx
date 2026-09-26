@@ -26,6 +26,14 @@ export function AuthProvider({ children }) {
   // Training-role users must additionally verify a weekly 4-digit code
   // before the session is treated as "fully signed in".
   const [needsTrainingCode, setNeedsTrainingCode] = useState(false)
+  // "Update" badges — see roster_change_events/roster_view_state (migration
+  // 0047): `myRoster` is true when THIS person's own shift changed since
+  // they last opened My Roster; `bulletin` is true when anyone's shift on
+  // this store's roster changed since they last looked at the Bulletin
+  // Board's Roster tab. Lives here (rather than in each page) so the
+  // Sidebar — a separate component that's always mounted — can show the
+  // My Roster badge too.
+  const [rosterUpdates, setRosterUpdates] = useState({ myRoster: false, bulletin: false })
 
   const loadProfileData = useCallback(async (userId) => {
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
@@ -99,6 +107,38 @@ export function AuthProvider({ children }) {
     if (id) localStorage.setItem('ot_current_store_id', id)
   }
 
+  // Recomputes both roster "Update" badges for the current person + store.
+  // Called on login/store-switch, and again by My Roster / the Bulletin
+  // Board's Roster tab right after they mark themselves as viewed, so the
+  // badge disappears immediately without needing a full page reload.
+  const refreshRosterUpdates = useCallback(async () => {
+    if (!profile?.id || !currentStoreId) {
+      setRosterUpdates({ myRoster: false, bulletin: false })
+      return
+    }
+    const [{ data: viewState }, { data: changeRows }] = await Promise.all([
+      supabase
+        .from('roster_view_state')
+        .select('my_roster_viewed_at, bulletin_roster_viewed_at')
+        .eq('profile_id', profile.id)
+        .eq('store_id', currentStoreId)
+        .maybeSingle(),
+      supabase.from('roster_change_events').select('profile_id, changed_at').eq('store_id', currentStoreId),
+    ])
+    const myLatest = (changeRows ?? [])
+      .filter((r) => r.profile_id === profile.id)
+      .reduce((max, r) => (r.changed_at > max ? r.changed_at : max), null)
+    const storeLatest = (changeRows ?? []).reduce((max, r) => (r.changed_at > max ? r.changed_at : max), null)
+    setRosterUpdates({
+      myRoster: !!myLatest && (!viewState?.my_roster_viewed_at || myLatest > viewState.my_roster_viewed_at),
+      bulletin: !!storeLatest && (!viewState?.bulletin_roster_viewed_at || storeLatest > viewState.bulletin_roster_viewed_at),
+    })
+  }, [profile?.id, currentStoreId])
+
+  useEffect(() => {
+    refreshRosterUpdates()
+  }, [refreshRosterUpdates])
+
   const signIn = useCallback(async (email, password) => {
     sessionStorage.removeItem('ot_training_verified')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -144,6 +184,8 @@ export function AuthProvider({ children }) {
     currentStoreId,
     setCurrentStoreId,
     refreshProfile: () => session?.user && loadProfileData(session.user.id),
+    rosterUpdates,
+    refreshRosterUpdates,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
