@@ -18,6 +18,7 @@ export const SECTIONS = {
     pages: {
       bulletin: 'Bulletin Board',
       study_log: 'Study Log',
+      time_attendance: 'Time & Attendance',
       my_information: 'My Information',
     },
   },
@@ -28,6 +29,11 @@ export const SECTIONS = {
       staff_information: 'Staff Information',
       training_code: 'Training Code',
       shop_training_database: 'Shop Training Database',
+      staff_time_logs: 'Staff Time Logs',
+      // Not a real "manage this" page — just the rotating QR display meant
+      // to sit on a phone in the store. Excluded from shop_manager's default
+      // below so only qr_code_maker and admin ever see it (per Jeff).
+      qr_code: '2D Code',
     },
   },
   roster_hub: {
@@ -71,6 +77,7 @@ const ROLE_DEFAULTS = {
         'admin_center.user_management',
         'admin_center.store_management',
         'admin_center.system_setting',
+        'shop_management.qr_code',
       ].includes(key)
   ),
 
@@ -79,6 +86,7 @@ const ROLE_DEFAULTS = {
     'operations_training.shop_training',
     'dashboard.bulletin',
     'dashboard.study_log',
+    'dashboard.time_attendance',
     'dashboard.my_information',
     'roster_hub.my_roster',
     'roster_hub.leave_management',
@@ -88,6 +96,11 @@ const ROLE_DEFAULTS = {
   // see Shop Training content flagged `visible_to_training` (enforced at the
   // data layer too, not just navigation).
   training: ['operations_training.shop_training'],
+
+  // A device account, not a person — sits on a phone mounted in the store
+  // and does nothing but display the rotating clock-in/out QR code (see
+  // migration 0054 / QrCodeDisplayPage.jsx). Exactly one page, on purpose.
+  qr_code_maker: ['shop_management.qr_code'],
 }
 
 /**
@@ -117,4 +130,5 @@ export const ROLE_LABELS = {
   shop_manager: 'Shop Manager',
   staff: 'Staff',
   training: 'Training',
+  qr_code_maker: '2D Code Maker',
 }

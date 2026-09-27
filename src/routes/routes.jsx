@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from '../components/layout/AppShell'
 import RequireAuth from './RequireAuth'
 import RequirePage from './RequirePage'
+import { useAuth } from '../lib/AuthContext'
+import { SECTIONS, canAccessPage } from '../lib/permissions'
 
 import SetPasswordPage from '../modules/auth/SetPasswordPage'
 
@@ -11,12 +13,15 @@ import ShopTrainingPage from '../modules/operations-training/shop-training/ShopT
 import DashboardLayout from '../modules/dashboard/DashboardLayout'
 import BulletinPage from '../modules/dashboard/bulletin/BulletinPage'
 import StudyLogPage from '../modules/dashboard/study-log/StudyLogPage'
+import TimeAttendancePage from '../modules/dashboard/time-attendance/TimeAttendancePage'
 import MyInformationPage from '../modules/dashboard/my-information/MyInformationPage'
 
 import LearningTrackerPage from '../modules/shop-management/learning-tracker/LearningTrackerPage'
 import StaffListPage from '../modules/shop-management/staff-information/StaffListPage'
 import TrainingCodePage from '../modules/shop-management/training-code/TrainingCodePage'
 import ShopTrainingDatabasePage from '../modules/shop-management/shop-training-database/ShopTrainingDatabasePage'
+import StaffTimeLogsPage from '../modules/shop-management/staff-time-logs/StaffTimeLogsPage'
+import QrCodeDisplayPage from '../modules/shop-management/qr-code-display/QrCodeDisplayPage'
 
 import MyRosterPage from '../modules/roster-hub/my-roster/MyRosterPage'
 import ManageRosterPage from '../modules/roster-hub/manage-roster/ManageRosterPage'
@@ -33,6 +38,27 @@ import SystemSettingPage from '../modules/admin-center/system-setting/SystemSett
 
 function guarded(pageKey, element) {
   return <RequirePage pageKey={pageKey}>{element}</RequirePage>
+}
+
+// "/" used to hardcode a redirect to Formula, which only worked because
+// every role until now happened to have that page. qr_code_maker (and the
+// pre-existing training role) don't, so this finds each person's own first
+// accessible page instead — walking SECTIONS in its declared order so the
+// result is stable and predictable (Operations & Training first, then My
+// Dashboard, etc.) rather than depending on Set iteration order.
+function RootRedirect() {
+  const { effectivePages } = useAuth()
+  for (const [sectionKey, section] of Object.entries(SECTIONS)) {
+    for (const pageKey of Object.keys(section.pages)) {
+      const fullKey = `${sectionKey}.${pageKey}`
+      if (canAccessPage(effectivePages, fullKey)) {
+        return <Navigate to={`/${sectionKey.replace(/_/g, '-')}/${pageKey.replace(/_/g, '-')}`} replace />
+      }
+    }
+  }
+  // No accessible page at all (e.g. a brand-new account with no role wired
+  // up yet) — send them somewhere that at least renders instead of looping.
+  return <Navigate to="/dashboard" replace />
 }
 
 export default function AppRoutes() {
@@ -52,7 +78,7 @@ export default function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<Navigate to="/operations-training/formula" replace />} />
+        <Route path="/" element={<RootRedirect />} />
 
         <Route path="/operations-training/formula" element={guarded('operations_training.formula', <FormulaPage />)} />
         <Route path="/operations-training/shop-training" element={guarded('operations_training.shop_training', <ShopTrainingPage />)} />
@@ -61,6 +87,7 @@ export default function AppRoutes() {
           <Route index element={<Navigate to="bulletin" replace />} />
           <Route path="bulletin" element={guarded('dashboard.bulletin', <BulletinPage />)} />
           <Route path="study-log" element={guarded('dashboard.study_log', <StudyLogPage />)} />
+          <Route path="time-attendance" element={guarded('dashboard.time_attendance', <TimeAttendancePage />)} />
           <Route path="my-information" element={guarded('dashboard.my_information', <MyInformationPage />)} />
         </Route>
 
@@ -71,6 +98,8 @@ export default function AppRoutes() {
           path="/shop-management/shop-training-database"
           element={guarded('shop_management.shop_training_database', <ShopTrainingDatabasePage />)}
         />
+        <Route path="/shop-management/staff-time-logs" element={guarded('shop_management.staff_time_logs', <StaffTimeLogsPage />)} />
+        <Route path="/shop-management/qr-code" element={guarded('shop_management.qr_code', <QrCodeDisplayPage />)} />
 
         <Route path="/roster-hub/my-roster" element={guarded('roster_hub.my_roster', <MyRosterPage />)} />
         <Route path="/roster-hub/manage-roster" element={guarded('roster_hub.manage_roster', <ManageRosterPage />)} />

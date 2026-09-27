@@ -5,6 +5,7 @@ import { canAccessPage } from '../../lib/permissions'
 const TABS = [
   { key: 'dashboard.bulletin', to: '/dashboard/bulletin', label: 'Bulletin Board' },
   { key: 'dashboard.study_log', to: '/dashboard/study-log', label: 'Study Log' },
+  { key: 'dashboard.time_attendance', to: '/dashboard/time-attendance', label: 'Time & Attendance' },
   { key: 'dashboard.my_information', to: '/dashboard/my-information', label: 'My Information' },
 ]
 
