@@ -7,7 +7,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import { isAnswerAccepted } from '../../../lib/answerMatching'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import { weightedSample } from '../../../lib/quizSelection'
-import { buildQuantityChoiceQuestion } from '../../../lib/formulaChoiceQuestion'
+import { buildHardQuantityChoiceQuestion } from '../../../lib/formulaChoiceQuestion'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -62,11 +62,6 @@ async function buildFormalQuizSet(profileId, storeId) {
   // drink is to be picked below, versus any other memorized item (1 = no
   // boost). See FormalQuizSettingsTab.jsx + migration 0046.
   const top10Weight = settings?.top10_fill_blank_weight ?? 3
-  // What % of the auto-generated "how much of this ingredient" questions
-  // (not the curated Quiz Bank fill-blank ones — see the comment where this
-  // is used below) get shown as multiple choice instead of typed. Default 0
-  // = today's all-typed behavior. See migration 0050 / Quiz Bank > Setting.
-  const mcFillBlankPct = settings?.mc_fill_blank_pct ?? 0
 
   // Which of the memorized items are ⭐ Top 10 — used to weight both kinds
   // of fill-blank candidate below (the auto-generated ones and any Quiz
@@ -93,17 +88,15 @@ async function buildFormalQuizSet(profileId, storeId) {
     // apply this before, so an excluded ingredient could still turn up here.
     supabase.from('quiz_excluded_ingredients').select('ingredient_id'),
     // Every distinct quantity_text recorded anywhere (any item, any store)
-    // for each ingredient — only fetched/used when mcFillBlankPct > 0 below,
-    // to supply "real" wrong answers when converting one of these to
-    // multiple choice, same source Quick Quiz's buildFormulaQuestions uses.
-    mcFillBlankPct > 0
-      ? supabase
-          .from('formula_item_ingredients')
-          .select('ingredient_id, quantity_text')
-          .not('quantity_text', 'is', null)
-          .not('ingredient_id', 'is', null)
-          .neq('quantity_text', '')
-      : Promise.resolve({ data: [] }),
+    // for each ingredient — supplies the "real" wrong-answer pool for
+    // whichever non-⭐-Top-10 generated candidates get turned into multiple
+    // choice below, same source Quick Quiz's buildFormulaQuestions uses.
+    supabase
+      .from('formula_item_ingredients')
+      .select('ingredient_id, quantity_text')
+      .not('quantity_text', 'is', null)
+      .not('ingredient_id', 'is', null)
+      .neq('quantity_text', ''),
   ])
   const excludedIngredientIds = new Set((excludedRows ?? []).map((r) => r.ingredient_id))
   const fillBlankCandidates = (ingredientRows ?? [])
@@ -205,30 +198,31 @@ async function buildFormalQuizSet(profileId, storeId) {
     fillBlankSelected = [...fillBlankSelected, ...extra]
   }
 
-  // Jeff asked why these auto-generated formula questions aren't multiple
-  // choice like Quick Quiz's version of the same question — this setting
-  // (mc_fill_blank_pct, migration 0050) lets Formal Quiz mix in some. Only
-  // the auto-generated ones (isGenerated) are eligible: a curated Quiz Bank
-  // fill-blank question is free-form admin-authored text, not necessarily
-  // even a quantity, so there's no reliable pool of wrong answers to build
-  // choices from — those always stay typed. A candidate that can't get 3
-  // distractors (buildQuantityChoiceQuestion returns null — too rare/unique
-  // a quantity, nothing to scale) silently stays typed too, rather than
-  // erroring or shrinking the quiz.
-  if (mcFillBlankPct > 0) {
-    const eligible = fillBlankSelected.filter((q) => q.isGenerated)
-    const convertCount = Math.round((eligible.length * mcFillBlankPct) / 100)
-    const toConvert = new Set(shuffle(eligible).slice(0, convertCount).map((q) => q.localId))
-    fillBlankSelected = fillBlankSelected.map((q) => {
-      if (!toConvert.has(q.localId)) return q
-      const built = buildQuantityChoiceQuestion({
-        questionText: q.question,
-        quantityText: q.quantityText,
-        realPool: [...(realQuantityPool[q.ingredientId] ?? [])],
-      })
-      return built ? { ...q, type: 'choice', isGenerated: true, choices: built.choices, correct_choice: built.correct_choice } : q
+  // Jeff's rule (replacing an earlier "% shown as multiple choice" setting
+  // — migration 0051 dropped that column again): a ⭐ Top 10 drink's
+  // auto-generated formula question stays typed fill-in-the-blank (the
+  // most rigorous form, for the drinks staff most need to know cold);
+  // every other memorized drink's version of the same question type is
+  // shown as multiple choice instead, but with deliberately HARD
+  // distractors — buildHardQuantityChoiceQuestion picks the wrong answers
+  // closest in value to the correct one, not random ones, so they can't be
+  // ruled out just by looking obviously too big/small. Only the
+  // auto-generated candidates (isGenerated) are eligible: a curated Quiz
+  // Bank fill-blank question is free-form admin-authored text, not
+  // necessarily even a quantity, so there's no reliable pool of wrong
+  // answers to build choices from — those always stay typed. A candidate
+  // that can't get 3 distractors this way (too rare/unique a quantity,
+  // nothing close enough on record, nothing parseable to scale) silently
+  // stays typed too, rather than erroring or shrinking the quiz.
+  fillBlankSelected = fillBlankSelected.map((q) => {
+    if (!q.isGenerated || q.topTen) return q
+    const built = buildHardQuantityChoiceQuestion({
+      questionText: q.question,
+      quantityText: q.quantityText,
+      realPool: [...(realQuantityPool[q.ingredientId] ?? [])],
     })
-  }
+    return built ? { ...q, type: 'choice', isGenerated: true, choices: built.choices, correct_choice: built.correct_choice } : q
+  })
 
   const combined = shuffle([...mcSelected, ...fillBlankSelected]).slice(0, questionCount)
   return { questions: combined, reason: null }

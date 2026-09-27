@@ -1,10 +1,12 @@
 // Shared "turn a recorded formula quantity into a 4-option multiple-choice
 // question" logic — originally lived only inside QuickQuizModal.jsx, moved
-// here (same reasoning as quizSelection.js's weightedSample) so Formal
-// Quiz's auto-generated ingredient-quantity questions can be presented as
-// multiple choice too, when Quiz Bank > Setting's "% shown as multiple
-// choice" is turned up (see migration 0050), without a second copy of this
-// logic drifting out of sync.
+// here (same reasoning as quizSelection.js's weightedSample) so more than
+// one caller can build the same style of question without a second copy of
+// this logic drifting out of sync. Two variants: buildQuantityChoiceQuestion
+// (Quick Quiz's original, randomly-picked distractors) and
+// buildHardQuantityChoiceQuestion (Formal Quiz's non-⭐-Top-10 formula
+// questions — see FormalQuizModal.jsx — picks the wrong answers closest in
+// value to the correct one, deliberately harder to rule out on sight).
 
 const CHOICE_KEYS = ['A', 'B', 'C', 'D']
 
@@ -27,8 +29,10 @@ function parseQuantity(text) {
 
 // Falls back to synthesized wrong answers (scaled versions of the real
 // quantity) when there aren't enough *other* real quantities on record for
-// this ingredient to use as distractors.
-function synthesizeDistractors(quantityText, count, exclude) {
+// this ingredient to use as distractors. `multipliers` controls how far off
+// the synthesized values are — the default wide swings (half/double, etc.)
+// for the easier variant below, a tighter set for the harder one.
+function synthesizeDistractors(quantityText, count, exclude, multipliers = [0.5, 1.5, 2, 0.75, 1.25]) {
   const parsed = parseQuantity(quantityText)
   if (!parsed || !(parsed.value > 0)) return []
   const { value, suffix } = parsed
@@ -36,7 +40,7 @@ function synthesizeDistractors(quantityText, count, exclude) {
   const round = (n) => (isInt ? Math.max(1, Math.round(n)) : Math.max(0.1, Math.round(n * 10) / 10))
   const seen = new Set(exclude)
   const out = []
-  for (const mult of [0.5, 1.5, 2, 0.75, 1.25]) {
+  for (const mult of multipliers) {
     if (out.length >= count) break
     const text = `${round(value * mult)}${suffix}`
     if (!seen.has(text)) {
@@ -47,23 +51,55 @@ function synthesizeDistractors(quantityText, count, exclude) {
   return out
 }
 
+function finish(questionText, quantityText, distractors) {
+  if (!distractors.length) return null
+  const choices = shuffle([quantityText, ...distractors]).map((text, i) => ({ key: CHOICE_KEYS[i], text }))
+  const correct_choice = choices.find((c) => c.text === quantityText).key
+  return { question: questionText, choices, correct_choice }
+}
+
 // Builds { question, choices, correct_choice } for a "how much X goes in Y"
 // question out of the row's own correct `quantityText` plus up to 3 wrong
 // answers: other real quantities recorded anywhere for the same ingredient
 // first (still plausible-looking, harder to rule out on sight than an
-// obviously-synthesized number), and only synthesized (scaled) ones when
-// there isn't enough real variety on record. Returns null when neither
-// source produced any distractor at all (no real alternative on record and
-// quantityText wasn't a parseable number to scale) — the caller should keep
-// the question as typed fill-in-the-blank in that case.
+// obviously-synthesized number), picked at random, and only synthesized
+// (scaled) ones when there isn't enough real variety on record. Returns null
+// when neither source produced any distractor at all (no real alternative on
+// record and quantityText wasn't a parseable number to scale) — the caller
+// should keep the question as typed fill-in-the-blank in that case.
 export function buildQuantityChoiceQuestion({ questionText, quantityText, realPool }) {
   const distractors = shuffle((realPool ?? []).filter((v) => v !== quantityText)).slice(0, 3)
   if (distractors.length < 3) {
     distractors.push(...synthesizeDistractors(quantityText, 3 - distractors.length, [quantityText, ...distractors]))
   }
-  if (!distractors.length) return null
+  return finish(questionText, quantityText, distractors)
+}
 
-  const choices = shuffle([quantityText, ...distractors]).map((text, i) => ({ key: CHOICE_KEYS[i], text }))
-  const correct_choice = choices.find((c) => c.text === quantityText).key
-  return { question: questionText, choices, correct_choice }
+// Same idea, but deliberately harder: instead of picking 3 random real
+// quantities as wrong answers, picks the 3 that are numerically CLOSEST to
+// the correct one (same unit only — a "2 pumps" quantity is never compared
+// against a "30g" one) — much harder to eliminate by "that number looks way
+// off" than a random real value might be. Falls back to synthesized values
+// scaled by a tighter set of factors (±10-30%, vs. the ±25-100% swings the
+// easier variant above uses) for the same reason, when there aren't 3 real
+// same-unit alternatives close enough to use. Returns null on the same
+// condition as buildQuantityChoiceQuestion.
+const HARD_SCALE_FACTORS = [0.8, 1.2, 0.9, 1.1, 0.85, 1.15, 0.7, 1.3]
+
+export function buildHardQuantityChoiceQuestion({ questionText, quantityText, realPool }) {
+  const parsedCorrect = parseQuantity(quantityText)
+  const closest = (realPool ?? [])
+    .filter((v) => v !== quantityText)
+    .map((v) => ({ v, parsed: parseQuantity(v) }))
+    .filter(({ parsed }) => parsed && parsedCorrect && parsed.suffix === parsedCorrect.suffix)
+    .sort((a, b) => Math.abs(a.parsed.value - parsedCorrect.value) - Math.abs(b.parsed.value - parsedCorrect.value))
+    .map(({ v }) => v)
+
+  const distractors = closest.slice(0, 3)
+  if (distractors.length < 3) {
+    distractors.push(
+      ...synthesizeDistractors(quantityText, 3 - distractors.length, [quantityText, ...distractors], HARD_SCALE_FACTORS)
+    )
+  }
+  return finish(questionText, quantityText, distractors)
 }
