@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { SECTIONS, canAccessSection, canAccessPage } from '../../lib/permissions'
+import { canAccessSection, canAccessPage } from '../../lib/permissions'
+import { orderedSectionEntries, orderedPageEntries } from '../../lib/sidebarOrder'
 import { useAuth } from '../../lib/AuthContext'
 import Badge from '../ui/Badge'
 
@@ -7,18 +8,22 @@ import Badge from '../ui/Badge'
 // and the slide-out mobile drawer (AppShell) — one place decides which
 // sections/pages a role can see, so the two never disagree. `onNavigate`
 // closes the mobile drawer after a tap; the desktop sidebar doesn't need it.
+// Section/page ORDER (as opposed to which ones a role can see at all) comes
+// from `sidebarOrder` (migration 0055) — a shared, admin-editable order set
+// in Admin Center > System Setting, rather than SECTIONS' own literal order
+// in permissions.js.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages, rosterUpdates, hasFormulaUpdates } = useAuth()
+  const { effectivePages, rosterUpdates, hasFormulaUpdates, sidebarOrder } = useAuth()
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
-      {Object.entries(SECTIONS).map(([sectionKey, section]) => {
+      {orderedSectionEntries(sidebarOrder).map(([sectionKey, section]) => {
         if (!canAccessSection(effectivePages, sectionKey)) return null
         return (
           <div key={sectionKey}>
             <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-brand-400">{section.label}</div>
             <div className="space-y-0.5">
-              {Object.entries(section.pages).map(([pageKey, pageLabel]) => {
+              {orderedPageEntries(sectionKey, sidebarOrder).map(([pageKey, pageLabel]) => {
                 const fullKey = `${sectionKey}.${pageKey}`
                 if (!canAccessPage(effectivePages, fullKey)) return null
                 return (

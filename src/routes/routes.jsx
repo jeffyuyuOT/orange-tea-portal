@@ -3,7 +3,8 @@ import AppShell from '../components/layout/AppShell'
 import RequireAuth from './RequireAuth'
 import RequirePage from './RequirePage'
 import { useAuth } from '../lib/AuthContext'
-import { SECTIONS, canAccessPage } from '../lib/permissions'
+import { canAccessPage } from '../lib/permissions'
+import { orderedSectionEntries, orderedPageEntries } from '../lib/sidebarOrder'
 
 import SetPasswordPage from '../modules/auth/SetPasswordPage'
 
@@ -43,13 +44,14 @@ function guarded(pageKey, element) {
 // "/" used to hardcode a redirect to Formula, which only worked because
 // every role until now happened to have that page. qr_code_maker (and the
 // pre-existing training role) don't, so this finds each person's own first
-// accessible page instead — walking SECTIONS in its declared order so the
-// result is stable and predictable (Operations & Training first, then My
-// Dashboard, etc.) rather than depending on Set iteration order.
+// accessible page instead — walking the same admin-editable Sidebar order
+// (migration 0055 / sidebarOrder.js) the Sidebar itself renders in, so
+// landing here after login always matches whatever's first in the Sidebar,
+// not a separate hardcoded order that could drift from it.
 function RootRedirect() {
-  const { effectivePages } = useAuth()
-  for (const [sectionKey, section] of Object.entries(SECTIONS)) {
-    for (const pageKey of Object.keys(section.pages)) {
+  const { effectivePages, sidebarOrder } = useAuth()
+  for (const [sectionKey] of orderedSectionEntries(sidebarOrder)) {
+    for (const [pageKey] of orderedPageEntries(sectionKey, sidebarOrder)) {
       const fullKey = `${sectionKey}.${pageKey}`
       if (canAccessPage(effectivePages, fullKey)) {
         return <Navigate to={`/${sectionKey.replace(/_/g, '-')}/${pageKey.replace(/_/g, '-')}`} replace />

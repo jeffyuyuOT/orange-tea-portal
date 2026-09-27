@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { supabase } from './supabaseClient'
 import { getEffectivePages } from './permissions'
 import { getUnseenFormulaItems } from './formulaUpdates'
+import { DEFAULT_SIDEBAR_ORDER, fetchSidebarOrder } from './sidebarOrder'
 
 const AuthContext = createContext(null)
 
@@ -45,6 +46,20 @@ export function AuthProvider({ children }) {
   // last opened it. Lives here for the same reason rosterUpdates does — the
   // Sidebar is a separate, always-mounted component.
   const [hasFormulaUpdates, setHasFormulaUpdates] = useState(false)
+  // Shared Sidebar section/page order (migration 0055) — global, not tied
+  // to who's logged in, so it's fetched once independently of profile/store
+  // rather than inside loadProfileData. Starts as SECTIONS' own literal
+  // order (DEFAULT_SIDEBAR_ORDER) so the Sidebar has something sane to
+  // render on the very first paint, before this fetch resolves.
+  const [sidebarOrder, setSidebarOrder] = useState(DEFAULT_SIDEBAR_ORDER)
+
+  const refreshSidebarOrder = useCallback(async () => {
+    setSidebarOrder(await fetchSidebarOrder())
+  }, [])
+
+  useEffect(() => {
+    refreshSidebarOrder()
+  }, [refreshSidebarOrder])
 
   const loadProfileData = useCallback(async (userId) => {
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
@@ -230,6 +245,8 @@ export function AuthProvider({ children }) {
     refreshRosterUpdates,
     hasFormulaUpdates,
     refreshFormulaUpdates,
+    sidebarOrder,
+    refreshSidebarOrder,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

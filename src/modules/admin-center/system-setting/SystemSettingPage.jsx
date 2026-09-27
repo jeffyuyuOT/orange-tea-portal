@@ -3,6 +3,7 @@ import Button from '../../../components/ui/Button'
 import { exportBackup, restoreBackup } from '../../../lib/backup'
 import ImportFilePanel from './ImportFilePanel'
 import MenuExportPanel from './MenuExportPanel'
+import SidebarOrderPanel from './SidebarOrderPanel'
 
 export default function SystemSettingPage() {
   const [busy, setBusy] = useState(false)
@@ -48,6 +49,8 @@ export default function SystemSettingPage() {
         </div>
         {log && <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">{log}</pre>}
       </section>
+
+      <SidebarOrderPanel />
 
       <MenuExportPanel />
 
