@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
-import { ROLE_LABELS } from '../../../lib/permissions'
+import { roleLabelFor } from '../../../lib/permissions'
 import { pendingRosterName } from '../../../lib/excelRoster'
 import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
@@ -9,7 +9,7 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import UserDetailModal from './UserDetailModal'
 
 export default function UserManagementPage() {
-  const { accessibleStores } = useAuth()
+  const { profile, accessibleStores } = useAuth()
   const [storeFilter, setStoreFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
@@ -164,7 +164,7 @@ export default function UserManagementPage() {
                 <span className="font-medium text-gray-800">
                   {u.first_name || u.last_name ? `${u.first_name ?? ''} ${u.last_name ?? ''}` : u.email}
                 </span>
-                <Badge color="gray">{ROLE_LABELS[u.role] ?? u.role}</Badge>
+                <Badge color="gray">{roleLabelFor(u.role, profile?.role)}</Badge>
                 {u.stores?.name && <Badge color="brand">{u.stores.name}</Badge>}
                 {!u.is_active && <Badge color="red">Inactive</Badge>}
               </span>

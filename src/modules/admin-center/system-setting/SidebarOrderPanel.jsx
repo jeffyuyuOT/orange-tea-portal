@@ -67,6 +67,10 @@ export default function SidebarOrderPanel() {
           {order.sectionOrder.map((sectionKey, i) => {
             const section = SECTIONS[sectionKey]
             if (!section) return null
+            // Hidden from everyone except the developer role itself, same as
+            // everywhere else this section is filtered — an admin reordering
+            // the Sidebar shouldn't even see "Developer" listed here.
+            if (sectionKey === 'developer_tools' && profile?.role !== 'developer') return null
             const pages = order.pageOrder[sectionKey] ?? []
             const isExpanded = expanded === sectionKey
             return (

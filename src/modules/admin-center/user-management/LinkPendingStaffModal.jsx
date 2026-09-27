@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
-import { ROLE_LABELS } from '../../../lib/permissions'
+import { useAuth } from '../../../lib/AuthContext'
+import { roleLabelFor } from '../../../lib/permissions'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
@@ -10,6 +11,7 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 // placeholder as linked so it drops out of the active list (and the Manage
 // Roster picker) while staying around as a record of who it was.
 export default function LinkPendingStaffModal({ pending, onClose, onLinked }) {
+  const { profile: me } = useAuth()
   const [candidates, setCandidates] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [saving, setSaving] = useState(false)
@@ -74,7 +76,7 @@ export default function LinkPendingStaffModal({ pending, onClose, onLinked }) {
     >
       <p className="mb-3 text-xs text-gray-400">
         Pick the account this person signed up with. Their role and store will be set to match this placeholder (
-        {ROLE_LABELS[pending.role] ?? pending.role}).
+        {roleLabelFor(pending.role, me?.role)}).
       </p>
       {loading ? (
         <p className="text-sm text-gray-400">Loading…</p>

@@ -37,6 +37,8 @@ import UserManagementPage from '../modules/admin-center/user-management/UserMana
 import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
 import SystemSettingPage from '../modules/admin-center/system-setting/SystemSettingPage'
 
+import PayrollPage from '../modules/developer/payroll/PayrollPage'
+
 function guarded(pageKey, element) {
   return <RequirePage pageKey={pageKey}>{element}</RequirePage>
 }
@@ -115,6 +117,8 @@ export default function AppRoutes() {
         <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
         <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />
         <Route path="/admin-center/system-setting" element={guarded('admin_center.system_setting', <SystemSettingPage />)} />
+
+        <Route path="/developer-tools/payroll" element={guarded('developer_tools.payroll', <PayrollPage />)} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

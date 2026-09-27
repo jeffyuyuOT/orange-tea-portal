@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
-import { ROLE_LABELS } from '../../../lib/permissions'
+import { roleSelectOptions } from '../../../lib/permissions'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 
@@ -75,7 +75,7 @@ export default function PendingStaffModal({ pending, onClose, onSaved }) {
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-500">Role</span>
             <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
-              {Object.entries(ROLE_LABELS).map(([key, label]) => (
+              {roleSelectOptions(pending?.role, me?.role).map(([key, label]) => (
                 <option key={key} value={key}>
                   {label}
                 </option>

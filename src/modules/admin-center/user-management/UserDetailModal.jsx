@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
-import { SECTIONS, ROLE_LABELS, getEffectivePages } from '../../../lib/permissions'
+import { SECTIONS, getEffectivePages, roleSelectOptions, roleLabelFor } from '../../../lib/permissions'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 
@@ -150,7 +150,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Role</span>
           <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
-            {Object.entries(ROLE_LABELS).map(([key, label]) => (
+            {roleSelectOptions(user.role, me?.role).map(([key, label]) => (
               <option key={key} value={key}>
                 {label}
               </option>
@@ -212,7 +212,9 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
 
       <h4 className="mb-2 text-sm font-semibold text-brand-700">Page Access</h4>
       <div className="space-y-3">
-        {Object.entries(SECTIONS).map(([sectionKey, section]) => (
+        {Object.entries(SECTIONS)
+          .filter(([sectionKey]) => sectionKey !== 'developer_tools' || me?.role === 'developer')
+          .map(([sectionKey, section]) => (
           <div key={sectionKey}>
             <p className="mb-1 text-xs font-semibold uppercase text-gray-400">{section.label}</p>
             <div className="flex flex-wrap gap-3">
@@ -239,7 +241,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
           </div>
         ))}
       </div>
-      <p className="mt-3 text-xs text-gray-400">* = overridden from the {ROLE_LABELS[role]} role default</p>
+      <p className="mt-3 text-xs text-gray-400">* = overridden from the {roleLabelFor(role, me?.role)} role default</p>
     </Modal>
   )
 }

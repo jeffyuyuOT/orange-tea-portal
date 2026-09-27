@@ -57,6 +57,16 @@ export const SECTIONS = {
       system_setting: 'System Setting',
     },
   },
+  // Hidden from everyone except the developer role itself — see
+  // visibleRoleEntries/roleLabelFor below and migration
+  // 0057_developer_role_and_payroll.sql (the real security boundary; this
+  // is only what decides what shows up in the nav/checkboxes/dropdowns).
+  developer_tools: {
+    label: 'Developer',
+    pages: {
+      payroll: 'Payroll',
+    },
+  },
 }
 
 // Flat list of every page key, e.g. "operations_training.formula"
@@ -67,7 +77,18 @@ export const ALL_PAGE_KEYS = Object.entries(SECTIONS).flatMap(([sectionKey, sect
 const ALL = ALL_PAGE_KEYS
 
 const ROLE_DEFAULTS = {
-  admin: ALL,
+  // Admin gets everything EXCEPT the hidden developer_tools.payroll page —
+  // Jeff's request specifically: admin shouldn't be able to reach the
+  // payroll app, whether by role default or by a permission_overrides
+  // grant (UserDetailModal's Page Access section also hides that
+  // checkbox from non-developer viewers, so admin can't grant it either).
+  admin: ALL.filter((key) => key !== 'developer_tools.payroll'),
+
+  // The developer role is admin's superset: same full access, PLUS the
+  // payroll app. Hidden everywhere else (see visibleRoleEntries/
+  // roleLabelFor) — only a developer account itself ever sees this role
+  // name; to anyone else it reads as "Admin".
+  developer: ALL,
 
   shop_manager: ALL.filter(
     (key) =>
@@ -131,12 +152,46 @@ export const ROLE_LABELS = {
   staff: 'Staff',
   training: 'Training',
   qr_code_maker: '2D Code Maker',
+  developer: 'Developer',
 }
 
 // Roles that shouldn't show up in a "pick a staff member" list — training is
 // a weekly-code account with its own separate content visibility (not
-// someone whose study/quiz/clock-in progress a manager reviews), and
-// qr_code_maker is a device account, not a person at all. Shared by every
-// such picker (Learning Tracker, Staff Time Logs, …) so they can't drift
-// apart on which roles count as "real staff".
-export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker']
+// someone whose study/quiz/clock-in progress a manager reviews),
+// qr_code_maker is a device account, not a person at all, and developer is
+// Jeff's own account for the payroll app, not scheduled staff. Shared by
+// every such picker (Learning Tracker, Staff Time Logs, …) so they can't
+// drift apart on which roles count as "real staff".
+export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'developer']
+
+// Every ROLE_LABELS entry EXCEPT 'developer', unless the viewer IS a
+// developer. Used everywhere a role picker is shown (User Management's
+// Staff/Pending Staff role <select>s) so the hidden role stays invisible
+// to everyone else — per Jeff's request, admin shouldn't see "Developer"
+// as an option at all, only a developer account looking at its own (or
+// another developer's) profile should.
+export function visibleRoleEntries(viewerRole) {
+  return Object.entries(ROLE_LABELS).filter(([key]) => key !== 'developer' || viewerRole === 'developer')
+}
+
+// A role <select>'s options: every role the viewer is allowed to pick,
+// plus — if it's not already in that list — whatever role the record
+// being edited already has, so an existing developer account's role
+// field still has a matching, selectable option (labelled via
+// roleLabelFor, so it still doesn't say "Developer") instead of silently
+// not matching any <option> and rendering blank.
+export function roleSelectOptions(currentRole, viewerRole) {
+  const visible = visibleRoleEntries(viewerRole)
+  if (currentRole && !visible.some(([key]) => key === currentRole)) {
+    return [...visible, [currentRole, roleLabelFor(currentRole, viewerRole)]]
+  }
+  return visible
+}
+
+// Label for a role, masked to the Admin label when the viewer isn't a
+// developer and the role itself is 'developer' — so a developer
+// account's role badge/caption doesn't leak the role's existence either.
+export function roleLabelFor(role, viewerRole) {
+  if (role === 'developer' && viewerRole !== 'developer') return ROLE_LABELS.admin
+  return ROLE_LABELS[role] ?? role
+}
