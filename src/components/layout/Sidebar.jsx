@@ -8,7 +8,7 @@ import Badge from '../ui/Badge'
 // sections/pages a role can see, so the two never disagree. `onNavigate`
 // closes the mobile drawer after a tap; the desktop sidebar doesn't need it.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages, rosterUpdates } = useAuth()
+  const { effectivePages, rosterUpdates, hasFormulaUpdates } = useAuth()
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -38,6 +38,10 @@ export function SidebarNavLinks({ onNavigate }) {
                         0047. Only ever shown on their own "My Roster" link,
                         never someone else's. */}
                     {fullKey === 'roster_hub.my_roster' && rosterUpdates.myRoster && <Badge color="red">Update</Badge>}
+                    {/* A formula item visible at this store is new or has
+                        been edited since this person last opened it — see
+                        migration 0053. */}
+                    {fullKey === 'operations_training.formula' && hasFormulaUpdates && <Badge color="red">Update</Badge>}
                   </NavLink>
                 )
               })}

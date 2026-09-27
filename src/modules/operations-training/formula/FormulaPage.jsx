@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
+import { getUnseenFormulaItems } from '../../../lib/formulaUpdates'
+import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import PronounceButton from '../../../components/ui/PronounceButton'
@@ -15,6 +17,8 @@ const GROUPS = [
   { key: 'others', label: 'Others' },
 ]
 
+const GROUP_LABELS = Object.fromEntries(GROUPS.map((g) => [g.key, g.label]))
+
 // A synthetic category, not a real `formula_categories` row — gathers every
 // drink flagged "Top 10" (Admin Center > Formula Database > edit a drink)
 // regardless of which real category it's in. Picking it doesn't move a
@@ -24,11 +28,33 @@ const GROUPS = [
 const TOP10_CATEGORY = { id: '__top10__', name: '⭐ Top 10' }
 
 export default function FormulaPage() {
-  const { currentStoreId } = useAuth()
+  const { profile, currentStoreId } = useAuth()
   const [group, setGroup] = useState('drink')
   const [category, setCategory] = useState(null) // drilled-into category, drink group only
   const [tipsCategory, setTipsCategory] = useState(null)
   const [openItem, setOpenItem] = useState(null)
+  // New/edited-since-last-seen items, across every group — see migration
+  // 0053 / src/lib/formulaUpdates.js. Loaded once per person+store rather
+  // than inside the "Update" tab itself, so the tab can simply not render
+  // at all when this is empty (per Jeff's spec: no updates = no tab).
+  const [updateItems, setUpdateItems] = useState([])
+
+  useEffect(() => {
+    let active = true
+    getUnseenFormulaItems(profile?.id, currentStoreId).then((items) => {
+      if (active) setUpdateItems(items)
+    })
+    return () => {
+      active = false
+    }
+  }, [profile?.id, currentStoreId])
+
+  // If the "Update" tab itself disappears (its last item just got opened
+  // and marked seen) while it was the active tab, fall back to Drink rather
+  // than leaving the page on a now-nonexistent tab.
+  useEffect(() => {
+    if (group === 'update' && !updateItems.length) setGroup('drink')
+  }, [group, updateItems.length])
 
   return (
     <div>
@@ -36,6 +62,20 @@ export default function FormulaPage() {
       <p className="mb-4 text-sm text-gray-500">Browse drink recipes, tea, toppings and other prep instructions.</p>
 
       <div className="mb-5 flex gap-1 border-b border-brand-100">
+        {updateItems.length > 0 && (
+          <button
+            onClick={() => {
+              setGroup('update')
+              setCategory(null)
+            }}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium ${
+              group === 'update' ? 'border-b-2 border-red-500 text-red-600' : 'text-red-500 hover:text-red-600'
+            }`}
+          >
+            Update
+            <Badge color="red">{updateItems.length}</Badge>
+          </button>
+        )}
         {GROUPS.map((g) => (
           <button
             key={g.key}
@@ -54,6 +94,7 @@ export default function FormulaPage() {
         ))}
       </div>
 
+      {group === 'update' && <UpdateItemList items={updateItems} onOpenItem={setOpenItem} />}
       {group === 'drink' && !category && (
         <DrinkCategories onSelect={setCategory} onTips={setTipsCategory} />
       )}
@@ -68,12 +109,63 @@ export default function FormulaPage() {
           onOpenItem={setOpenItem}
         />
       )}
-      {group !== 'drink' && (
+      {group !== 'drink' && group !== 'update' && (
         <ItemList groupKey={group} categoryId={null} storeId={currentStoreId} onOpenItem={setOpenItem} />
       )}
 
       <TipsModal category={tipsCategory} onClose={() => setTipsCategory(null)} />
-      <FormulaItemDetail item={openItem} onClose={() => setOpenItem(null)} />
+      <FormulaItemDetail
+        item={openItem}
+        onClose={() => setOpenItem(null)}
+        onSeen={(itemId) => setUpdateItems((prev) => prev.filter((i) => i.id !== itemId))}
+      />
+    </div>
+  )
+}
+
+// Flat list spanning every group (a modified item could be a tea or topping,
+// not just a drink) — each row is tagged with its group (and drink category,
+// where there is one) since they're mixed together here.
+function UpdateItemList({ items, onOpenItem }) {
+  const [categoryNames, setCategoryNames] = useState({}) // category_id -> name, drink items only
+
+  useEffect(() => {
+    const categoryIds = [...new Set(items.filter((i) => i.category_id).map((i) => i.category_id))]
+    if (!categoryIds.length) {
+      setCategoryNames({})
+      return
+    }
+    supabase
+      .from('formula_categories')
+      .select('id, name')
+      .in('id', categoryIds)
+      .then(({ data }) => setCategoryNames(Object.fromEntries((data ?? []).map((c) => [c.id, c.name]))))
+  }, [items])
+
+  return (
+    <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          onClick={() => onOpenItem(item)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50"
+        >
+          <span className="flex items-center gap-2">
+            <span className="font-medium text-gray-800">{item.name_en}</span>
+            {item.name_zh && (
+              <span className="flex items-center gap-1 text-sm text-brand-600 font-zh">
+                {item.name_zh}
+                <PronounceButton text={item.name_zh} />
+              </span>
+            )}
+            <span className="text-xs text-gray-400">
+              {GROUP_LABELS[item.group_key] ?? item.group_key}
+              {categoryNames[item.category_id] ? ` · ${categoryNames[item.category_id]}` : ''}
+            </span>
+          </span>
+          <span className="text-gray-300">›</span>
+        </button>
+      ))}
     </div>
   )
 }

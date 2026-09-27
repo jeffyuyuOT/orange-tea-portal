@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabaseClient'
 import { getEffectivePages } from './permissions'
+import { getUnseenFormulaItems } from './formulaUpdates'
 
 const AuthContext = createContext(null)
 
@@ -38,6 +39,12 @@ export function AuthProvider({ children }) {
   // now computes and owns entirely on its own, so there's nothing for this
   // context to track for it any more.)
   const [rosterUpdates, setRosterUpdates] = useState({ myRoster: false })
+  // "Update" badge next to Formula in the Sidebar — see migration 0053 /
+  // src/lib/formulaUpdates.js: true when at least one formula item visible
+  // at this store is new or has been edited (by anyone) since this person
+  // last opened it. Lives here for the same reason rosterUpdates does — the
+  // Sidebar is a separate, always-mounted component.
+  const [hasFormulaUpdates, setHasFormulaUpdates] = useState(false)
 
   const loadProfileData = useCallback(async (userId) => {
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
@@ -146,6 +153,23 @@ export function AuthProvider({ children }) {
     refreshRosterUpdates()
   }, [refreshRosterUpdates])
 
+  // Recomputes the Formula "Update" badge for the current person + store.
+  // Called on login/store-switch, and again by FormulaItemDetail right
+  // after someone opens an item (which marks it seen), so the badge clears
+  // immediately without needing a full page reload.
+  const refreshFormulaUpdates = useCallback(async () => {
+    if (!profile?.id || !currentStoreId) {
+      setHasFormulaUpdates(false)
+      return
+    }
+    const unseen = await getUnseenFormulaItems(profile.id, currentStoreId)
+    setHasFormulaUpdates(unseen.length > 0)
+  }, [profile?.id, currentStoreId])
+
+  useEffect(() => {
+    refreshFormulaUpdates()
+  }, [refreshFormulaUpdates])
+
   const signIn = useCallback(async (email, password) => {
     sessionStorage.removeItem('ot_training_verified')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -193,6 +217,8 @@ export function AuthProvider({ children }) {
     refreshProfile: () => session?.user && loadProfileData(session.user.id),
     rosterUpdates,
     refreshRosterUpdates,
+    hasFormulaUpdates,
+    refreshFormulaUpdates,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

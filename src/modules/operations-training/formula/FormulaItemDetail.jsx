@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
+import { useAuth } from '../../../lib/AuthContext'
+import { markFormulaItemSeen } from '../../../lib/formulaUpdates'
 import Modal from '../../../components/ui/Modal'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
 import PronounceButton from '../../../components/ui/PronounceButton'
@@ -17,7 +19,8 @@ function stripHtml(html) {
 // for every drink/tea/topping/other item straight from the database. The
 // ingredients/notes section itself is drawn by FormulaIngredientsView,
 // shared with Edit Item's live Preview so the two can't drift apart.
-export default function FormulaItemDetail({ item, onClose }) {
+export default function FormulaItemDetail({ item, onClose, onSeen }) {
+  const { profile, refreshFormulaUpdates } = useAuth()
   const [allIngredients, setAllIngredients] = useState([])
   const [sizes, setSizes] = useState([]) // sizes this item offers; [] = single formula, no sizing
   const [annotationsAbove, setAnnotationsAbove] = useState([])
@@ -73,6 +76,18 @@ export default function FormulaItemDetail({ item, onClose }) {
       active = false
     }
   }, [item])
+
+  // Opening an item's detail is what "reading it" means for the Formula
+  // "Update" category (migration 0053) — record that this person has now
+  // seen it as of its CURRENT updated_at, so it drops out of their Update
+  // list/badge immediately, and reappears if it's edited again later.
+  useEffect(() => {
+    if (!item || !profile?.id) return
+    markFormulaItemSeen(profile.id, item).then(() => {
+      onSeen?.(item.id)
+      refreshFormulaUpdates?.()
+    })
+  }, [item, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Steps that were added but never actually filled in (blank text, no
   // image) don't get a number shown to staff — see ItemEditModal, which
