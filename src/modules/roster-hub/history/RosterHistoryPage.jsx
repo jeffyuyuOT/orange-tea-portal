@@ -7,6 +7,7 @@ import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { exportRosterGrid, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
+import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import MultiStoreExportModal from './MultiStoreExportModal'
 
 export default function RosterHistoryPage() {
@@ -38,11 +39,14 @@ export default function RosterHistoryPage() {
     // came from.
     const [{ data: rows }, { data: memberships }] = await Promise.all([
       supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
-      supabase.from('user_stores').select('profile_id, roster_display_name, profiles(id, first_name, last_name, is_active)').eq('store_id', currentStoreId),
+      supabase.from('user_stores').select('profile_id, roster_display_name, profiles(id, first_name, last_name, is_active, role)').eq('store_id', currentStoreId),
     ])
     const nameByProfile = new Map((memberships ?? []).map((m) => [m.profile_id, m.roster_display_name]))
+    // Exported "blank" rows for staff with no shift that week come from this
+    // list too, so keep it in step with Manage Roster: training/qr_code_maker
+    // accounts don't get scheduled and shouldn't show up in the export either.
     const staffList = (memberships ?? [])
-      .filter((m) => m.profiles?.is_active)
+      .filter((m) => m.profiles?.is_active && !NON_PICKABLE_STAFF_ROLES.includes(m.profiles.role))
       .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
     const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(period.week_start_date), i), 'yyyy-MM-dd'))
     const entries = (rows ?? []).map((r) => ({

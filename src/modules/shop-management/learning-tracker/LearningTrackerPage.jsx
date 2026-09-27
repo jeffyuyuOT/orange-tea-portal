@@ -4,6 +4,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Badge from '../../../components/ui/Badge'
 import { rosterDisplayName } from '../../../lib/excelRoster'
+import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import StaffStudyDetail from './StaffStudyDetail'
 
 export default function LearningTrackerPage() {
@@ -26,7 +27,7 @@ export default function LearningTrackerPage() {
       .then(({ data }) => {
         const rows = (data ?? [])
           .map((m) => (m.profiles?.is_active ? { ...m.profiles, roster_display_name: m.roster_display_name } : null))
-          .filter(Boolean)
+          .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role))
         // Re-sort by the same display name shown below, so the list order
         // matches what's actually on screen instead of each person's
         // (possibly different) raw first name.

@@ -2,13 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import AttendanceLogTable from '../../dashboard/time-attendance/AttendanceLogTable'
-
-// Roles that don't get a Time & Attendance tab of their own (see
-// permissions.js) have nothing to show up here either — training is a
-// weekly-code account, not someone who clocks in, and qr_code_maker is the
-// device account for the store's own QR display, not a person.
-const EXCLUDED_ROLES = ['training', 'qr_code_maker']
 
 // Manager-facing view of the same Attendance Logs table each employee sees
 // for themselves under My Dashboard > Time & Attendance — a manager just
@@ -36,7 +31,7 @@ export default function StaffTimeLogsPage() {
         if (!active) return
         const rows = (data ?? [])
           .map((m) => m.profiles)
-          .filter((p) => p && p.is_active && !EXCLUDED_ROLES.includes(p.role))
+          .filter((p) => p && p.is_active && !NON_PICKABLE_STAFF_ROLES.includes(p.role))
           .sort((a, b) => (a.first_name ?? '').localeCompare(b.first_name ?? ''))
         setStaff(rows)
         setLoading(false)

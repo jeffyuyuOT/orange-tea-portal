@@ -18,6 +18,7 @@ import {
   pendingAsStaff,
   pendingRosterName,
 } from '../../../lib/excelRoster'
+import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 
 export default function ManageRosterPage() {
   const { currentStoreId, accessibleStores, profile, refreshRosterUpdates } = useAuth()
@@ -114,11 +115,14 @@ export default function ManageRosterPage() {
       // under a different name at each, set from that store's Staff
       // Information. Folded back onto the embedded profile below so
       // rosterDisplayName() just reads `.roster_display_name` either way.
-      .select('roster_display_name, profiles(id, first_name, last_name, email, is_active)')
+      .select('roster_display_name, profiles(id, first_name, last_name, email, is_active, role)')
       .eq('store_id', currentStoreId)
       .then(({ data }) => {
+        // training/qr_code_maker accounts don't get scheduled at all (per
+        // Jeff — they don't work store shifts), so they never auto-populate
+        // onto this grid the way real staff do.
         const list = (data ?? [])
-          .filter((r) => r.profiles?.is_active)
+          .filter((r) => r.profiles?.is_active && !NON_PICKABLE_STAFF_ROLES.includes(r.profiles.role))
           .map((r) => ({ ...r.profiles, roster_display_name: r.roster_display_name }))
         setStaff(list)
       })

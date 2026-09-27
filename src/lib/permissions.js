@@ -132,3 +132,11 @@ export const ROLE_LABELS = {
   training: 'Training',
   qr_code_maker: '2D Code Maker',
 }
+
+// Roles that shouldn't show up in a "pick a staff member" list — training is
+// a weekly-code account with its own separate content visibility (not
+// someone whose study/quiz/clock-in progress a manager reviews), and
+// qr_code_maker is a device account, not a person at all. Shared by every
+// such picker (Learning Tracker, Staff Time Logs, …) so they can't drift
+// apart on which roles count as "real staff".
+export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker']

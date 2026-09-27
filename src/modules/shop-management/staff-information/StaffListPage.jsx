@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Badge from '../../../components/ui/Badge'
-import { ROLE_LABELS } from '../../../lib/permissions'
+import { ROLE_LABELS, NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 import StaffDetailModal from './StaffDetailModal'
 import PendingStaffDetailModal from './PendingStaffDetailModal'
@@ -34,7 +34,13 @@ export default function StaffListPage() {
     ])
     const staffRows = (memberships ?? [])
       .map((m) => (m.profiles ? { ...m.profiles, roster_display_name: m.roster_display_name } : null))
-      .filter(Boolean)
+      // training (weekly-code account) and qr_code_maker (the store's QR
+      // display device) aren't "staff" in the sense this page or the
+      // roster/schedule cares about — they don't clock in, get scheduled,
+      // or show up in Bulletin Board, so they're kept out of this list too
+      // (their store assignment is still managed the normal way from
+      // Admin Center > User Management, they just don't clutter this page).
+      .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role))
       .sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0) || (a.first_name ?? '').localeCompare(b.first_name ?? ''))
     setStaff(staffRows)
     setPendingStaff(pendingRows ?? [])
