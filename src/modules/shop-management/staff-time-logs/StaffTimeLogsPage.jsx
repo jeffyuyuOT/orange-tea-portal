@@ -97,7 +97,7 @@ export default function StaffTimeLogsPage() {
           <h2 className="mb-2 text-sm font-semibold text-brand-700">
             {selected.first_name} {selected.last_name}
           </h2>
-          <AttendanceLogTable profileId={selected.id} />
+          <AttendanceLogTable profileId={selected.id} storeId={currentStoreId} />
         </div>
       )}
     </div>

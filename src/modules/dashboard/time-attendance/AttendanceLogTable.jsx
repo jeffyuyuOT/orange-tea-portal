@@ -17,7 +17,17 @@ function daysAgoStr(n) {
 // Attendance) and Shop Management > Staff Time Logs (a manager picks an
 // employee, this renders the same way) — one place computing shifts/totals
 // so the two views can't drift apart.
-export default function AttendanceLogTable({ profileId }) {
+//
+// `storeId` is optional and only passed by Staff Time Logs: a manager
+// looking at a multi-store employee while store-switched to Store A should
+// only see that employee's Store A punches, not the ones they racked up at
+// Store B — each punch already carries the store the SCANNED QR belonged to
+// (see submitClockEvent in src/lib/attendance.js, which records
+// parsed.storeId from the code, never whatever store the phone happened to
+// have selected), so filtering by it here is exact. An employee looking at
+// their own Attendance Logs gets `storeId` omitted on purpose — that's
+// meant to be their whole personal history across every store they work at.
+export default function AttendanceLogTable({ profileId, storeId }) {
   const [from, setFrom] = useState(daysAgoStr(6)) // default: last 7 days, inclusive
   const [to, setTo] = useState(todayStr())
   const [events, setEvents] = useState([])
@@ -30,21 +40,18 @@ export default function AttendanceLogTable({ profileId }) {
     // Fetched unfiltered (by date) and trimmed to the selected range only
     // AFTER pairing into shifts — filtering the raw punches first could cut
     // an overnight shift's clock-in off the front of the range it belongs to.
-    supabase
-      .from('attendance_events')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('occurred_at', { ascending: true })
-      .then(({ data }) => {
-        if (active) {
-          setEvents(data ?? [])
-          setLoading(false)
-        }
-      })
+    let query = supabase.from('attendance_events').select('*').eq('profile_id', profileId)
+    if (storeId) query = query.eq('store_id', storeId)
+    query.order('occurred_at', { ascending: true }).then(({ data }) => {
+      if (active) {
+        setEvents(data ?? [])
+        setLoading(false)
+      }
+    })
     return () => {
       active = false
     }
-  }, [profileId])
+  }, [profileId, storeId])
 
   const allSessions = pairEventsIntoSessions(events)
   const sessions = allSessions.filter((s) => s.date && s.date >= from && s.date <= to)
