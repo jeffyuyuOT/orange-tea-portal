@@ -43,7 +43,10 @@ export default function BulletinPage() {
   const [showImportant, setShowImportant] = useState(false)
 
   const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager'
-  const canPost = isManagerOrAdmin
+  // Staff can post too now (migration 0056, per Jeff) — they just can only
+  // edit/delete the posts they themselves created afterwards (enforced in
+  // AnnouncementDetailModal.jsx + RLS), not anyone else's.
+  const canPost = isManagerOrAdmin || profile?.role === 'staff'
 
   async function load() {
     if (!currentStoreId || !profile) return
@@ -51,7 +54,7 @@ export default function BulletinPage() {
 
     const oneMonthAgo = addMonths(new Date(), -1).toISOString()
 
-    const [{ data: announcementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }] = await Promise.all([
+    const [{ data: announcementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }, { data: announcementReadRows }] = await Promise.all([
       supabase
         .from('announcements')
         .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
@@ -84,6 +87,10 @@ export default function BulletinPage() {
       // roster_period_views, migration 0048).
       supabase.from('roster_change_events').select('roster_period_id, changed_at').eq('store_id', currentStoreId),
       supabase.from('roster_period_views').select('roster_period_id, viewed_at').eq('profile_id', profile.id),
+      // This person's own "last opened THIS announcement/complaint"
+      // timestamp (migration 0056) — same New/Update pattern as the Roster
+      // tab above, just keyed by announcement_id instead of roster period.
+      supabase.from('announcement_reads').select('announcement_id, read_at').eq('profile_id', profile.id),
     ])
 
     const reminderMonths = settingsRow?.reminder_period_months ?? 3
@@ -139,6 +146,18 @@ export default function BulletinPage() {
         .filter(Boolean)
     }
 
+    // This person's own "last opened THIS announcement" timestamp
+    // (migration 0056), by announcement id — read once, reused for both
+    // announcements and customer complaints below (they're the same table).
+    const announcementReadAt = new Map((announcementReadRows ?? []).map((r) => [r.announcement_id, r.read_at]))
+    // Never opened at all → "New". Opened before, but edited again since →
+    // "Update". Both clear the same way: actually opening it (see openItem
+    // below) upserts announcement_reads and clears the flag locally.
+    function readFlags(a) {
+      const readAt = announcementReadAt.get(a.id)
+      return { isNewItem: !readAt, hasUpdate: !!readAt && readAt < a.updated_at }
+    }
+
     const announcementItems = (announcementRows ?? []).map((a) => {
       // Prefer the permanent name snapshot over the live creator/editor
       // join, which goes blank once that person's account is removed.
@@ -151,6 +170,7 @@ export default function BulletinPage() {
         title: a.title,
         subtitle: `${new Date(a.updated_at).toLocaleString()}${actorName ? ` · ${actorName}` : ''}`,
         isImportant: a.is_important,
+        ...readFlags(a),
         raw: a,
       }
     })
@@ -169,6 +189,7 @@ export default function BulletinPage() {
         subtitle: `${new Date(a.updated_at).toLocaleString()}${actorName ? ` · ${actorName}` : ''}${solvedNote}`,
         isImportant: a.is_important,
         solved: a.solved,
+        ...readFlags(a),
         raw: a,
       }
     })
@@ -226,14 +247,33 @@ export default function BulletinPage() {
   // filters never affects this, only actually opening a week does (openItem
   // below), so it only goes out once every week's been opened.
   const hasUnviewedRoster = useMemo(() => items.some((i) => i.type === 'roster' && i.hasUpdate), [items])
+  // Same small-dot treatment for the other two tabs (migration 0056) —
+  // "unviewed" covers both a never-opened item (isNewItem) and one that's
+  // been edited again since this person last opened it (hasUpdate).
+  const hasUnviewedAnnouncement = useMemo(
+    () => items.some((i) => i.type === 'announcement' && (i.isNewItem || i.hasUpdate)),
+    [items]
+  )
+  const hasUnviewedComplaint = useMemo(
+    () => items.some((i) => i.type === 'customer_complaint' && (i.isNewItem || i.hasUpdate)),
+    [items]
+  )
 
   function toggleFilter(key) {
     setFilter((prev) => (prev === key ? null : key))
   }
 
   function openItem(item) {
-    if (item.type === 'announcement' || item.type === 'customer_complaint') setOpenAnnouncementId(item.raw.id)
-    else if (item.type === 'roster') {
+    if (item.type === 'announcement' || item.type === 'customer_complaint') {
+      // Unlike the Roster branch below, the read receipt itself is written
+      // by AnnouncementDetailModal (migration 0056) the moment it loads an
+      // existing item — not here — so it's covered no matter how the modal
+      // was opened (this list, or the separate "⭐ Important Announcements"
+      // picker). This list's own New/Update flags just get refreshed by the
+      // full reload on close (see onClose below) rather than an optimistic
+      // local patch.
+      setOpenAnnouncementId(item.raw.id)
+    } else if (item.type === 'roster') {
       setOpenRosterPeriod(item.raw)
       // Opening THIS specific week is "having looked at it" — clears its own
       // Update badge (migration 0048), independent of every other week's.
@@ -267,6 +307,12 @@ export default function BulletinPage() {
                   rather than repeating an "Update" pill here too. Stays lit
                   until every week in the list has actually been opened. */}
               {f.key === 'roster' && hasUnviewedRoster && (
+                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
+              )}
+              {f.key === 'announcement' && hasUnviewedAnnouncement && (
+                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
+              )}
+              {f.key === 'customer_complaint' && hasUnviewedComplaint && (
                 <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
               )}
             </button>
@@ -310,6 +356,12 @@ export default function BulletinPage() {
                       week's roster just changed, and whether a complaint's
                       been solved. */}
                   {item.type === 'roster' && item.hasUpdate && <Badge color="red">Update</Badge>}
+                  {(item.type === 'announcement' || item.type === 'customer_complaint') && item.isNewItem && (
+                    <Badge color="red">New</Badge>
+                  )}
+                  {(item.type === 'announcement' || item.type === 'customer_complaint') && item.hasUpdate && (
+                    <Badge color="red">Update</Badge>
+                  )}
                   {item.type === 'customer_complaint' &&
                     (item.solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
                   <span className="shrink-0 text-xs text-gray-400">{item.subtitle}</span>
@@ -332,7 +384,14 @@ export default function BulletinPage() {
         <AnnouncementDetailModal
           announcementId={openAnnouncementId === 'new' ? null : openAnnouncementId}
           storeId={currentStoreId}
-          onClose={() => setOpenAnnouncementId(null)}
+          onClose={() => {
+            setOpenAnnouncementId(null)
+            // Just viewing (no save) can still have cleared this item's own
+            // New/Update flag — the modal marks it read as soon as it loads
+            // an existing item (migration 0056) — so refresh to pick that up,
+            // same as the onSaved reload just below already does for edits.
+            load()
+          }}
           onSaved={() => {
             setOpenAnnouncementId(null)
             load()

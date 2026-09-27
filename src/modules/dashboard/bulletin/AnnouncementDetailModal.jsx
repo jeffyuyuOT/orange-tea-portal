@@ -6,6 +6,7 @@ import Button from '../../../components/ui/Button'
 import Badge from '../../../components/ui/Badge'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
+import AnnouncementViewersModal from './AnnouncementViewersModal'
 
 // The category dropdown is really just a friendlier front end over two
 // independent fields: `category` (Normal vs Customer Complaint — a real
@@ -29,7 +30,7 @@ function nameOf(profile) {
 export default function AnnouncementDetailModal({ announcementId, storeId, onClose, onSaved }) {
   const { profile } = useAuth()
   const isNew = !announcementId
-  const canEdit = profile?.role === 'admin' || profile?.role === 'shop_manager'
+  const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager'
   const [editing, setEditing] = useState(isNew)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -46,18 +47,30 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [solvedAt, setSolvedAt] = useState(null)
   const [solving, setSolving] = useState(false)
   const [history, setHistory] = useState([])
+  const [comments, setComments] = useState([])
+  const [newComment, setNewComment] = useState('')
+  const [postingComment, setPostingComment] = useState(false)
+  const [showViewers, setShowViewers] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const isComplaint = category === 'customer_complaint'
   const isCreator = !!profile && profile.id === createdBy
-  // Everyone who can post can delete (per the "manager admin write
-  // announcements" RLS policy — any manager/admin with access to this
-  // store, not just the original poster), so the button is really always
-  // available to canEdit; only the label changes to reflect that the
-  // creator is "retracting" their own post rather than moderating
-  // someone else's.
+  // Who can edit the title/content or delete/retract this post: the
+  // original creator (of a staff-posted item — see migration 0056),
+  // manager/admin at this store (who can still touch anyone's post), or
+  // anyone at all while creating a brand-new one. Everyone else (a staff
+  // member viewing someone ELSE's post) still gets the Comments section
+  // below, and the Solved checkbox on a complaint, just not this footer.
+  const canManageThis = isNew || isManagerOrAdmin || isCreator
+  // Everyone who can manage a post can delete it (per the "manager admin
+  // write announcements" RLS policy for manager/admin — any manager/admin
+  // with access to this store, not just the original poster — and per the
+  // "staff delete own announcements" policy for a staff creator, which is
+  // their own post only), so the button is really always available to
+  // canManageThis; only the label changes to reflect that the creator is
+  // "retracting" their own post rather than moderating someone else's.
   const deleteLabel = isCreator ? 'Retract' : 'Delete'
   const categorySelectValue = isComplaint ? 'customer_complaint' : isImportant ? 'important' : 'normal'
 
@@ -87,7 +100,29 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       .eq('announcement_id', announcementId)
       .order('acted_at', { ascending: false })
       .then(({ data }) => setHistory(data ?? []))
-  }, [announcementId, isNew])
+    // "Supplement" comments (migration 0056) — anyone who can see this
+    // post can add one, regardless of who posted it, separate from the
+    // History log above and from editing the post's own title/content.
+    supabase
+      .from('announcement_comments')
+      .select('*, author:author_id(first_name,last_name)')
+      .eq('announcement_id', announcementId)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => setComments(data ?? []))
+    // Opening an EXISTING item is "having looked at it" — marks/refreshes
+    // this person's own read receipt (migration 0056), which is what clears
+    // its New/Update badge on the Bulletin Board list (BulletinPage.jsx
+    // reloads on close to pick this up) and what populates the manager/
+    // admin-only "View history" list (AnnouncementViewersModal). Written
+    // here rather than by whichever list opened this modal, so it's covered
+    // no matter the entry point (the main feed, or the separate "⭐
+    // Important Announcements" picker).
+    if (profile?.id) {
+      supabase
+        .from('announcement_reads')
+        .upsert({ profile_id: profile.id, announcement_id: announcementId, read_at: new Date().toISOString() }, { onConflict: 'profile_id,announcement_id' })
+    }
+  }, [announcementId, isNew]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function onCategorySelect(value) {
     if (value === 'customer_complaint') {
@@ -141,6 +176,15 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
         await supabase
           .from('announcement_history')
           .insert({ announcement_id: announcementId, action: 'edited', actor_id: profile.id, actor_name: actorName })
+        // Same as the isNew branch above — the editor has obviously just
+        // seen their own edit, so mark it read for them too (this time as
+        // a real upsert, since a read row from before the edit may already
+        // exist and needs its read_at bumped past the new updated_at, or
+        // this same edit would otherwise show up flagged Update on the
+        // editor's own Bulletin Board).
+        await supabase
+          .from('announcement_reads')
+          .upsert({ profile_id: profile.id, announcement_id: announcementId, read_at: new Date().toISOString() }, { onConflict: 'profile_id,announcement_id' })
       }
       onSaved()
     } finally {
@@ -148,30 +192,50 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     }
   }
 
+  // Posts a "supplement" comment (migration 0056) — open to anyone who can
+  // see this post, regardless of who created it, separate from Edit/Save
+  // above (which stays restricted to the creator + manager/admin).
+  async function postComment() {
+    const body = newComment.trim()
+    if (!body) return
+    setPostingComment(true)
+    const actorName = nameOf(profile)
+    const { data, error } = await supabase
+      .from('announcement_comments')
+      .insert({ announcement_id: announcementId, author_id: profile.id, author_name: actorName, content: body })
+      .select('*, author:author_id(first_name,last_name)')
+      .single()
+    setPostingComment(false)
+    if (error) {
+      alert(`Could not post comment: ${error.message}`)
+      return
+    }
+    setComments((prev) => [...prev, data])
+    setNewComment('')
+  }
+
   // Writes the staged Solved/Unsolved change — independent of the Edit/Save
   // flow, so solved_at reflects the moment Submit was actually clicked, not
-  // whenever some unrelated edit happens to be saved.
+  // whenever some unrelated edit happens to be saved. Routed through the
+  // set_complaint_solved() function (migration 0056) rather than a direct
+  // update, so anyone who can see this complaint — staff included, not
+  // just the creator or manager/admin — can toggle Solved without also
+  // getting broad UPDATE rights over the complaint's title/content.
   async function submitSolved() {
     setSolving(true)
-    const actorName = nameOf(profile)
-    const payload = draftSolved
-      ? { solved: true, solved_by: profile.id, solved_by_name: actorName, solved_at: new Date().toISOString() }
-      : { solved: false, solved_by: null, solved_by_name: null, solved_at: null }
-    const { error } = await supabase.from('announcements').update(payload).eq('id', announcementId)
-    if (!error) {
-      await supabase
-        .from('announcement_history')
-        .insert({ announcement_id: announcementId, action: draftSolved ? 'solved' : 'reopened', actor_id: profile.id, actor_name: actorName })
-    }
+    const { error } = await supabase.rpc('set_complaint_solved', {
+      p_announcement_id: announcementId,
+      p_solved: draftSolved,
+    })
     setSolving(false)
     if (error) {
       alert(`Update failed: ${error.message}`)
       return
     }
-    setSolved(payload.solved)
-    setDraftSolved(payload.solved)
-    setSolvedByName(payload.solved_by_name)
-    setSolvedAt(payload.solved_at)
+    const actorName = nameOf(profile)
+    setSolved(draftSolved)
+    setSolvedByName(draftSolved ? actorName : null)
+    setSolvedAt(draftSolved ? new Date().toISOString() : null)
     // Without this, the write above succeeds but the list this modal was
     // opened from (BulletinPage / AnnouncementsTab) never re-fetches, so it
     // keeps showing whatever Solved/Unsolved badge it had when the modal
@@ -200,7 +264,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       wide
       title={isNew ? 'New Announcement' : editing ? 'Edit Announcement' : title}
       footer={
-        canEdit &&
+        canManageThis &&
         (editing ? (
           <>
             <Button variant="secondary" onClick={() => (isNew ? onClose() : setEditing(false))}>
@@ -215,6 +279,13 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             <Button variant="danger" onClick={() => setConfirmDelete(true)}>
               {deleteLabel}
             </Button>
+            {/* Manager/admin-only read-receipt list — who has actually
+                opened this post (see migration 0056 / AnnouncementViewersModal). */}
+            {isManagerOrAdmin && (
+              <Button variant="secondary" onClick={() => setShowViewers(true)}>
+                View history
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -291,6 +362,40 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           )}
 
           <RichTextViewer html={content} />
+
+          {/* "Supplement" comments (migration 0056) — anyone who can see
+              this post can add one here, regardless of who created it;
+              this is separate from Edit/Save above, which stays limited to
+              the creator + manager/admin. */}
+          <div>
+            <h4 className="mb-1 text-xs font-semibold uppercase text-gray-400">Comments</h4>
+            <ul className="mb-2 space-y-1.5">
+              {comments.map((c) => (
+                <li key={c.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                  <p className="whitespace-pre-wrap text-gray-700">{c.content}</p>
+                  <p className="mt-1 text-xs text-gray-400">
+                    {c.author_name || (c.author ? `${c.author.first_name ?? ''} ${c.author.last_name ?? ''}`.trim() : 'Unknown')} ·{' '}
+                    {new Date(c.created_at).toLocaleString()}
+                  </p>
+                </li>
+              ))}
+              {!comments.length && <li className="text-xs text-gray-400">No comments yet.</li>}
+            </ul>
+            <div className="flex gap-2">
+              <input
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && postComment()}
+                placeholder="Add a comment…"
+                disabled={postingComment}
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+              />
+              <Button onClick={postComment} disabled={postingComment || !newComment.trim()} className="!px-3 !py-1.5 !text-xs">
+                {postingComment ? 'Posting…' : 'Post'}
+              </Button>
+            </div>
+          </div>
+
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase text-gray-400">History</h4>
             <ul className="space-y-1 text-xs text-gray-500">
@@ -320,6 +425,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           )}
         </div>
       )}
+      {showViewers && <AnnouncementViewersModal announcementId={announcementId} onClose={() => setShowViewers(false)} />}
     </Modal>
   )
 }
