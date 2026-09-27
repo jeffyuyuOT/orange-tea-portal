@@ -126,6 +126,14 @@ const PAYMENT_TYPES = ["FT","PT","Casual","CA","Direct"];
 const PAYMENT_TYPE_LABEL = {FT:"FT (Full time)",PT:"PT (Part time)",Casual:"Casual",CA:"CA",Direct:"Direct"};
 const DEFAULT_HOUR_CAP = 76; // 可報時數上限，未設定時的預設值 (hrs per calc period)
 
+// Roles that aren't "real" scheduled staff for payroll purposes — mirrors
+// src/lib/permissions.js's NON_PICKABLE_STAFF_ROLES. This static file (not
+// part of the Vite build) can't import from the source tree, so the list
+// is duplicated here; keep it in sync if that one ever changes. Used by
+// fetchRealStaffForStore() below to skip training/QR-code/developer/
+// accountant accounts when pulling Staff Information into Payroll.
+const NON_PAYROLL_STAFF_ROLES = ["training", "qr_code_maker", "developer", "accountant"];
+
 // --- QLD school term calendar, for the "school student" automatic hour cap ---
 // Queensland state-school term dates (first/last day students attend),
 // sourced from Education Queensland's published school calendar. Only the
@@ -335,6 +343,12 @@ function defaultSettings(){
     penalty: JSON.parse(JSON.stringify(DEFAULT_PENALTY)),
     taxBrackets:{ withThreshold: annualBracketsWithThreshold(), noThreshold: annualBracketsNoThreshold(), medicareLevy:0.02 },
     autoBackup:false,
+    // Off by default -- see the long comment on the "同步 OT Portal Staff
+    // 資料" checkbox in renderSysSettings() for why. When off,
+    // syncEmployeesFromStaffInfo() only ever adds/updates linked employees,
+    // never resigns one just because it's missing from Staff Information's
+    // current (still-incomplete) data.
+    syncStaffInfoFully:false,
   };
 }
 
@@ -1691,6 +1705,11 @@ function makeRow(match, displayName, age, buckets, settings, splitLabel, periodF
 let currentSettings = null;
 let currentStores = [];
 let currentEmployees = [];
+// OT Portal's actual `stores` table (Staff Information's real store list) —
+// loaded read-only, only to match a Payroll store (currentStores, above,
+// which stays independently managed) to a real store by name. See
+// findRealStore()/syncEmployeesFromStaffInfo() below. Never written to.
+let realStores = [];
 let activeTopTab = "t1";
 let activeSubTab3 = "branch";
 let activeSubTab2 = "records";
@@ -1720,6 +1739,7 @@ async function loadAllData(){
   currentSettings = await idbGet("settings","app");
   if(!currentSettings){ currentSettings = defaultSettings(); await idbPut("settings", currentSettings); }
   if(!currentSettings.taxBrackets) currentSettings.taxBrackets = {withThreshold:annualBracketsWithThreshold(),noThreshold:annualBracketsNoThreshold(),medicareLevy:0.02};
+  if(currentSettings.syncStaffInfoFully===undefined){ currentSettings.syncStaffInfoFully = false; await idbPut("settings", currentSettings); }
   // Migrate the old {permanent:{...}, casual:{...}} penalty shape (two
   // independently-configured multiplier sets) to the new flat shared shape
   // {saturday, sunday, publicHoliday, casualLoading} -- Casual no longer has
@@ -1738,11 +1758,145 @@ async function loadAllData(){
   }
   currentStores = await idbAll("stores");
   currentEmployees = await idbAll("employees");
+  await loadRealStores();
 }
 async function saveSettings(){ await idbPut("settings", currentSettings); }
 async function saveStore(s){ await idbPut("stores", s); currentStores = await idbAll("stores"); autoBackupIfEnabled(); }
 async function deleteStoreRec(id){ await idbDelete("stores", id); currentStores = await idbAll("stores"); }
 async function saveEmployee(e){ await idbPut("employees", e); currentEmployees = await idbAll("employees"); autoBackupIfEnabled(); }
+
+/* --- Staff Information 同步 (見 NON_PAYROLL_STAFF_ROLES 上方註解) --- */
+async function loadRealStores(){
+  const { data, error } = await sb.from("stores").select("id,name").eq("is_active", true);
+  if(error){ console.error("loadRealStores failed", error); realStores = []; return; }
+  realStores = data || [];
+}
+// 名稱完全相符（不分大小寫、去頭尾空白）才算配對到 —— Payroll 分店資料若沒有
+// 對應到任何一個真實分店，syncEmployeesFromStaffInfo 就完全不會動它。
+function findRealStore(payrollStore){
+  if(!payrollStore) return null;
+  const name = (payrollStore.name||"").trim().toLowerCase();
+  if(!name) return null;
+  return realStores.find(s=>(s.name||"").trim().toLowerCase()===name) || null;
+}
+// 抓這個真實分店目前「在職」、且不是 NON_PAYROLL_STAFF_ROLES 裡角色的員工，
+// 對應到 syncEmployeesFromStaffInfo 需要的 5 個共通欄位 + cash-in-hand 狀態。
+async function fetchRealStaffForStore(realStoreId){
+  const { data, error } = await sb
+    .from("user_stores")
+    .select("profile_id, profiles(*)")
+    .eq("store_id", realStoreId);
+  if(error){ console.error("fetchRealStaffForStore failed", error); return []; }
+  const seen = new Set();
+  const out = [];
+  (data||[]).forEach(row=>{
+    const p = row.profiles;
+    if(!p || seen.has(p.id)) return;
+    if(!p.is_active) return;
+    if(NON_PAYROLL_STAFF_ROLES.includes(p.role)) return;
+    seen.add(p.id);
+    out.push({
+      profileId: p.id,
+      name: `${p.first_name||""} ${p.last_name||""}`.trim() || p.email || "(未命名)",
+      dob: p.date_of_birth || null,
+      tfn: p.tax_file_number || "",
+      email: p.email || "",
+      phone: p.phone || "",
+      hireDate: p.hire_date || null,
+      cashInHand: !!p.cash_in_hand,
+    });
+  });
+  return out;
+}
+// 把某個 Payroll 分店（store）跟它配對到的真實分店（real，findRealStore 的結
+// 果 —— 呼叫端已保證非 null）之間的員工資料同步進 currentEmployees：
+//  - Staff Information 有、這邊還沒登記過的（用 profileId 比對）→ 新增一筆已
+//    連結的員工，付款方式預設 FT，除非勾了 cash-in-hand 就直接帶入 "CA"（這個
+//    app 原本就有的「整筆薪水都算 cash-in-hand」付款方式，不是新類別）。
+//  - 已連結的 → 更新 dob/tfn/email/phone/hireDate 這 5 個共通欄位；若目前勾了
+//    cash-in-hand 但 paymentType 還不是 "CA"，強制改成 "CA" 並把費率歸零。
+//    姓名、銀行資訊、費率等其他欄位不受影響 —— 這些不在 Jeff 要求同步的欄位裡，
+//    仍由 Payroll 這邊自己維護。
+//  - 之前連結過、但這次抓回來的名單裡已經沒有（整個人從 Staff Information /
+//    這個分店移除，或被設為非在職）的 → 比照「離職」按鈕的做法，設定
+//    resignDate（用今天日期），不會直接刪除，保留過去的薪水計算紀錄。
+//    ⚠️ Jeff：這個「視同離職、不直接刪除」的處理方式，是我自己判斷的 —— 你
+//    原本的要求沒有明講這種情況要怎麼處理，如果你比較希望直接刪除，之後跟我
+//    說一聲即可調整。
+async function syncEmployeesFromStaffInfo(store, real){
+  const realStaff = await fetchRealStaffForStore(real.id);
+  const byProfileId = new Map();
+  currentEmployees.forEach(e=>{ if(e.storeId===store.id && e.profileId) byProfileId.set(e.profileId, e); });
+  const seenProfileIds = new Set();
+  let created = 0, updated = 0, resigned = 0;
+
+  for(const rs of realStaff){
+    seenProfileIds.add(rs.profileId);
+    const existing = byProfileId.get(rs.profileId);
+    if(existing){
+      let changed = false;
+      ["dob","tfn","email","phone"].forEach(k=>{ if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; } });
+      if(existing.hireDate!==rs.hireDate){ existing.hireDate = rs.hireDate; changed=true; }
+      if(existing.resignDate){ existing.resignDate = null; changed=true; } // Staff Information 那邊重新在職了
+      if(rs.cashInHand && existing.paymentType!=="CA"){
+        existing.paymentType = "CA";
+        existing.rateMode = "manual";
+        existing.rates = {weekday:0,saturday:0,sunday:0,publicHoliday:0};
+        existing.cashRates = {weekday:0,saturday:0,sunday:0,publicHoliday:0};
+        changed = true;
+      }
+      if(changed){ await saveEmployee(existing); updated++; }
+    } else {
+      const id = "emp_"+await nextId("employee");
+      const order = currentEmployees.filter(e=>e.storeId===store.id).length;
+      const paymentType = rs.cashInHand ? "CA" : "FT";
+      const level = (currentSettings.awardLevels[0]||{}).id;
+      let rates, cashRates;
+      if(paymentType==="CA"){
+        rates = {weekday:0,saturday:0,sunday:0,publicHoliday:0};
+        cashRates = {weekday:0,saturday:0,sunday:0,publicHoliday:0};
+      } else {
+        const age = rs.dob ? calcAge(rs.dob, toISO(new Date())) : null;
+        const r = computeAwardRates(currentSettings, level, paymentType, age);
+        rates = makeRatesObj(r.weekday,r.saturday,r.sunday,r.publicHoliday);
+        cashRates = {...rates};
+      }
+      const emp = {
+        id, storeId: store.id, profileId: rs.profileId, name: rs.name, dob: rs.dob,
+        tfn: rs.tfn, email: rs.email, phone: rs.phone, hireDate: rs.hireDate || toISO(new Date()),
+        resignDate: null, paymentType, level, taxType: "with", rateMode: "award",
+        rates, cashRates, hourCap: null,
+        bankAccountName: "", bankBsb: "", bankAccountNumber: "",
+        documents: {}, order,
+      };
+      await saveEmployee(emp);
+      created++;
+    }
+  }
+
+  // Jeff (2026-09): Staff Information's data is still incomplete right now,
+  // so a linked employee missing from this store's current Staff
+  // Information list doesn't necessarily mean that person actually left --
+  // it may just mean their Staff Information record hasn't been filled in
+  // yet. So resigning a "missing" linked employee only happens when
+  // 系統設置 > Staff Information 同步設定's "同步 OT Portal Staff 資料"
+  // checkbox is turned ON (currentSettings.syncStaffInfoFully) -- with it
+  // off (the default), a payroll employee that's already here is left
+  // alone even if Staff Information doesn't (yet) show them for this
+  // store, and additions/edits above still keep happening either way, only
+  // the resign-on-missing step is skipped.
+  if(currentSettings.syncStaffInfoFully){
+    for(const [profileId, emp] of byProfileId){
+      if(!seenProfileIds.has(profileId) && !emp.resignDate){
+        emp.resignDate = toISO(new Date());
+        await saveEmployee(emp);
+        resigned++;
+      }
+    }
+  }
+
+  return { created, updated, resigned };
+}
 
 function renderApp(){
   $all(".toptab").forEach(t=>{
@@ -3459,7 +3613,12 @@ function openEmployeeCreateModal(storeId, onDone){
     const rates = computeAwardRates(currentSettings, level, "FT", dob?calcAge(dob,toISO(new Date())):null);
     const ratesObj = makeRatesObj(rates.weekday,rates.saturday,rates.sunday,rates.publicHoliday);
     const emp = {
-      id, storeId, name, dob, tfn:$("#etfn",m).value.trim(), email:$("#eemail",m).value.trim(),
+      // profileId stays null for a manually-created employee — this is the
+      // escape hatch for someone genuinely not in OT Portal at all (no
+      // Staff Information account). Anyone with a profileId set is managed
+      // by syncEmployeesFromStaffInfo() instead (see below), which is why
+      // that function only ever looks at employees where profileId is set.
+      id, storeId, profileId: null, name, dob, tfn:$("#etfn",m).value.trim(), email:$("#eemail",m).value.trim(),
       phone:$("#ephone",m).value.trim(), hireDate:hire, resignDate:null,
       paymentType:"FT", level, taxType:"with", rateMode:"award",
       rates: ratesObj, cashRates: {...ratesObj}, hourCap: null,
@@ -3474,22 +3633,55 @@ function openEmployeeCreateModal(storeId, onDone){
 }
 
 /* --- 3.2 員工資料管理 --- */
-function renderEmpMgmt(container){
+async function renderEmpMgmt(container){
   if(!empListStoreId && currentStores.length) empListStoreId = currentStores[0].id;
   const opts = currentStores.map(s=>`<option value="${s.id}" ${s.id===empListStoreId?'selected':''}>${escapeHtml(s.name)}</option>`).join("");
   container.innerHTML = `
   <div class="panel">
     <div class="row between">
       <div class="row"><label class="small muted">分店</label><select id="empstoresel">${opts||'<option>（請先新增分店）</option>'}</select></div>
-      <button class="primary" id="addEmpBtn2" ${!empListStoreId?'disabled':''}>新增員工</button>
+      <div class="row">
+        <button id="syncEmpBtn2" ${!empListStoreId?'disabled':''}>🔄 從 Staff Information 同步</button>
+        <button class="primary" id="addEmpBtn2" ${!empListStoreId?'disabled':''}>新增員工</button>
+      </div>
     </div>
+    <p class="small muted" id="empSyncStatus"></p>
     <div id="emplist"></div>
   </div>`;
   const sel = $("#empstoresel");
   if(sel) sel.onchange = ()=>{ empListStoreId=sel.value; renderEmpMgmt(container); };
   const addBtn = $("#addEmpBtn2");
   if(addBtn) addBtn.onclick = ()=>openEmployeeCreateModal(empListStoreId, ()=>renderEmpMgmt(container));
+  const syncBtn = $("#syncEmpBtn2");
+  if(syncBtn) syncBtn.onclick = ()=>runEmpSync(true);
   renderEmpList();
+  if(empListStoreId) await runEmpSync(false);
+}
+// 進到「員工資料管理」這個分店時自動跑一次（manual=false，不彈 toast），也可
+// 用上面新增的「🔄 從 Staff Information 同步」按鈕手動再跑一次
+// （manual=true）。找不到同名真實分店時只顯示提示文字，不會報錯或動任何資料。
+async function runEmpSync(manual){
+  const statusEl = document.getElementById("empSyncStatus");
+  const store = currentStores.find(s=>s.id===empListStoreId);
+  if(!store) return;
+  const real = findRealStore(store);
+  if(!real){
+    if(statusEl){
+      statusEl.textContent = `⚠️ 找不到跟「${store.name}」名稱完全相符的 Staff Information 分店，不會自動同步員工資料（分店名稱需完全一致，大小寫、前後空白不計）。`;
+    }
+    return;
+  }
+  if(statusEl) statusEl.textContent = manual ? "同步中…" : "";
+  const result = await syncEmployeesFromStaffInfo(store, real);
+  renderEmpList();
+  if(statusEl){
+    const parts = [];
+    if(result.created) parts.push(`新增 ${result.created} 位`);
+    if(result.updated) parts.push(`更新 ${result.updated} 位`);
+    if(result.resigned) parts.push(`已離職/移除 ${result.resigned} 位`);
+    statusEl.textContent = `✅ 已跟 Staff Information 的「${real.name}」同步` + (parts.length ? `（${parts.join("、")}）` : "（無變動）");
+  }
+  if(manual) toast("已跟 Staff Information 同步完成");
 }
 function renderEmpList(){
   const box = document.getElementById("emplist");
@@ -3498,7 +3690,7 @@ function renderEmpList(){
   box.innerHTML = `<div class="table-wrap"><table><thead><tr><th></th><th>姓名</th><th>Payment type</th><th>Level</th><th></th></tr></thead><tbody>
     ${list.map((e,i)=>`<tr data-id="${e.id}">
       <td><button class="iconbtn" data-up="${e.id}" ${i===0?'disabled':''}>↑</button><button class="iconbtn" data-down="${e.id}" ${i===list.length-1?'disabled':''}>↓</button></td>
-      <td>${escapeHtml(e.name)}</td><td>${PAYMENT_TYPE_LABEL[e.paymentType]||e.paymentType}</td>
+      <td>${escapeHtml(e.name)}${e.profileId?' <span class="small muted" title="已與 Staff Information 連結">🔗</span>':''}</td><td>${PAYMENT_TYPE_LABEL[e.paymentType]||e.paymentType}</td>
       <td>${(currentSettings.awardLevels.find(l=>l.id===e.level)||{}).name||''}</td>
       <td><button class="ghost" data-editemp="${e.id}">編輯</button><button class="danger" data-resign="${e.id}">離職</button><button class="danger" data-delemp="${e.id}">刪除</button></td>
     </tr>`).join("") || `<tr><td colspan="5" class="muted">此分店尚無在職員工</td></tr>`}
@@ -3515,6 +3707,7 @@ function openDeleteEmpModal(empId){
   const m = openModal(`
     <div class="modal-header"><h3>刪除員工資料 — ${escapeHtml(emp.name)}</h3><button class="close-x" id="mclose">✕</button></div>
     <p class="small muted">確定要刪除「${escapeHtml(emp.name)}」的員工資料嗎？此動作無法復原。已提交/儲存的薪水計算表紀錄不會受影響（歷史紀錄裡是各自獨立保存的快照），但刪除後，之後若班表裡再出現同名員工，將視為「未登記」員工，不會自動比對到費率與 Level 等資料。</p>
+    ${emp.profileId ? `<p class="small muted">🔗 此員工是從 Staff Information 同步過來的 —— 若該帳號在 Staff Information 那邊仍是在職狀態，刪除後下次同步（自動或手動按「🔄 從 Staff Information 同步」）會重新把這個人加回來。要讓這個人真的從 Payroll 消失，請先在 Staff Information 那邊將其移除或設為非在職。</p>` : ''}
     <div class="toolbar"><button class="danger" id="mconfirm">確認刪除</button><button id="mcancel">取消</button></div>
   `);
   $("#mclose").onclick=closeModal; $("#mcancel").onclick=closeModal;
@@ -3539,6 +3732,7 @@ function openResignModal(empId){
   const emp = currentEmployees.find(e=>e.id===empId);
   const m = openModal(`
     <div class="modal-header"><h3>員工離職 — ${escapeHtml(emp.name)}</h3><button class="close-x" id="mclose">✕</button></div>
+    ${emp.profileId ? `<p class="small muted">🔗 此員工是從 Staff Information 同步過來的 —— 若該帳號在 Staff Information 那邊仍是在職狀態，下次同步會把離職日期清掉、視為重新在職。要讓離職狀態維持，請也在 Staff Information 那邊將其移除或設為非在職。</p>` : ''}
     <div class="field"><label>離職日期</label><input type="date" id="rdate" value="${toISO(new Date())}"></div>
     <div class="toolbar"><button class="danger" id="mconfirm">確認離職</button><button id="mcancel">取消</button></div>
   `);
@@ -3587,14 +3781,14 @@ function openEmployeeEditModal(empId){
     <div class="modal-header"><h3>編輯員工 — ${escapeHtml(emp.name)}</h3><button class="close-x" id="mclose">✕</button></div>
     <div class="grid2">
       <div class="field"><label>姓名</label><input id="ename" value="${escapeHtml(emp.name)}"></div>
-      <div class="field"><label>生日 (選填)</label><input type="date" id="edob" value="${emp.dob||''}"></div>
+      <div class="field"><label>生日 ${emp.profileId?'🔗':'(選填)'}</label><input type="date" id="edob" value="${emp.dob||''}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
       <div class="field"><label>Payment type</label><select id="eptype">${paymentOpts}</select></div>
       <div class="field"><label>Level</label><select id="elevel">${levelOpts}</select></div>
       <div class="field"><label>主要記錄分店</label><select id="ehomestore">${storeOpts}</select></div>
-      <div class="field"><label>TFN</label><input id="etfn" value="${escapeHtml(emp.tfn||'')}"></div>
-      <div class="field"><label>Email</label><input id="eemail" value="${escapeHtml(emp.email||'')}"></div>
-      <div class="field"><label>電話</label><input id="ephone" value="${escapeHtml(emp.phone||'')}"></div>
-      <div class="field"><label>入職日期</label><input type="date" id="ehire" value="${emp.hireDate||''}"></div>
+      <div class="field"><label>TFN ${emp.profileId?'🔗':''}</label><input id="etfn" value="${escapeHtml(emp.tfn||'')}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
+      <div class="field"><label>Email ${emp.profileId?'🔗':''}</label><input id="eemail" value="${escapeHtml(emp.email||'')}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
+      <div class="field"><label>電話 ${emp.profileId?'🔗':''}</label><input id="ephone" value="${escapeHtml(emp.phone||'')}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
+      <div class="field"><label>入職日期 ${emp.profileId?'🔗':''}</label><input type="date" id="ehire" value="${emp.hireDate||''}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
       <div class="field">
         <label>可報時數上限 (未填預設 ${DEFAULT_HOUR_CAP} hr)</label>
         <input id="ehourcap" type="number" step="0.5" placeholder="${DEFAULT_HOUR_CAP}" value="${emp.hourCap==null?'':emp.hourCap}" ${emp.isSchoolStudent?'disabled':''}>
@@ -3608,6 +3802,7 @@ function openEmployeeEditModal(empId){
       </select></div>
     </div>
     <div class="small muted" style="margin:-4px 0 10px;">員工若出現在其他分店的班表裡，時數會計算到此「主要記錄分店」，並在支援款項紀錄中產生分店間的積欠款項（可於匯入班表時選擇是否啟用）。Working holiday visa 員工的稅額固定為 bank amount 的 ${WORKING_HOLIDAY_TAX_RATE*100}%（不套用 tax-free threshold 或級距表）。</div>
+    ${emp.profileId ? `<div class="small muted" style="margin:-4px 0 10px;">🔗 此員工已與 Staff Information 帳號連結，標示 🔗 的欄位（生日/TFN/Email/電話/入職日期）改為唯讀，由 Staff Information（或該員工自己的 My Information）維護，這邊會自動同步過來；若該帳號勾了 cash-in-hand，Payment type 也會自動同步為 CA。</div>` : ''}
     <h4 style="margin-top:14px;">銀行資訊 (選填)</h4>
     <div class="grid2">
       <div class="field"><label>Bank account name</label><input id="ebankname" value="${escapeHtml(emp.bankAccountName||'')}"></div>
@@ -3702,15 +3897,22 @@ function openEmployeeEditModal(empId){
   renderDocs();
   $("#msave",m).onclick = async ()=>{
     emp.name = $("#ename",m).value.trim();
-    emp.dob = $("#edob",m).value || null;
     emp.paymentType = $("#eptype",m).value;
     emp.level = $("#elevel",m).value;
     const homeSel = $("#ehomestore",m);
     if(homeSel && homeSel.value) emp.storeId = homeSel.value;
-    emp.tfn = $("#etfn",m).value.trim();
-    emp.email = $("#eemail",m).value.trim();
-    emp.phone = $("#ephone",m).value.trim();
-    emp.hireDate = $("#ehire",m).value;
+    // The 5 fields below are read-only (disabled, see the 🔗 markers above)
+    // once profileId is set — they're owned by Staff Information and kept
+    // in sync by syncEmployeesFromStaffInfo(), not editable from here. The
+    // inputs are disabled so their .value can't actually have changed, but
+    // this guard keeps that true even if the modal markup ever changes.
+    if(!emp.profileId){
+      emp.dob = $("#edob",m).value || null;
+      emp.tfn = $("#etfn",m).value.trim();
+      emp.email = $("#eemail",m).value.trim();
+      emp.phone = $("#ephone",m).value.trim();
+      emp.hireDate = $("#ehire",m).value;
+    }
     emp.taxType = $("#etaxtype",m).value;
     emp.isSchoolStudent = $("#eschoolstudent",m).checked;
     const capVal = $("#ehourcap",m).value;
@@ -3860,18 +4062,27 @@ async function commitEmployeeImport(results){
     const emp = existing ? {...existing} : {
       id: "emp_"+await nextId("employee"),
       storeId: store.id,
+      profileId: null,
       documents: {},
       order: currentEmployees.filter(e=>e.storeId===store.id).length,
       resignDate: null,
     };
     emp.name = r.name;
-    emp.dob = r.dob;
+    // Same rule as the Edit modal: once profileId is set (this employee was
+    // synced in from Staff Information — see syncEmployeesFromStaffInfo),
+    // dob/TFN/email/phone/hireDate are owned by Staff Information, so a
+    // bulk import shouldn't be able to clobber them either.
+    if(!emp.profileId){
+      emp.dob = r.dob;
+      emp.tfn = r.tfn;
+      emp.email = r.email;
+      emp.phone = r.phone;
+      emp.hireDate = r.hireDate;
+    } else if(r.dob!==emp.dob || r.tfn!==emp.tfn || r.email!==emp.email || r.phone!==emp.phone || r.hireDate!==emp.hireDate){
+      warnings.push(`「${r.name}」(${store.name}) 已與 Staff Information 連結，匯入檔案裡的生日/TFN/Email/電話/入職日期已略過不匯入（這些欄位由 Staff Information 維護，見「員工資料管理」頁的 🔗 標示）`);
+    }
     emp.paymentType = paymentType;
     emp.level = level.id;
-    emp.tfn = r.tfn;
-    emp.email = r.email;
-    emp.phone = r.phone;
-    emp.hireDate = r.hireDate;
     emp.taxType = r.taxType;
     emp.hourCap = r.hourCap;
     emp.rates = rates;
@@ -3975,6 +4186,16 @@ function renderSysSettings(container){
   </div>
 
   <div class="panel">
+    <h3>Staff Information 同步設定</h3>
+    <div class="small muted" style="margin-bottom:8px;">「員工資料管理」頁會自動把每個分店對應到的 OT Portal 真實分店（依分店名稱完全相符配對）的 Staff Information 資料（生日/TFN/Email/電話/入職日期，以及 cash-in-hand 狀態）同步進來，見該頁的 🔗 標示員工。新增/更新一律都會同步；下面這個勾選只影響「Payroll 這邊已經有、但目前 Staff Information 那邊抓不到」的員工要怎麼處理。</div>
+    <label class="chk"><input type="checkbox" id="syncStaffFully" ${s.syncStaffInfoFully?'checked':''}> 同步 OT Portal Staff 資料</label>
+    <div class="small muted" style="margin:4px 0 0 26px;">
+      <b>未勾選（預設）</b>：因為現在 Staff Information 的資料還不齊全，Payroll 這邊已經有、但目前在 Staff Information 找不到的員工會維持原樣保留，不會被自動設為離職。<br>
+      <b>勾選後</b>：完全以 Staff Information 的資料為準 —— 找不到的已連結員工會被視同離職（比照「離職」按鈕，設定離職日期，不會直接刪除歷史紀錄）。等 Staff Information 的員工資料補齊之後，建議打開這個選項，之後新增/刪除/編輯員工資料就統一在 Staff Information 那邊做即可，不用再兩邊分別維護。
+    </div>
+  </div>
+
+  <div class="panel">
     <h3>匯入員工資料主檔</h3>
     <div class="small muted" style="margin-bottom:8px;">一次匯入（新增或更新）多間分店的員工資料。分店名稱若不存在會自動建立；姓名與分店名稱相同者視為更新既有員工資料。</div>
     <div class="toolbar"><button id="empTemplateBtn">下載匯入範本</button></div>
@@ -3999,6 +4220,11 @@ function renderSysSettings(container){
   `;
   $("#awardname").onchange = async ()=>{ s.award=$("#awardname").value; await saveSettings(); };
   $("#wsplit").onchange = async ()=>{ s.weekendSplit=$("#wsplit").checked; await saveSettings(); toast("已更新，將套用於下一次計算"); };
+  $("#syncStaffFully").onchange = async ()=>{
+    s.syncStaffInfoFully = $("#syncStaffFully").checked;
+    await saveSettings();
+    toast(s.syncStaffInfoFully ? "已開啟：找不到的已連結員工將視同離職" : "已關閉：找不到的已連結員工會維持保留");
+  };
   $("#addLevel").onclick = ()=>{ s.awardLevels.push({id:"L"+(s.awardLevels.length+1), name:"New level", baseRate:0}); renderSysSettings(container); };
   $all("[data-rmlv]").forEach(b=>b.onclick=()=>{ s.awardLevels.splice(Number(b.dataset.rmlv),1); renderSysSettings(container); });
   $("#addJunior").onclick = ()=>{ s.juniorPct.push({maxAge:99, pct:1.0}); renderSysSettings(container); };

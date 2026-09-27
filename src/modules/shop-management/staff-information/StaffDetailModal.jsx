@@ -3,10 +3,17 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 
 export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const { profile: me, currentStoreId, accessibleStores } = useAuth()
   const isAdmin = me?.role === 'admin'
+  // Accountant is view-only everywhere on this page (per Jeff: "只能看到"
+  // — can only SEE) — the cash-in-hand filtering that keeps someone off
+  // this list entirely happens earlier, in StaffListPage.jsx/RLS (see
+  // migration 0060_accountant_role_and_profile_fields.sql); this is just
+  // what stops that role from editing anyone it CAN see.
+  const isReadOnly = me?.role === 'accountant'
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? 'this store'
   const [form, setForm] = useState({
     first_name: staff.first_name ?? '',
@@ -16,6 +23,14 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
     email: staff.email ?? '',
     date_of_birth: staff.date_of_birth ?? '',
     hire_date: staff.hire_date ?? '',
+    tax_file_number: staff.tax_file_number ?? '',
+    // Shared with My Information (same `profiles` columns, migration
+    // 0060) — Display name and Hire date above are the only two fields on
+    // this modal that DON'T also show on My Information.
+    address: staff.address ?? '',
+    bank_account_name: staff.bank_account_name ?? '',
+    bsb: staff.bsb ?? '',
+    account_number: staff.account_number ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -67,61 +82,125 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
       onClose={onClose}
       title={`${staff.first_name} ${staff.last_name}`}
       footer={
-        <>
-          <Button variant="danger" onClick={() => setConfirmDelete(true)}>
-            Remove staff
-          </Button>
-          <Button onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </>
+        isReadOnly ? null : (
+          <>
+            <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+              Remove staff
+            </Button>
+            <Button onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        )
       }
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="First name">
-          <input className="input" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.first_name}
+            onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+          />
         </Field>
         <Field label="Last name">
-          <input className="input" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.last_name}
+            onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+          />
         </Field>
         <Field
           label={`Display name at ${storeName}`}
-          hint="Shown instead of the full name wherever other people see it — Bulletin Board, Manage Roster, Leave Schedule, Learning Tracker. Specific to this store — someone working at more than one store can have a different display name at each (switch stores with the picker top right to edit the other one). Leave blank to just use their first name."
+          hint="Shown instead of the full name wherever other people see it — Bulletin Board, Manage Roster, Leave Schedule, Learning Tracker. Specific to this store — someone working at more than one store can have a different display name at each (switch stores with the picker top right to edit the other one). Leave blank to just use their first name. Only shown here on Staff Information, not on My Information."
           span2
         >
           <input
-            className="input"
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
             placeholder={form.first_name || '(first name)'}
             value={form.roster_display_name}
             onChange={(e) => setForm({ ...form, roster_display_name: e.target.value })}
           />
         </Field>
         <Field label="Phone">
-          <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
         </Field>
         <Field label="Email">
-          <input className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
         </Field>
         <Field label="Date of birth">
           <input
             type="date"
-            className="input"
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
             value={form.date_of_birth ?? ''}
             onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })}
           />
         </Field>
-        <Field label="Hire date (admin only)">
+        <Field label="Hire date (admin only, staff information only)">
           <input
             type="date"
-            disabled={!isAdmin}
+            disabled={!isAdmin || isReadOnly}
             className="input disabled:bg-gray-50 disabled:text-gray-400"
             value={form.hire_date ?? ''}
             onChange={(e) => setForm({ ...form, hire_date: e.target.value })}
           />
         </Field>
+        <Field label="Tax File Number">
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.tax_file_number}
+            onChange={(e) => setForm({ ...form, tax_file_number: e.target.value })}
+          />
+        </Field>
+        <Field label="Address" span2>
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.address}
+            onChange={(e) => setForm({ ...form, address: e.target.value })}
+          />
+        </Field>
+        <Field label="Bank account name">
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.bank_account_name}
+            onChange={(e) => setForm({ ...form, bank_account_name: e.target.value })}
+          />
+        </Field>
+        <Field label="BSB">
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.bsb}
+            onChange={(e) => setForm({ ...form, bsb: e.target.value })}
+          />
+        </Field>
+        <Field label="Account number">
+          <input
+            className="input disabled:bg-gray-50 disabled:text-gray-400"
+            disabled={isReadOnly}
+            value={form.account_number}
+            onChange={(e) => setForm({ ...form, account_number: e.target.value })}
+          />
+        </Field>
       </div>
 
-      {confirmDelete && (
+      {!isReadOnly && confirmDelete && (
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           Remove {staff.first_name} from this store's active staff list? This sets them inactive rather than
           permanently deleting their history.
@@ -135,6 +214,10 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
           </div>
         </div>
       )}
+
+      <div className="mt-6">
+        <StaffDocumentsSection profileId={staff.id} storeId={currentStoreId} readOnly={isReadOnly} />
+      </div>
     </Modal>
   )
 }

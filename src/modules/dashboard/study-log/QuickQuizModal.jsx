@@ -141,10 +141,11 @@ async function buildBankQuestions(memorizedIds, storeId, targetCount, ratio) {
 
 async function buildQuizSet(profile, storeId) {
   let memorizedIds
-  if (profile.is_senior) {
-    // Senior staff count every active item as memorized automatically —
-    // see StudyLogList's `senior` prop — so quiz on all of them, not just
-    // whatever (if anything) their study_progress rows happen to say.
+  if (profile.qualified) {
+    // Qualified staff count every active item as memorized automatically —
+    // see StudyLogList's `qualified` prop — so quiz on all of them, not just
+    // whatever (if anything) their study_progress rows happen to say. (Also
+    // covers the never-reachable old "senior" case, which this replaced.)
     const { data: allItems } = await supabase.from('formula_items').select('id').eq('is_active', true)
     memorizedIds = (allItems ?? []).map((i) => i.id)
   } else {

@@ -19,16 +19,16 @@ export default function StudySummaryModal({ profileId, onClose }) {
     if (!profileId) return
     setLoading(true)
     Promise.all([
-      supabase.from('profiles').select('is_senior').eq('id', profileId).single(),
+      supabase.from('profiles').select('qualified').eq('id', profileId).single(),
       supabase.from('formula_items').select('id, group_key, category_id, top_10').eq('is_active', true),
       supabase.from('formula_categories').select('id, name').eq('group_key', 'drink').order('sort_order').order('id'),
       supabase.from('study_progress').select('formula_item_id').eq('profile_id', profileId).eq('memorized', true),
     ]).then(([{ data: profileRow }, { data: items }, { data: categories }, { data: progress }]) => {
-      // Senior staff count every active item as memorized automatically —
-      // same rule StudyLogList's `senior` prop and the Progress Chart use.
-      const isSenior = !!profileRow?.is_senior
+      // Qualified staff count every active item as memorized automatically —
+      // same rule StudyLogList's `qualified` prop and the Progress Chart use.
+      const isQualified = !!profileRow?.qualified
       const memorizedIds = new Set((progress ?? []).map((p) => p.formula_item_id))
-      const isMemorized = (item) => isSenior || memorizedIds.has(item.id)
+      const isMemorized = (item) => isQualified || memorizedIds.has(item.id)
 
       const drinkItems = (items ?? []).filter((i) => i.group_key === 'drink')
       const top10Items = drinkItems.filter((i) => i.top_10)

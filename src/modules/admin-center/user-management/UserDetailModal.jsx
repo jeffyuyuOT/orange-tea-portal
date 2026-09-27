@@ -20,6 +20,11 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   const [role, setRole] = useState(user.role)
   const [storeId, setStoreId] = useState(user.primary_store_id ?? '')
   const [isActive, setIsActive] = useState(user.is_active)
+  // Paid off the books rather than through normal payroll — set here so an
+  // Accountant-role viewer's Staff Information list (and the underlying
+  // RLS, see migration 0060_accountant_role_and_profile_fields.sql) can
+  // leave this person out of what that role sees entirely.
+  const [cashInHand, setCashInHand] = useState(user.cash_in_hand ?? false)
   const [overrides, setOverrides] = useState({}) // page_key -> boolean (explicit override) or undefined
   // Store(s) this person shows up on the roster for, beyond their primary
   // Store above — e.g. an admin who only actually works a couple of
@@ -72,7 +77,14 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     setSaving(true)
     await supabase
       .from('profiles')
-      .update({ first_name: firstName.trim(), last_name: lastName.trim(), role, primary_store_id: storeId || null, is_active: isActive })
+      .update({
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        role,
+        primary_store_id: storeId || null,
+        is_active: isActive,
+        cash_in_hand: cashInHand,
+      })
       .eq('id', user.id)
     await supabase.from('permission_overrides').delete().eq('profile_id', user.id)
     const meName = `${me.first_name ?? ''} ${me.last_name ?? ''}`.trim() || me.email
@@ -147,8 +159,8 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       </div>
 
       <div className="mb-5 grid grid-cols-3 gap-3">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Role</span>
+        <div className="block">
+          <label className="mb-1 block text-xs font-medium text-gray-500">Role</label>
           <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
             {roleSelectOptions(user.role, me?.role).map(([key, label]) => (
               <option key={key} value={key}>
@@ -156,7 +168,11 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
               </option>
             ))}
           </select>
-        </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={cashInHand} onChange={(e) => setCashInHand(e.target.checked)} />
+            Cash-in-hand
+          </label>
+        </div>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Store</span>
           <select className="input" value={storeId} onChange={(e) => setStoreId(e.target.value)}>

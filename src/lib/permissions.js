@@ -122,6 +122,14 @@ const ROLE_DEFAULTS = {
   // and does nothing but display the rotating clock-in/out QR code (see
   // migration 0054 / QrCodeDisplayPage.jsx). Exactly one page, on purpose.
   qr_code_maker: ['shop_management.qr_code'],
+
+  // For an external/contract bookkeeper — sees only Staff Information
+  // (address, bank details, TFN/super/parent-consent uploads), and even
+  // there only staff who aren't marked cash_in_hand (StaffDetailModal.jsx
+  // is read-only for this role; the cash-in-hand exclusion is also
+  // enforced at the RLS layer — see migration
+  // 0060_accountant_role_and_profile_fields.sql's accountant_visible_profile()).
+  accountant: ['shop_management.staff_information'],
 }
 
 /**
@@ -153,6 +161,7 @@ export const ROLE_LABELS = {
   training: 'Training',
   qr_code_maker: '2D Code Maker',
   developer: 'Developer',
+  accountant: 'Accountant',
 }
 
 // Roles that shouldn't show up in a "pick a staff member" list — training is
@@ -168,7 +177,10 @@ export const ROLE_LABELS = {
 // assigns it a store (Jeff: "jeff chuang有勾取Also on the roster at
 // sunnybank, toowong, 和brookside，但班表跟名字排序都沒看到" — that turned
 // out to be this same exclusion, reused a bit too broadly).
-export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'developer']
+// accountant joined this list for the same reason as qr_code_maker: it's
+// an external bookkeeper's login, not a real front-line staff member, so
+// it shouldn't clutter a "pick a staff member" list either.
+export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'developer', 'accountant']
 
 // Manage Roster / Roster Staff Order / roster history & multi-store
 // exports use this narrower list instead of NON_PICKABLE_STAFF_ROLES
@@ -178,7 +190,9 @@ export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'developer
 // to be schedulable on the roster once it's assigned to a store via
 // User Management's "Also on the roster at" checkboxes, the same as any
 // other role.
-export const NON_ROSTER_STAFF_ROLES = ['training', 'qr_code_maker']
+// accountant is excluded here too, unlike developer — a bookkeeper login
+// is never scheduled or shown on a roster, even once assigned to a store.
+export const NON_ROSTER_STAFF_ROLES = ['training', 'qr_code_maker', 'accountant']
 
 // Every ROLE_LABELS entry EXCEPT 'developer', unless the viewer IS a
 // developer. Used everywhere a role picker is shown (User Management's

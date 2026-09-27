@@ -13,7 +13,7 @@ import Badge from '../ui/Badge'
 // in Admin Center > System Setting, rather than SECTIONS' own literal order
 // in permissions.js.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages, rosterUpdates, hasFormulaUpdates, sidebarOrder } = useAuth()
+  const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, sidebarOrder } = useAuth()
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -47,6 +47,18 @@ export function SidebarNavLinks({ onNavigate }) {
                         been edited since this person last opened it — see
                         migration 0053. */}
                     {fullKey === 'operations_training.formula' && hasFormulaUpdates && <Badge color="red">Update</Badge>}
+                    {/* Jeff (2026-09): a small dot rather than an "Update"
+                        pill like the two above — Bulletin covers three
+                        different feeds at once (announcements, customer
+                        complaints, roster postings) and no single word
+                        summarizes all three, so this just says "something's
+                        here" the same way the dots on Bulletin's own inner
+                        tabs already do (see BulletinPage.jsx) — this is that
+                        same signal, one level up, on the Sidebar entry that
+                        leads there. See AuthContext.jsx's hasBulletinUpdates. */}
+                    {fullKey === 'dashboard.bulletin' && hasBulletinUpdates && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" aria-label="Update" />
+                    )}
                   </NavLink>
                 )
               })}

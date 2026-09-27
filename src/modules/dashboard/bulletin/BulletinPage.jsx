@@ -34,7 +34,7 @@ const TYPE_BADGE = {
 // person actually takes the quiz, since they describe current status, not a
 // one-off posting.
 export default function BulletinPage() {
-  const { currentStoreId, profile } = useAuth()
+  const { currentStoreId, profile, refreshBulletinUpdates } = useAuth()
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
@@ -283,7 +283,12 @@ export default function BulletinPage() {
         supabase
           .from('roster_period_views')
           .upsert({ profile_id: profile.id, roster_period_id: item.raw.id, viewed_at: new Date().toISOString() }, { onConflict: 'profile_id,roster_period_id' })
-          .then(() => setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, hasUpdate: false } : i))))
+          .then(() => {
+            setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, hasUpdate: false } : i)))
+            // Clears the Sidebar's Bulletin dot too, if this was the last
+            // unviewed thing — see AuthContext.jsx's hasBulletinUpdates.
+            refreshBulletinUpdates?.()
+          })
       }
     }
   }
@@ -391,10 +396,12 @@ export default function BulletinPage() {
             // an existing item (migration 0056) — so refresh to pick that up,
             // same as the onSaved reload just below already does for edits.
             load()
+            refreshBulletinUpdates?.()
           }}
           onSaved={() => {
             setOpenAnnouncementId(null)
             load()
+            refreshBulletinUpdates?.()
           }}
         />
       )}

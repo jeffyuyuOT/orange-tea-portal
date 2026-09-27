@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
+import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import StudyLogList from '../../dashboard/study-log/StudyLogList'
 import ProgressChartModal from '../../dashboard/study-log/ProgressChartModal'
 import StudySummaryModal from '../../dashboard/study-log/StudySummaryModal'
@@ -12,7 +13,7 @@ import { rosterDisplayName } from '../../../lib/excelRoster'
 const QUIZ_TYPE_LABEL = { quick: 'Quick Quiz', formal: 'Formal Quiz' }
 
 export default function StaffStudyDetail({ staff, onBack }) {
-  const { profile } = useAuth()
+  const { profile, currentStoreId } = useAuth()
   const [tab, setTab] = useState('progress')
   const [attempts, setAttempts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +47,43 @@ export default function StaffStudyDetail({ staff, onBack }) {
     load()
   }, [staff.id])
 
+  // Every active + store-visible formula item this staff member hasn't
+  // ticked "Memorized" for in Study Log — same visibility rule Study Log
+  // itself and the quiz builders use (storeVisibility.js). Used to gate a
+  // Formal Quiz Pass below: Jeff wants a manager blocked from passing (and
+  // thereby granting Qualified) someone who still has unmemorized items.
+  async function getUnmemorizedItems() {
+    const [{ data: itemRows }, { data: storeRows }, { data: progressRows }] = await Promise.all([
+      supabase.from('formula_items').select('id, name_en, name_zh').eq('is_active', true),
+      supabase.from('formula_item_stores').select('*'),
+      supabase.from('study_progress').select('formula_item_id').eq('profile_id', staff.id).eq('memorized', true),
+    ])
+    const visibleItems = filterVisibleForStore(itemRows ?? [], storeRows ?? [], 'formula_item_id', currentStoreId)
+    const memorizedIds = new Set((progressRows ?? []).map((p) => p.formula_item_id))
+    return visibleItems.filter((i) => !memorizedIds.has(i.id))
+  }
+
   async function togglePass(attempt, checked) {
+    // Ticking Pass on a Formal Quiz attempt is what grants Qualified in the
+    // first place (same rule this used to be derived from before migration
+    // 0049) — only grant, never revoke, from here: unchecking one attempt's
+    // Pass (e.g. fixing a mis-click) shouldn't silently cancel Qualified —
+    // that's a deliberate, confirmed action of its own (cancelQualified).
+    // Jeff: before that grant happens, every active formula item must be
+    // ticked "Memorized" in Study Log — if not, block the Pass entirely
+    // (nothing is written) and list what's still missing.
+    if (attempt.quiz_type === 'formal' && checked && !qualified) {
+      const unmemorized = await getUnmemorizedItems()
+      if (unmemorized.length) {
+        alert(
+          `Can't mark this Pass yet — ${rosterDisplayName(staff)} hasn't ticked "Memorized" for every formula item in Study Log.\n\nStill missing:\n${unmemorized
+            .map((i) => `• ${i.name_en}${i.name_zh ? ` (${i.name_zh})` : ''}`)
+            .join('\n')}`
+        )
+        return
+      }
+    }
+
     setAttempts((prev) =>
       prev.map((a) =>
         a.id === attempt.id
@@ -59,11 +96,6 @@ export default function StaffStudyDetail({ staff, onBack }) {
       .update({ passed: checked, passed_by: checked ? profile.id : null, passed_at: checked ? new Date().toISOString() : null })
       .eq('id', attempt.id)
 
-    // Ticking Pass on a Formal Quiz attempt is what grants Qualified in the
-    // first place (same rule this used to be derived from before migration
-    // 0049) — only grant, never revoke, from here: unchecking one attempt's
-    // Pass (e.g. fixing a mis-click) shouldn't silently cancel Qualified —
-    // that's a deliberate, confirmed action of its own (cancelQualified).
     if (attempt.quiz_type === 'formal' && checked && !qualified) {
       setQualified(true)
       await supabase
@@ -71,6 +103,24 @@ export default function StaffStudyDetail({ staff, onBack }) {
         .update({ qualified: true, qualified_at: new Date().toISOString(), qualified_by: profile.id })
         .eq('id', staff.id)
     }
+  }
+
+  // Direct grant, bypassing the Formal Quiz Pass flow (and its memorize-
+  // completeness check above) entirely — Jeff wanted a way to mark someone
+  // Qualified outright, e.g. an experienced hire, without staging a review.
+  async function markQualified() {
+    if (
+      !confirm(
+        `Mark ${rosterDisplayName(staff)} as Qualified?\n\nThis skips Formal Quiz review — every Study Log item will show as memorized right away, and future Formal Quiz attempts will be marked Pass automatically.`
+      )
+    ) {
+      return
+    }
+    setQualified(true)
+    await supabase
+      .from('profiles')
+      .update({ qualified: true, qualified_at: new Date().toISOString(), qualified_by: profile.id })
+      .eq('id', staff.id)
   }
 
   async function cancelQualified() {
@@ -95,7 +145,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
       </button>
       <h1 className="mb-4 flex items-center gap-2 text-xl font-semibold text-gray-900">
         {rosterDisplayName(staff)}
-        {qualified && (
+        {qualified ? (
           <>
             <Badge color="green">Qualified</Badge>
             <button
@@ -106,6 +156,14 @@ export default function StaffStudyDetail({ staff, onBack }) {
               Cancel Qualified
             </button>
           </>
+        ) : (
+          <button
+            onClick={markQualified}
+            className="text-xs font-medium text-brand-600 hover:underline"
+            title="Mark as Qualified directly, without a Formal Quiz review"
+          >
+            Mark as Qualified
+          </button>
         )}
       </h1>
 
@@ -146,7 +204,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
       </div>
 
       {tab === 'progress' ? (
-        <StudyLogList profileId={staff.id} allowBulkSelect />
+        <StudyLogList profileId={staff.id} allowBulkSelect qualified={qualified} />
       ) : loading ? (
         <LoadingSpinner />
       ) : !attempts.length ? (

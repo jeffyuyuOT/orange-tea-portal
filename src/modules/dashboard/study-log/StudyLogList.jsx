@@ -29,17 +29,22 @@ const TOP10_CATEGORY_ID = '__top10__'
 // "Shop Management > Learning Tracker" (a manager/admin viewing + bulk
 // editing someone else's progress, per the spec's "admin可支援批量選取").
 //
-// `senior`: a manager-flagged "senior" staff member is treated as having
-// every item memorized automatically (including items added later) — the
-// checkboxes render checked-and-locked rather than reflecting individual
-// study_progress rows.
-// `onProgressChange`: fired after a (non-senior) toggle persists, so a
+// `qualified`: a Qualified staff member (profiles.qualified — migration
+// 0049, granted via a passed Formal Quiz or directly by a manager in
+// StaffStudyDetail) is treated as having every item memorized automatically
+// (including items added later) — the checkboxes render checked-and-locked
+// rather than reflecting individual study_progress rows. This replaces the
+// old `senior`/profiles.is_senior concept (Jeff, 2026-09): there was never
+// a reachable UI to set is_senior, so it was dead weight — Qualified
+// already existed, already had a grant/revoke flow, and covers the same
+// "this person knows everything" case.
+// `onProgressChange`: fired after a (non-qualified) toggle persists, so a
 // parent tracking overall memorized % (e.g. the forced-quiz-every-10%
 // check in StudyLogPage) can re-evaluate immediately.
 // `headerActions`: optional content (e.g. StudyLogPage's Quick Quiz/Formal
 // Quiz buttons) rendered at the right end of the group-tabs row, so a
 // caller isn't stuck putting its own controls below the whole list.
-export default function StudyLogList({ profileId, allowBulkSelect = false, senior = false, onProgressChange, headerActions }) {
+export default function StudyLogList({ profileId, allowBulkSelect = false, qualified = false, onProgressChange, headerActions }) {
   const { currentStoreId } = useAuth()
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([]) // drink-group sub-categories, for the filter dropdown
@@ -101,7 +106,7 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
   }, [items, group, categoryId])
 
   async function toggle(itemId, value) {
-    if (senior) return // locked — senior status covers every item automatically
+    if (qualified) return // locked — Qualified status covers every item automatically
     setProgress((prev) => ({ ...prev, [itemId]: { ...prev[itemId], memorized: value } }))
     await supabase.from('study_progress').upsert(
       {
@@ -122,7 +127,7 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
   if (loading) return <LoadingSpinner />
   if (!items.length) return <EmptyState label="No formula items to study yet." />
 
-  const memorizedCount = senior ? filteredItems.length : filteredItems.filter((i) => progress[i.id]?.memorized).length
+  const memorizedCount = qualified ? filteredItems.length : filteredItems.filter((i) => progress[i.id]?.memorized).length
 
   return (
     <div>
@@ -172,9 +177,9 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
           <p className="text-sm text-gray-500">
             {memorizedCount} of {filteredItems.length} memorized
           </p>
-          {senior && <span className="text-xs font-medium text-brand-500">Senior — all items auto-memorized</span>}
+          {qualified && <span className="text-xs font-medium text-brand-500">Qualified — all items auto-memorized</span>}
         </div>
-        {allowBulkSelect && !senior && (
+        {allowBulkSelect && !qualified && (
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => bulkSet(true)}>
               Mark all memorized
@@ -204,8 +209,8 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, senio
                 Memorized
                 <input
                   type="checkbox"
-                  checked={senior || !!progress[item.id]?.memorized}
-                  disabled={senior}
+                  checked={qualified || !!progress[item.id]?.memorized}
+                  disabled={qualified}
                   onChange={(e) => toggle(item.id, e.target.checked)}
                 />
               </label>

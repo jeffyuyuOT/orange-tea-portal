@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient'
-import { SECTIONS } from './permissions'
+import { SECTIONS, canAccessPage } from './permissions'
 
 // One shared order for the whole app (not per-role/per-user) — see
 // migration 0055. This module is the only place that reconciles the
@@ -64,4 +64,25 @@ export function orderedPageEntries(sectionKey, order) {
   if (!section) return []
   const pageOrder = order?.pageOrder?.[sectionKey] ?? Object.keys(section.pages)
   return pageOrder.map((key) => [key, section.pages[key]]).filter(([, label]) => label)
+}
+
+// The first page (in Sidebar order) this effectivePages set can reach, as
+// a route path like "/roster-hub/my-roster" — or null if none at all.
+// Shared by RootRedirect (landing on "/", e.g. right after login) and
+// RequirePage (landing on ANY page this person doesn't have access to —
+// a stale bookmark, a link someone sent them, a page an override used to
+// grant that's since been revoked) so both send someone to a page they can
+// actually see instead of leaving them stuck on one they can't with no
+// obvious next step (Jeff: a first-time user who doesn't happen to click
+// a different tab themselves "would think the site is broken").
+export function firstAccessiblePagePath(effectivePages, order) {
+  for (const [sectionKey] of orderedSectionEntries(order)) {
+    for (const [pageKey] of orderedPageEntries(sectionKey, order)) {
+      const fullKey = `${sectionKey}.${pageKey}`
+      if (canAccessPage(effectivePages, fullKey)) {
+        return `/${sectionKey.replace(/_/g, '-')}/${pageKey.replace(/_/g, '-')}`
+      }
+    }
+  }
+  return null
 }

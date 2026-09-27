@@ -1,0 +1,14 @@
+-- Drops profiles.is_senior — a column that existed live (added directly via
+-- the Supabase SQL Editor at some point, never captured in a migration file
+-- until now) but had no reachable UI to ever set it: 0 of the then-28
+-- profiles had it true, and no code anywhere wrote to it. Jeff confirmed he
+-- couldn't find a "senior" checkbox in Manage Staff / Staff Information
+-- either, since there never was one.
+--
+-- The "this person auto-memorizes every formula item" concept it was meant
+-- to cover already exists as profiles.qualified (migration 0049), which
+-- does have a working grant/revoke flow (Formal Quiz Pass, or a manager's
+-- direct "Mark as Qualified" in Learning Tracker) — see StudyLogList.jsx's
+-- `qualified` prop and QuickQuizModal.jsx's buildQuizSet, both updated in
+-- the same change that added this migration.
+alter table profiles drop column if exists is_senior;

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { addMonths } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { getEffectivePages } from './permissions'
 import { getUnseenFormulaItems } from './formulaUpdates'
@@ -46,6 +47,21 @@ export function AuthProvider({ children }) {
   // last opened it. Lives here for the same reason rosterUpdates does — the
   // Sidebar is a separate, always-mounted component.
   const [hasFormulaUpdates, setHasFormulaUpdates] = useState(false)
+  // Small red dot next to Bulletin in the Sidebar (Jeff, 2026-09) — true the
+  // moment ANY of the three "unviewed" signals BulletinPage.jsx already
+  // computes for its own Roster / Store Announcement / Customer Complaint
+  // tab dots (hasUnviewedRoster/hasUnviewedAnnouncement/hasUnviewedComplaint
+  // there) would be true, so the Sidebar can hint "something's here" before
+  // the person has even opened Bulletin — same idea as rosterUpdates/
+  // hasFormulaUpdates above, computed independently here for the same
+  // reason (Sidebar is a separate, always-mounted component), reading the
+  // same underlying tables (announcements/announcement_reads,
+  // roster_periods/roster_change_events/roster_period_views) rather than
+  // sharing code with BulletinPage's fuller item-list computation. Quiz
+  // reminders are deliberately NOT included — BulletinPage doesn't count
+  // them as "unviewed" either, since they're a standing status rather than
+  // a one-off post.
+  const [hasBulletinUpdates, setHasBulletinUpdates] = useState(false)
   // Shared Sidebar section/page order (migration 0055) — global, not tied
   // to who's logged in, so it's fetched once independently of profile/store
   // rather than inside loadProfileData. Starts as SECTIONS' own literal
@@ -200,6 +216,80 @@ export function AuthProvider({ children }) {
     refreshFormulaUpdates()
   }, [refreshFormulaUpdates])
 
+  // Recomputes the Bulletin "Update" dot for the current person + store.
+  // Called on login/store-switch, and again by BulletinPage right after it
+  // marks something read (an announcement/complaint opened, or a roster
+  // week opened), so the dot clears immediately without needing a full page
+  // reload — same trigger points as refreshRosterUpdates/refreshFormulaUpdates.
+  const refreshBulletinUpdates = useCallback(async () => {
+    if (!profile?.id || !currentStoreId) {
+      setHasBulletinUpdates(false)
+      return
+    }
+    // Same one-month drop-out window BulletinPage.jsx applies to normal
+    // announcements and roster postings (customer complaints stay until
+    // solved, so no window there) — an item outside this window never shows
+    // in the feed at all, so it shouldn't light up the Sidebar dot either.
+    const oneMonthAgo = addMonths(new Date(), -1).toISOString()
+    const [
+      { data: announcementRows },
+      { data: complaintRows },
+      { data: rosterRows },
+      { data: changeEventRows },
+      { data: periodViewRows },
+      { data: announcementReadRows },
+    ] = await Promise.all([
+      supabase
+        .from('announcements')
+        .select('id, updated_at')
+        .eq('store_id', currentStoreId)
+        .eq('category', 'normal')
+        .gte('updated_at', oneMonthAgo),
+      supabase.from('announcements').select('id, updated_at').eq('store_id', currentStoreId).eq('category', 'customer_complaint'),
+      supabase
+        .from('roster_periods')
+        .select('id')
+        .eq('store_id', currentStoreId)
+        .eq('status', 'submitted')
+        .not('submitted_at', 'is', null)
+        .gte('submitted_at', oneMonthAgo),
+      supabase.from('roster_change_events').select('roster_period_id, changed_at').eq('store_id', currentStoreId),
+      supabase.from('roster_period_views').select('roster_period_id, viewed_at').eq('profile_id', profile.id),
+      supabase.from('announcement_reads').select('announcement_id, read_at').eq('profile_id', profile.id),
+    ])
+
+    // Never opened at all, or opened before but edited again since — same
+    // "New or Update" definition BulletinPage.jsx's readFlags() uses.
+    const readAtById = new Map((announcementReadRows ?? []).map((r) => [r.announcement_id, r.read_at]))
+    const isUnviewedAnnouncement = (a) => {
+      const readAt = readAtById.get(a.id)
+      return !readAt || readAt < a.updated_at
+    }
+    const hasUnviewedAnnouncement = (announcementRows ?? []).some(isUnviewedAnnouncement)
+    const hasUnviewedComplaint = (complaintRows ?? []).some(isUnviewedAnnouncement)
+
+    // Same per-period comparison as BulletinPage.jsx's rosterItems mapping —
+    // '' (not null) as the reduce seed for the same reason refreshRosterUpdates
+    // above uses it (string-vs-null comparisons with `>` always come out false).
+    const periodLatestChange = new Map()
+    ;(changeEventRows ?? []).forEach((r) => {
+      const cur = periodLatestChange.get(r.roster_period_id) ?? ''
+      if (r.changed_at > cur) periodLatestChange.set(r.roster_period_id, r.changed_at)
+    })
+    const periodViewedAt = new Map((periodViewRows ?? []).map((r) => [r.roster_period_id, r.viewed_at]))
+    const hasUnviewedRoster = (rosterRows ?? []).some((r) => {
+      const latestChange = periodLatestChange.get(r.id)
+      const viewedAt = periodViewedAt.get(r.id)
+      return !!latestChange && (!viewedAt || latestChange > viewedAt)
+    })
+
+    setHasBulletinUpdates(hasUnviewedAnnouncement || hasUnviewedComplaint || hasUnviewedRoster)
+  }, [profile?.id, currentStoreId])
+
+  useEffect(() => {
+    refreshBulletinUpdates()
+  }, [refreshBulletinUpdates])
+
   const signIn = useCallback(async (email, password) => {
     sessionStorage.removeItem('ot_training_verified')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -249,6 +339,8 @@ export function AuthProvider({ children }) {
     refreshRosterUpdates,
     hasFormulaUpdates,
     refreshFormulaUpdates,
+    hasBulletinUpdates,
+    refreshBulletinUpdates,
     sidebarOrder,
     refreshSidebarOrder,
   }

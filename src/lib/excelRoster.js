@@ -328,20 +328,53 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
         // SheetJS's array read only puts a value in a merged range's
         // TOP-LEFT cell — every other cell the merge covers comes back as
         // '' (via defval above) even though Excel visually shows the same
-        // value across the whole merge. A manager merging, say, a Break
-        // row's day cells together (the same break often applies every
-        // day that week), or merging a Name cell vertically across the
-        // Shift+Break row pair, would otherwise silently read as "no
-        // break recorded" / "no name" for every cell but the first one in
-        // that merge — which is exactly what Jeff ran into. Propagate
-        // each merge's corner value across every cell it covers before
-        // the row-by-row parsing below reads any of it.
+        // value across the whole merge. A manager merging a Break row's day
+        // cells together (the same break often applies every day that
+        // week) would otherwise silently read as "no break recorded" for
+        // every cell but the first one in that merge — which is what the
+        // fix below (propagating each merge's corner value across every
+        // cell it covers) originally targeted.
+        //
+        // Jeff (2026-09): after that fix shipped, start/end times started
+        // reading wrong across many rows — root cause is this same
+        // propagation ALSO applying to the Name column (column 0). A very
+        // natural thing for a manager to do for a tidier-looking sheet is
+        // select a staff member's Shift-row Name cell together with their
+        // Break-row Name cell right below it and merge them vertically
+        // (Excel shows one name spanning both rows). But merging in Excel
+        // itself immediately DISCARDS the non-corner cell's original text —
+        // so the Break row's own "Break (½h units)" label is gone from the
+        // file the moment that merge is created, before this app ever reads
+        // it. Propagating the shift row's real name into that now-blank
+        // cell (which is what the code used to do here) made the
+        // break-row-detection check further below — which looks for the
+        // literal text "break" in that cell — treat the break row as a
+        // SECOND, separate employee row using the same name as the row
+        // above it, and read that row's break-hours values (small numbers
+        // like "1" for a half-hour) as if they were real clock-in times —
+        // producing a bogus duplicate "employee" with a nonsense start time
+        // and no end time, for every staff member whose sheet had this
+        // merge. That's the "start/end read into the wrong cell" symptom.
+        //
+        // Fix: never propagate INTO the Name column. Every row's Name cell
+        // always has an explicit, correct value straight from our own
+        // export (the real name on the shift row, the literal
+        // "Break (½h units)" label on the break row) — there's no
+        // legitimate case within this app's own template where that column
+        // needs "filling in" from a merge. Leaving it blank instead (which
+        // is genuinely how Excel already left it) means the "if (!name)"
+        // guard in the row loop below just skips that one row as empty —
+        // losing that employee's break-hours for the affected day(s), but
+        // never fabricating a bogus shift or a duplicate employee. Break
+        // row day-cell merges (columns 1+) are completely unaffected by
+        // this and keep working exactly as before.
         ;(sheet['!merges'] || []).forEach((m) => {
           const corner = aoa[m.s.r]?.[m.s.c]
           for (let r = m.s.r; r <= m.e.r; r++) {
             if (!aoa[r]) aoa[r] = []
             for (let c = m.s.c; c <= m.e.c; c++) {
               if (r === m.s.r && c === m.s.c) continue
+              if (c === NAME_COL) continue
               aoa[r][c] = corner
             }
           }

@@ -89,14 +89,14 @@ function monotonePath(points, xScale, yScale) {
 }
 
 // x = days since hire date, y = cumulative count of formula items marked
-// "Memorized" in Study Log. Senior staff (see StudyLogList's `senior` prop)
-// count every active item as memorized automatically from day one, so
+// "Memorized" in Study Log. Qualified staff (see StudyLogList's `qualified`
+// prop) count every active item as memorized automatically from day one, so
 // there's no real event history for them — just a flat line at the top.
 export default function ProgressChartModal({ profileId, onClose }) {
   const [loading, setLoading] = useState(true)
   const [hireDate, setHireDate] = useState(null)
   const [usedFallbackDate, setUsedFallbackDate] = useState(false)
-  const [isSenior, setIsSenior] = useState(false)
+  const [isQualified, setIsQualified] = useState(false)
   const [totalItems, setTotalItems] = useState(0)
   const [events, setEvents] = useState([]) // ascending memorized_at Dates
 
@@ -104,7 +104,7 @@ export default function ProgressChartModal({ profileId, onClose }) {
     if (!profileId) return
     setLoading(true)
     Promise.all([
-      supabase.from('profiles').select('hire_date, is_senior, created_at').eq('id', profileId).single(),
+      supabase.from('profiles').select('hire_date, qualified, created_at').eq('id', profileId).single(),
       supabase.from('formula_items').select('id').eq('is_active', true),
       supabase
         .from('study_progress')
@@ -116,7 +116,7 @@ export default function ProgressChartModal({ profileId, onClose }) {
     ]).then(([{ data: p }, { data: items }, { data: progress }]) => {
       setHireDate(p?.hire_date ?? p?.created_at ?? null)
       setUsedFallbackDate(!p?.hire_date && !!p?.created_at)
-      setIsSenior(!!p?.is_senior)
+      setIsQualified(!!p?.qualified)
       setTotalItems(items?.length ?? 0)
       setEvents((progress ?? []).map((r) => new Date(r.memorized_at)))
       setLoading(false)
@@ -132,10 +132,10 @@ export default function ProgressChartModal({ profileId, onClose }) {
     const width = PAD_LEFT + PAD_RIGHT + windowDays * PX_PER_DAY
     const plotHeight = CHART_HEIGHT - PAD_TOP - PAD_BOTTOM
 
-    const maxCount = Math.max(1, isSenior ? totalItems : Math.max(totalItems, events.length))
+    const maxCount = Math.max(1, isQualified ? totalItems : Math.max(totalItems, events.length))
 
     const points = []
-    if (isSenior) {
+    if (isQualified) {
       points.push([0, totalItems], [daysSoFar, totalItems])
     } else {
       // Merge same-day events into a single point holding that day's final
@@ -194,9 +194,9 @@ export default function ProgressChartModal({ profileId, onClose }) {
       yScale,
       ticks,
       daysSoFar,
-      memorizedNow: isSenior ? totalItems : events.length,
+      memorizedNow: isQualified ? totalItems : events.length,
     }
-  }, [hireDate, isSenior, totalItems, events])
+  }, [hireDate, isQualified, totalItems, events])
 
   return (
     <Modal open onClose={onClose} extraWide title="📈 Progress Chart">
@@ -275,8 +275,8 @@ export default function ProgressChartModal({ profileId, onClose }) {
             </svg>
           </div>
           <p className="mt-2 text-xs text-gray-400">
-            {isSenior
-              ? 'Senior staff — every item counts as memorized from day one.'
+            {isQualified
+              ? 'Qualified staff — every item counts as memorized from day one.'
               : `${chart.memorizedNow} item${chart.memorizedNow === 1 ? '' : 's'} memorized so far · day ${chart.daysSoFar} since hire (dashed line = today).`}
           </p>
         </div>

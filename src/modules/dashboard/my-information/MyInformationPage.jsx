@@ -2,19 +2,15 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
-import { STAFF_DOC_TYPES } from '../../../lib/staffDocumentTypes'
 import Button from '../../../components/ui/Button'
+import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 import MyStaffIdModal from './MyStaffIdModal'
-
-const DOC_TYPES = STAFF_DOC_TYPES
 
 export default function MyInformationPage() {
   const { profile, currentStoreId, refreshProfile } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
-  const [docs, setDocs] = useState({})
-  const [templates, setTemplates] = useState({})
   const [showStaffId, setShowStaffId] = useState(false)
 
   useEffect(() => {
@@ -26,46 +22,18 @@ export default function MyInformationPage() {
         date_of_birth: profile.date_of_birth ?? '',
         email: profile.email ?? '',
         tax_file_number: profile.tax_file_number ?? '',
+        // Address + banking (migration 0060) — kept on `profiles` the same
+        // as everything else here, and readable/editable from Staff
+        // Information too (StaffDetailModal.jsx) since both pages read
+        // and write the same columns. Display name and Hire date are the
+        // deliberate exception: those two stay on Staff Information only.
+        address: profile.address ?? '',
+        bank_account_name: profile.bank_account_name ?? '',
+        bsb: profile.bsb ?? '',
+        account_number: profile.account_number ?? '',
       })
     }
   }, [profile])
-
-  useEffect(() => {
-    if (!profile) return
-    supabase
-      .from('user_documents')
-      .select('*')
-      .eq('profile_id', profile.id)
-      .then(({ data }) => {
-        const map = {}
-        ;(data ?? []).forEach((d) => (map[d.doc_type] = d))
-        setDocs(map)
-      })
-  }, [profile])
-
-  // Which blank template file to offer depends on the staff's store — set
-  // per store in Store Management (store_document_links) so, e.g., a
-  // state-specific form can differ between stores. No store selected yet,
-  // or that store has no file linked for a category, just means no
-  // "Download blank form" link shows for it.
-  useEffect(() => {
-    if (!currentStoreId) {
-      setTemplates({})
-      return
-    }
-    supabase
-      .from('store_document_links')
-      .select('doc_type, url, file_repository(file_path)')
-      .eq('store_id', currentStoreId)
-      .then(({ data }) => {
-        const map = {}
-        ;(data ?? []).forEach((l) => {
-          const href = l.url || (l.file_repository ? supabase.storage.from('documents').getPublicUrl(l.file_repository.file_path).data.publicUrl : null)
-          if (href) map[l.doc_type] = href
-        })
-        setTemplates(map)
-      })
-  }, [currentStoreId])
 
   async function save() {
     setSaving(true)
@@ -79,21 +47,6 @@ export default function MyInformationPage() {
     if (error) alert(`Save failed: ${error.message}`)
     await refreshProfile()
     setSaving(false)
-  }
-
-  async function uploadDoc(docType, file) {
-    const path = `user-documents/${profile.id}/${docType}-${Date.now()}-${file.name}`
-    const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
-    if (error) {
-      alert(`Upload failed: ${error.message}`)
-      return
-    }
-    const { data } = await supabase
-      .from('user_documents')
-      .insert({ profile_id: profile.id, doc_type: docType, file_path: path, original_name: file.name })
-      .select()
-      .single()
-    setDocs((prev) => ({ ...prev, [docType]: data }))
   }
 
   return (
@@ -135,6 +88,35 @@ export default function MyInformationPage() {
               onChange={(e) => setForm({ ...form, tax_file_number: e.target.value })}
             />
           </Field>
+          <Field label="Address" span2>
+            <input className="input" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          </Field>
+        </div>
+        <Button className="mt-3" onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-semibold text-brand-700">Bank Details</h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Bank account name">
+            <input
+              className="input"
+              value={form.bank_account_name}
+              onChange={(e) => setForm({ ...form, bank_account_name: e.target.value })}
+            />
+          </Field>
+          <Field label="BSB">
+            <input className="input" value={form.bsb} onChange={(e) => setForm({ ...form, bsb: e.target.value })} />
+          </Field>
+          <Field label="Account number">
+            <input
+              className="input"
+              value={form.account_number}
+              onChange={(e) => setForm({ ...form, account_number: e.target.value })}
+            />
+          </Field>
         </div>
         <Button className="mt-3" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
@@ -148,46 +130,16 @@ export default function MyInformationPage() {
         </Button>
       </section>
 
-      <section>
-        <h2 className="mb-3 text-sm font-semibold text-brand-700">Documents</h2>
-        <div className="space-y-3">
-          {DOC_TYPES.map((d) => (
-            <div key={d.key} className="flex items-center justify-between rounded-lg border border-brand-100 px-4 py-3">
-              <div>
-                <div className="text-sm font-medium text-gray-800">{d.label}</div>
-                <div className="text-xs text-gray-400">
-                  {docs[d.key] ? `Uploaded: ${docs[d.key].original_name}` : 'Not uploaded yet'}
-                  {templates[d.key] && (
-                    <>
-                      {' · '}
-                      <a className="text-brand-600 hover:underline" href={templates[d.key]} target="_blank" rel="noreferrer">
-                        Download blank form
-                      </a>
-                    </>
-                  )}
-                </div>
-              </div>
-              <label className="cursor-pointer rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">
-                Upload
-                <input
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => e.target.files[0] && uploadDoc(d.key, e.target.files[0])}
-                />
-              </label>
-            </div>
-          ))}
-        </div>
-      </section>
+      <StaffDocumentsSection profileId={profile?.id} storeId={currentStoreId} />
 
       {showStaffId && <MyStaffIdModal onClose={() => setShowStaffId(false)} />}
     </div>
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, span2, children }) {
   return (
-    <label className="block">
+    <label className={`block ${span2 ? 'sm:col-span-2' : ''}`}>
       <span className="mb-1 block text-xs font-medium text-gray-500">{label}</span>
       {children}
     </label>
