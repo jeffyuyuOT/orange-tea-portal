@@ -203,6 +203,16 @@ export default function FormalQuizModal({ onClose }) {
 
   async function submit() {
     setSubmitting(true)
+    // Already-Qualified staff (profiles.qualified — migration 0049) skip
+    // manager review: their Formal Quiz attempts are marked passed at
+    // submit time automatically. Fetched fresh here rather than trusting
+    // AuthContext's cached `profile`, since a manager could have just
+    // granted or cancelled it moments ago (e.g. this attempt was opened
+    // from the Bulletin Board's Quiz reminder cadence nudge, possibly a
+    // while after the qualified flag last changed). `passed_by` is left
+    // null for an auto-pass — there's no manual reviewer to record.
+    const { data: freshProfile } = await supabase.from('profiles').select('qualified').eq('id', profile.id).single()
+    const autoPassed = !!freshProfile?.qualified
     let correct = 0
     // Every branch returns the same full set of keys (see the matching
     // comment in QuickQuizModal.jsx's submit()) so a future NOT NULL column
@@ -255,6 +265,7 @@ export default function FormalQuizModal({ onClose }) {
         quiz_type: 'formal',
         total_questions: questions.length,
         correct_count: correct,
+        ...(autoPassed ? { passed: true, passed_at: new Date().toISOString() } : {}),
       })
       .select()
       .single()
@@ -266,7 +277,7 @@ export default function FormalQuizModal({ onClose }) {
       // why. At least log it now so a repeat isn't invisible.
       if (error) console.error('Failed to save quiz answer detail:', error)
     }
-    setResult({ correct, total: questions.length })
+    setResult({ correct, total: questions.length, autoPassed })
     setSubmitting(false)
   }
 
@@ -280,7 +291,10 @@ export default function FormalQuizModal({ onClose }) {
             {result.correct} out of {result.total}
           </p>
           <p className="mt-1 text-sm text-gray-500">
-            correct answers — a manager or admin will review this attempt in Learning Tracker.
+            correct answers —{' '}
+            {result.autoPassed
+              ? "you're already Qualified, so this attempt didn't need manager review."
+              : 'a manager or admin will review this attempt in Learning Tracker.'}
           </p>
           <Button className="mt-4" onClick={onClose}>
             Done

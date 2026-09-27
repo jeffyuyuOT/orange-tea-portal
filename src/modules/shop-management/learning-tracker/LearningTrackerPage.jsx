@@ -9,11 +9,10 @@ import StaffStudyDetail from './StaffStudyDetail'
 export default function LearningTrackerPage() {
   const { currentStoreId } = useAuth()
   const [staff, setStaff] = useState([])
-  const [qualifiedIds, setQualifiedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
 
-  useEffect(() => {
+  function load() {
     if (!currentStoreId) return
     setLoading(true)
     // Staff at THIS store via user_stores (not just primary_store_id), same
@@ -24,7 +23,7 @@ export default function LearningTrackerPage() {
       .from('user_stores')
       .select('roster_display_name, profiles(*)')
       .eq('store_id', currentStoreId)
-      .then(async ({ data }) => {
+      .then(({ data }) => {
         const rows = (data ?? [])
           .map((m) => (m.profiles?.is_active ? { ...m.profiles, roster_display_name: m.roster_display_name } : null))
           .filter(Boolean)
@@ -33,24 +32,26 @@ export default function LearningTrackerPage() {
         // (possibly different) raw first name.
         const sorted = rows.sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
         setStaff(sorted)
-        // Qualified = has at least one Formal Quiz attempt a manager/admin
-        // has ticked as a pass (see StaffStudyDetail's Quiz History tab) —
-        // not tied to this store, since it's a personal achievement.
-        const ids = sorted.map((s) => s.id)
-        if (ids.length) {
-          const { data: passed } = await supabase
-            .from('quiz_attempts')
-            .select('profile_id')
-            .eq('quiz_type', 'formal')
-            .eq('passed', true)
-            .in('profile_id', ids)
-          setQualifiedIds(new Set((passed ?? []).map((p) => p.profile_id)))
-        }
         setLoading(false)
       })
-  }, [currentStoreId])
+  }
 
-  if (selected) return <StaffStudyDetail staff={selected} onBack={() => setSelected(null)} />
+  useEffect(load, [currentStoreId])
+
+  // Re-fetch on the way back from a staff member's detail page — Qualified
+  // may have just been granted or cancelled there (StaffStudyDetail.jsx),
+  // so this list's own Qualified badge needs to pick that up too.
+  if (selected) {
+    return (
+      <StaffStudyDetail
+        staff={selected}
+        onBack={() => {
+          setSelected(null)
+          load()
+        }}
+      />
+    )
+  }
 
   return (
     <div>
@@ -71,7 +72,7 @@ export default function LearningTrackerPage() {
             >
               <span className="flex items-center gap-2 font-medium text-gray-800">
                 {rosterDisplayName(s)}
-                {qualifiedIds.has(s.id) && <Badge color="green">Qualified</Badge>}
+                {s.qualified && <Badge color="green">Qualified</Badge>}
               </span>
               <span className="text-gray-300">›</span>
             </button>
