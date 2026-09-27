@@ -4,6 +4,12 @@ import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import AttendanceLogTable from '../../dashboard/time-attendance/AttendanceLogTable'
 
+// Roles that don't get a Time & Attendance tab of their own (see
+// permissions.js) have nothing to show up here either — training is a
+// weekly-code account, not someone who clocks in, and qr_code_maker is the
+// device account for the store's own QR display, not a person.
+const EXCLUDED_ROLES = ['training', 'qr_code_maker']
+
 // Manager-facing view of the same Attendance Logs table each employee sees
 // for themselves under My Dashboard > Time & Attendance — a manager just
 // picks who to look at first. Staff list follows the same "via user_stores,
@@ -13,13 +19,15 @@ export default function StaffTimeLogsPage() {
   const { currentStoreId } = useAuth()
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedId, setSelectedId] = useState(null)
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState(null)
 
   useEffect(() => {
     if (!currentStoreId) return
     let active = true
     setLoading(true)
-    setSelectedId(null)
+    setSelected(null)
+    setSearch('')
     supabase
       .from('user_stores')
       .select('profiles(*)')
@@ -28,7 +36,7 @@ export default function StaffTimeLogsPage() {
         if (!active) return
         const rows = (data ?? [])
           .map((m) => m.profiles)
-          .filter((p) => p && p.is_active)
+          .filter((p) => p && p.is_active && !EXCLUDED_ROLES.includes(p.role))
           .sort((a, b) => (a.first_name ?? '').localeCompare(b.first_name ?? ''))
         setStaff(rows)
         setLoading(false)
@@ -37,6 +45,11 @@ export default function StaffTimeLogsPage() {
       active = false
     }
   }, [currentStoreId])
+
+  const query = search.trim().toLowerCase()
+  const filtered = query
+    ? staff.filter((s) => `${s.first_name ?? ''} ${s.last_name ?? ''}`.toLowerCase().includes(query))
+    : staff
 
   return (
     <div>
@@ -48,24 +61,45 @@ export default function StaffTimeLogsPage() {
       ) : !staff.length ? (
         <EmptyState label="No active staff at this store yet." />
       ) : (
-        <div className="mb-5 flex flex-wrap gap-2">
-          {staff.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSelectedId(s.id)}
-              className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
-                selectedId === s.id
-                  ? 'border-brand-500 bg-brand-500 text-white'
-                  : 'border-brand-200 bg-white text-gray-700 hover:bg-brand-50'
-              }`}
-            >
-              {s.first_name} {s.last_name}
-            </button>
-          ))}
-        </div>
+        <>
+          <input
+            type="text"
+            className="input mb-3"
+            placeholder="Search by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {!filtered.length ? (
+            <EmptyState label="No staff match that search." />
+          ) : (
+            <div className="mb-5 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+              {filtered.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSelected(s)}
+                  className={`flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50 ${
+                    selected?.id === s.id ? 'bg-brand-50' : ''
+                  }`}
+                >
+                  <span className="font-medium text-gray-800">
+                    {s.first_name} {s.last_name}
+                  </span>
+                  <span className="text-gray-300">›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      {selectedId && <AttendanceLogTable profileId={selectedId} />}
+      {selected && (
+        <div>
+          <h2 className="mb-2 text-sm font-semibold text-brand-700">
+            {selected.first_name} {selected.last_name}
+          </h2>
+          <AttendanceLogTable profileId={selected.id} />
+        </div>
+      )}
     </div>
   )
 }

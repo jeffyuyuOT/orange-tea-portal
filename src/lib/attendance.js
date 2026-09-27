@@ -1,14 +1,22 @@
 import { format } from 'date-fns'
 import { supabase } from './supabaseClient'
 
+// How often the store's QR code display (QrCodeDisplayPage.jsx) rolls over
+// to a fresh code. 15s (rather than every 1s, which was the first cut of
+// this) gives staff enough time to actually get the camera up and scan
+// before the code they're looking at changes underneath them.
+export const QR_REFRESH_MS = 15000
+
 // How old a scanned QR's timestamp is allowed to be before it's rejected as
 // stale — rules out someone clocking in off a screenshot of an old code
-// (the code on the display device changes every second — see
-// QrCodeDisplayPage.jsx) rather than the code actually on screen right now.
-// This is a soft, client-side check, not a cryptographic guarantee; good
-// enough for "were you actually standing in front of the phone" at the
-// scale of one small business.
-export const QR_FRESHNESS_MS = 15000
+// rather than the code actually on screen right now. Set a bit above
+// QR_REFRESH_MS: someone scanning right before a code rolls over can end up
+// submitting a punch whose code is nearly a full refresh interval old, plus
+// a few seconds of camera-decode/network time on top of that. This is a
+// soft, client-side check, not a cryptographic guarantee; good enough for
+// "were you actually standing in front of the phone" at the scale of one
+// small business.
+export const QR_FRESHNESS_MS = QR_REFRESH_MS + 5000
 
 export function buildQrPayload(store) {
   return JSON.stringify({ storeId: store.id, storeName: store.name, ts: new Date().toISOString() })
