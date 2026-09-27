@@ -7,6 +7,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import { isAnswerAccepted } from '../../../lib/answerMatching'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import { weightedSample } from '../../../lib/quizSelection'
+import { buildQuantityChoiceQuestion } from '../../../lib/formulaChoiceQuestion'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -15,38 +16,6 @@ function shuffle(arr) {
     ;[a[i], a[j]] = [a[j], a[i]]
   }
   return a
-}
-
-const CHOICE_KEYS = ['A', 'B', 'C', 'D']
-
-// "30g" -> { value: 30, suffix: "g" }; "2 pumps" -> { value: 2, suffix: " pumps" }.
-// Anything that doesn't start with a number (e.g. "a pinch") is unparseable.
-function parseQuantity(text) {
-  const m = /^(\d+(?:\.\d+)?)(.*)$/.exec((text ?? '').trim())
-  if (!m) return null
-  return { value: parseFloat(m[1]), suffix: m[2] }
-}
-
-// Falls back to synthesized wrong answers (scaled versions of the real
-// quantity) when there aren't enough *other* real quantities on record for
-// this ingredient to use as distractors.
-function synthesizeDistractors(quantityText, count, exclude) {
-  const parsed = parseQuantity(quantityText)
-  if (!parsed || !(parsed.value > 0)) return []
-  const { value, suffix } = parsed
-  const isInt = Number.isInteger(value)
-  const round = (n) => (isInt ? Math.max(1, Math.round(n)) : Math.max(0.1, Math.round(n * 10) / 10))
-  const seen = new Set(exclude)
-  const out = []
-  for (const mult of [0.5, 1.5, 2, 0.75, 1.25]) {
-    if (out.length >= count) break
-    const text = `${round(value * mult)}${suffix}`
-    if (!seen.has(text)) {
-      seen.add(text)
-      out.push(text)
-    }
-  }
-  return out
 }
 
 function itemLabel(item) {
@@ -115,17 +84,6 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
 
   return weightedSample(candidates, (c) => (top10Ids.has(c.formula_item_id) ? top10Weight : 1), targetCount)
     .map((row) => {
-      const realPool = [...(byIngredient[row.ingredient_id] ?? [])].filter((v) => v !== row.quantity_text)
-      const distractors = shuffle(realPool).slice(0, 3)
-      if (distractors.length < 3) {
-        distractors.push(
-          ...synthesizeDistractors(row.quantity_text, 3 - distractors.length, [row.quantity_text, ...distractors])
-        )
-      }
-      if (!distractors.length) return null // no real alternative on record and quantity_text wasn't a parseable number
-
-      const choices = shuffle([row.quantity_text, ...distractors]).map((text, i) => ({ key: CHOICE_KEYS[i], text }))
-      const correctKey = choices.find((c) => c.text === row.quantity_text).key
       const sizeSuffix = row.drink_sizes?.name ? ` (${row.drink_sizes.name})` : ''
       // The recipe's recorded quantity for the plain "Sugar" ingredient is
       // the full-sugar (100%) amount — customer sugar-level requests are a
@@ -139,13 +97,14 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
       // needs to name the group to say which occurrence it means.
       const groupSuffix = row.group_label ? ` (${row.group_label})` : ''
 
-      return {
-        id: `formula-${row.id}`,
-        isGenerated: true,
-        question: `How much ${row.ingredient_master?.name ?? 'this ingredient'}${groupSuffix} goes in ${itemLabel(row.formula_items)}${sizeSuffix}${sugarSuffix}?`,
-        choices,
-        correct_choice: correctKey,
-      }
+      const built = buildQuantityChoiceQuestion({
+        questionText: `How much ${row.ingredient_master?.name ?? 'this ingredient'}${groupSuffix} goes in ${itemLabel(row.formula_items)}${sizeSuffix}${sugarSuffix}?`,
+        quantityText: row.quantity_text,
+        realPool: [...(byIngredient[row.ingredient_id] ?? [])],
+      })
+      if (!built) return null // no real alternative on record and quantity_text wasn't a parseable number
+
+      return { id: `formula-${row.id}`, isGenerated: true, ...built }
     })
     .filter(Boolean)
 }
@@ -423,7 +382,14 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
             const qType = q.question_type ?? 'single'
             return (
               <div key={q.id}>
-                <p className="mb-2 text-sm font-medium text-gray-800">
+                {/* whitespace-pre-wrap: a Quiz Bank question is often typed
+                    as multiple lines (the question itself, then each
+                    "a. Sugar   b. Taro chunk" choice line spaced out for
+                    readability in the Quiz Bank editor) — plain text
+                    rendering collapses all of that to one run-on line, so
+                    this preserves the line breaks/spacing exactly as
+                    authored. */}
+                <p className="mb-2 whitespace-pre-wrap text-sm font-medium text-gray-800">
                   {idx + 1}. {q.question}
                 </p>
                 {q.image_path && (

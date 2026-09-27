@@ -32,6 +32,62 @@ function startOfDay(d) {
   return x
 }
 
+// Fritsch–Carlson monotone cubic Hermite spline, converted to SVG cubic
+// Bezier segments — Jeff asked for a smooth curve instead of the sharp
+// "one straight segment per memorized item" line this used to draw (a day
+// with several items memorized at once made it look like a staircase).
+// This specific spline (rather than a plain Catmull-Rom smoothing) is
+// chosen because the data is a running total that only ever goes up or
+// stays flat — a spline that doesn't preserve monotonicity can curve
+// slightly below a point or overshoot above the next one between two
+// samples, which would misleadingly show the count dipping or exceeding
+// what was actually memorized at that moment. `points` must already be
+// sorted ascending by x with strictly increasing x (no two points sharing
+// the same x — see the same-day merge below, before this is called).
+function monotonePath(points, xScale, yScale) {
+  const n = points.length
+  if (n < 2) return ''
+  const xs = points.map(([day]) => xScale(day))
+  const ys = points.map(([, count]) => yScale(count))
+  const segCount = n - 1
+  const slope = new Array(segCount)
+  for (let i = 0; i < segCount; i++) {
+    slope[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i])
+  }
+  const tangent = new Array(n)
+  tangent[0] = slope[0]
+  tangent[n - 1] = slope[segCount - 1]
+  for (let i = 1; i < n - 1; i++) {
+    // A flat spot, or a direction change (never happens for this
+    // non-decreasing data, but kept for safety) gets a flat tangent —
+    // otherwise the average of the two neighboring segment slopes.
+    tangent[i] = slope[i - 1] === 0 || slope[i] === 0 || slope[i - 1] < 0 !== slope[i] < 0 ? 0 : (slope[i - 1] + slope[i]) / 2
+  }
+  // Fritsch-Carlson correction so the curve can never overshoot past a
+  // segment's own two endpoint values.
+  for (let i = 0; i < segCount; i++) {
+    if (slope[i] === 0) {
+      tangent[i] = 0
+      tangent[i + 1] = 0
+      continue
+    }
+    const alpha = tangent[i] / slope[i]
+    const beta = tangent[i + 1] / slope[i]
+    const h = Math.hypot(alpha, beta)
+    if (h > 3) {
+      const tau = 3 / h
+      tangent[i] = tau * alpha * slope[i]
+      tangent[i + 1] = tau * beta * slope[i]
+    }
+  }
+  let path = `M ${xs[0]} ${ys[0]}`
+  for (let i = 0; i < segCount; i++) {
+    const dx = (xs[i + 1] - xs[i]) / 3
+    path += ` C ${xs[i] + dx} ${ys[i] + tangent[i] * dx}, ${xs[i + 1] - dx} ${ys[i + 1] - tangent[i + 1] * dx}, ${xs[i + 1]} ${ys[i + 1]}`
+  }
+  return path
+}
+
 // x = days since hire date, y = cumulative count of formula items marked
 // "Memorized" in Study Log. Senior staff (see StudyLogList's `senior` prop)
 // count every active item as memorized automatically from day one, so
@@ -82,19 +138,35 @@ export default function ProgressChartModal({ profileId, onClose }) {
     if (isSenior) {
       points.push([0, totalItems], [daysSoFar, totalItems])
     } else {
+      // Merge same-day events into a single point holding that day's final
+      // cumulative count, before building the point list — a day with
+      // several items memorized at once used to add several points at the
+      // same x, which is what turned the line into a staircase. One point
+      // per day (last count wins) also gives monotonePath below strictly
+      // increasing x values, which it requires.
       let count = 0
       points.push([0, 0])
       events.forEach((e) => {
         const day = Math.max(0, Math.round((startOfDay(e) - start) / DAY_MS))
         count += 1
-        points.push([day, count])
+        const last = points[points.length - 1]
+        if (last[0] === day) {
+          last[1] = count
+        } else {
+          points.push([day, count])
+        }
       })
-      points.push([daysSoFar, count])
+      const last = points[points.length - 1]
+      if (last[0] === daysSoFar) {
+        last[1] = count
+      } else {
+        points.push([daysSoFar, count])
+      }
     }
 
     const xScale = (day) => PAD_LEFT + day * PX_PER_DAY
     const yScale = (count) => PAD_TOP + plotHeight - (count / maxCount) * plotHeight
-    const path = points.map(([d, c], i) => `${i === 0 ? 'M' : 'L'} ${xScale(d)} ${yScale(c)}`).join(' ')
+    const path = points.length < 2 ? '' : monotonePath(points, xScale, yScale)
 
     // Average learning curve: a straight ramp from (0, 0) to (TARGET_DAYS,
     // totalItems), then flat at totalItems for the rest of the window —

@@ -86,7 +86,12 @@ export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) 
             >
               {qType === 'fill_blank' ? (
                 <>
-                  <p className="font-medium text-gray-800">{r.question_text}</p>
+                  {/* whitespace-pre-wrap: a Quiz Bank question is often
+                      authored as multiple lines (the question, then each
+                      spaced-out "a. Sugar   b. Taro chunk" choice line) —
+                      plain text rendering otherwise collapses all of that
+                      to one run-on line. */}
+                  <p className="whitespace-pre-wrap font-medium text-gray-800">{r.question_text}</p>
                   {image && (
                     <img
                       src={supabase.storage.from('documents').getPublicUrl(image).data.publicUrl}
@@ -101,7 +106,7 @@ export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) 
                 </>
               ) : qType === 'multi' ? (
                 <>
-                  <p className="font-medium text-gray-800">{r.quiz_questions?.question}</p>
+                  <p className="whitespace-pre-wrap font-medium text-gray-800">{r.quiz_questions?.question}</p>
                   {image && (
                     <img
                       src={supabase.storage.from('documents').getPublicUrl(image).data.publicUrl}
@@ -117,7 +122,7 @@ export default function AttemptDetailModal({ attempt, onClose, quizTypeLabel }) 
                 </>
               ) : (
                 <>
-                  <p className="font-medium text-gray-800">
+                  <p className="whitespace-pre-wrap font-medium text-gray-800">
                     {r.quiz_questions?.question ?? r.generated_question}
                     {r.is_generated && <span className="ml-1.5 text-xs font-normal text-brand-400">(formula)</span>}
                   </p>

@@ -7,6 +7,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import { isAnswerAccepted } from '../../../lib/answerMatching'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import { weightedSample } from '../../../lib/quizSelection'
+import { buildQuantityChoiceQuestion } from '../../../lib/formulaChoiceQuestion'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -61,6 +62,11 @@ async function buildFormalQuizSet(profileId, storeId) {
   // drink is to be picked below, versus any other memorized item (1 = no
   // boost). See FormalQuizSettingsTab.jsx + migration 0046.
   const top10Weight = settings?.top10_fill_blank_weight ?? 3
+  // What % of the auto-generated "how much of this ingredient" questions
+  // (not the curated Quiz Bank fill-blank ones — see the comment where this
+  // is used below) get shown as multiple choice instead of typed. Default 0
+  // = today's all-typed behavior. See migration 0050 / Quiz Bank > Setting.
+  const mcFillBlankPct = settings?.mc_fill_blank_pct ?? 0
 
   // Which of the memorized items are ⭐ Top 10 — used to weight both kinds
   // of fill-blank candidate below (the auto-generated ones and any Quiz
@@ -74,7 +80,7 @@ async function buildFormalQuizSet(profileId, storeId) {
   // Hot-serving variant (see QuickQuizModal.jsx's buildFormulaQuestions for
   // the same exclusion + rationale) — only an item's normal ingredient rows
   // become questions here. ---
-  const [{ data: ingredientRows }, { data: excludedRows }] = await Promise.all([
+  const [{ data: ingredientRows }, { data: excludedRows }, { data: allQuantityRows }] = await Promise.all([
     supabase
       .from('formula_item_ingredients')
       .select('id, ingredient_id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh)')
@@ -86,18 +92,37 @@ async function buildFormalQuizSet(profileId, storeId) {
     // questions" settings section in QuizBankPage.jsx. Formal Quiz didn't
     // apply this before, so an excluded ingredient could still turn up here.
     supabase.from('quiz_excluded_ingredients').select('ingredient_id'),
+    // Every distinct quantity_text recorded anywhere (any item, any store)
+    // for each ingredient — only fetched/used when mcFillBlankPct > 0 below,
+    // to supply "real" wrong answers when converting one of these to
+    // multiple choice, same source Quick Quiz's buildFormulaQuestions uses.
+    mcFillBlankPct > 0
+      ? supabase
+          .from('formula_item_ingredients')
+          .select('ingredient_id, quantity_text')
+          .not('quantity_text', 'is', null)
+          .not('ingredient_id', 'is', null)
+          .neq('quantity_text', '')
+      : Promise.resolve({ data: [] }),
   ])
   const excludedIngredientIds = new Set((excludedRows ?? []).map((r) => r.ingredient_id))
   const fillBlankCandidates = (ingredientRows ?? [])
     .filter((r) => r.quantity_text?.trim() && r.ingredient_master?.name && !r.is_hot && !excludedIngredientIds.has(r.ingredient_id))
     .map((r) => ({
       type: 'fill_blank',
+      isGenerated: true,
       localId: r.id,
+      ingredientId: r.ingredient_id,
+      quantityText: r.quantity_text.trim(),
       question: `${r.formula_items.name_en}${r.formula_items.name_zh ? ` · ${r.formula_items.name_zh}` : ''} — how much ${r.ingredient_master.name}?`,
       correctAnswer: r.quantity_text.trim(),
       topTen: top10Ids.has(r.formula_items.id),
       formulaItemId: r.formula_items.id,
     }))
+  const realQuantityPool = {}
+  ;(allQuantityRows ?? []).forEach((r) => {
+    ;(realQuantityPool[r.ingredient_id] ??= new Set()).add(r.quantity_text)
+  })
 
   // --- Choice-type candidates (single or multi) + bank-authored fill-blank
   // candidates: same source/filtering as Quick Quiz, split by question_type.
@@ -180,6 +205,31 @@ async function buildFormalQuizSet(profileId, storeId) {
     fillBlankSelected = [...fillBlankSelected, ...extra]
   }
 
+  // Jeff asked why these auto-generated formula questions aren't multiple
+  // choice like Quick Quiz's version of the same question — this setting
+  // (mc_fill_blank_pct, migration 0050) lets Formal Quiz mix in some. Only
+  // the auto-generated ones (isGenerated) are eligible: a curated Quiz Bank
+  // fill-blank question is free-form admin-authored text, not necessarily
+  // even a quantity, so there's no reliable pool of wrong answers to build
+  // choices from — those always stay typed. A candidate that can't get 3
+  // distractors (buildQuantityChoiceQuestion returns null — too rare/unique
+  // a quantity, nothing to scale) silently stays typed too, rather than
+  // erroring or shrinking the quiz.
+  if (mcFillBlankPct > 0) {
+    const eligible = fillBlankSelected.filter((q) => q.isGenerated)
+    const convertCount = Math.round((eligible.length * mcFillBlankPct) / 100)
+    const toConvert = new Set(shuffle(eligible).slice(0, convertCount).map((q) => q.localId))
+    fillBlankSelected = fillBlankSelected.map((q) => {
+      if (!toConvert.has(q.localId)) return q
+      const built = buildQuantityChoiceQuestion({
+        questionText: q.question,
+        quantityText: q.quantityText,
+        realPool: [...(realQuantityPool[q.ingredientId] ?? [])],
+      })
+      return built ? { ...q, type: 'choice', isGenerated: true, choices: built.choices, correct_choice: built.correct_choice } : q
+    })
+  }
+
   const combined = shuffle([...mcSelected, ...fillBlankSelected]).slice(0, questionCount)
   return { questions: combined, reason: null }
 }
@@ -229,12 +279,34 @@ export default function FormalQuizModal({ onClose }) {
       correct_answer_text: null,
       answer_text: null,
       is_correct: false,
+      is_generated: false,
+      generated_question: null,
+      generated_choices: null,
+      generated_correct_choice: null,
     }
     const answerRows = questions.map((q) => {
       if (q.type === 'choice') {
         const isCorrect = answers[q.localId] === q.correct_choice
         if (isCorrect) correct += 1
-        return { ...BLANK_ANSWER_ROW, question_id: q.id, question_type: 'choice', selected_choice: answers[q.localId] ?? null, is_correct: isCorrect }
+        // A curated Quiz Bank single-choice question references its
+        // quiz_questions row (question_id); a formula question converted to
+        // multiple choice above (q.isGenerated) has no such row, so it
+        // carries its own question/choices snapshot instead — same
+        // generated_* shape QuickQuizModal.jsx already uses for its
+        // formula questions, so Quiz History renders it the same way.
+        return q.isGenerated
+          ? {
+              ...BLANK_ANSWER_ROW,
+              question_id: null,
+              question_type: 'choice',
+              selected_choice: answers[q.localId] ?? null,
+              is_correct: isCorrect,
+              is_generated: true,
+              generated_question: q.question,
+              generated_choices: q.choices,
+              generated_correct_choice: q.correct_choice,
+            }
+          : { ...BLANK_ANSWER_ROW, question_id: q.id, question_type: 'choice', selected_choice: answers[q.localId] ?? null, is_correct: isCorrect }
       }
       if (q.type === 'multi') {
         const selected = answers[q.localId] ?? []
@@ -312,7 +384,12 @@ export default function FormalQuizModal({ onClose }) {
         <div className="space-y-5">
           {questions.map((q, idx) => (
             <div key={q.localId}>
-              <p className="mb-2 text-sm font-medium text-gray-800">
+              {/* whitespace-pre-wrap: see the same fix in QuickQuizModal.jsx
+                  — a Quiz Bank question is often authored as multiple lines
+                  (the question, then each spaced-out "a. Sugar   b. Taro
+                  chunk" choice line), which plain text rendering otherwise
+                  collapses into one run-on line. */}
+              <p className="mb-2 whitespace-pre-wrap text-sm font-medium text-gray-800">
                 {idx + 1}. {q.question}
               </p>
               {q.image_path && (

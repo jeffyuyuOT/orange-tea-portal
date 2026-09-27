@@ -45,6 +45,10 @@ export default function QuizSettingsTab() {
   // weight, excluded ingredients) plus each quiz type's own mix %.
   const [fillBlankRatio, setFillBlankRatio] = useState(20) // Formal Quiz's own formula-question %
   const [top10Weight, setTop10Weight] = useState(3) // shared — see quizSelection.js
+  // Formal Quiz only (migration 0050) — Quick Quiz's formula questions are
+  // already 100% multiple choice, so there's nothing to mix there. 0 = all
+  // typed (today's behavior), 100 = all multiple choice like Quick Quiz.
+  const [mcFillBlankPct, setMcFillBlankPct] = useState(0)
 
   const [saving, setSaving] = useState(false)
 
@@ -65,6 +69,7 @@ export default function QuizSettingsTab() {
         setFormalRatio(formal.importance_ratio)
         setFillBlankRatio(formal.fill_in_blank_ratio)
         setTop10Weight(formal.top10_fill_blank_weight ?? 3)
+        setMcFillBlankPct(formal.mc_fill_blank_pct ?? 0)
       }
     })
   }, [currentStoreId])
@@ -89,6 +94,7 @@ export default function QuizSettingsTab() {
           importance_ratio: formalRatio,
           fill_in_blank_ratio: fillBlankRatio,
           top10_fill_blank_weight: top10Weight,
+          mc_fill_blank_pct: mcFillBlankPct,
         },
         { onConflict: 'store_id' }
       ),
@@ -244,13 +250,33 @@ export default function QuizSettingsTab() {
               onChange={(e) => setTop10Weight(Number(e.target.value))}
             />
           </label>
+          <label className="block max-w-xs">
+            <span className="mb-1 block text-xs font-medium text-gray-500">
+              Formal Quiz: % shown as multiple choice
+            </span>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                className="input"
+                value={mcFillBlankPct}
+                onChange={(e) => setMcFillBlankPct(Number(e.target.value))}
+              />
+              <span className="text-sm text-gray-400">%</span>
+            </div>
+          </label>
         </div>
         <p className="mb-4 text-xs text-gray-400">
-          Both % settings control how much of that quiz type is auto-generated "fill in the ingredient quantity"
-          questions from Formula Database recipes, rather than ordinary questions pulled from the Quiz Bank above.
-          The Top 10 weight — how many times more likely a fill-in-the-blank question about a ⭐ Top 10 drink is to
-          be picked, versus any other memorized item (1 = no boost, 3 = default) — and the excluded-ingredients
-          list below both apply the same way to Quick Quiz and Formal Quiz.
+          Both top "% of quiz" settings control how much of that quiz type is auto-generated "fill in the
+          ingredient quantity" questions from Formula Database recipes, rather than ordinary questions pulled from
+          the Quiz Bank above. The Top 10 weight — how many times more likely a fill-in-the-blank question about a
+          ⭐ Top 10 drink is to be picked, versus any other memorized item (1 = no boost, 3 = default) — and the
+          excluded-ingredients list below both apply the same way to Quick Quiz and Formal Quiz. Quick Quiz's
+          version of these questions is always multiple choice; Formal Quiz's is typed by default — "% shown as
+          multiple choice" mixes some multiple-choice questions in (0% = all typed, 100% = all multiple choice like
+          Quick Quiz). This only applies to these auto-generated questions, not to a fill-in-the-blank question an
+          admin wrote by hand in the Quiz Bank — those stay typed either way.
         </p>
 
         <ExcludedIngredientsSection />
