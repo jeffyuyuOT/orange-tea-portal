@@ -108,7 +108,18 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Once we know which stores the user can see, default the active store.
-    if (!currentStoreId && accessibleStores.length) {
+    // Also corrects a STALE currentStoreId — it's cached in localStorage per
+    // BROWSER, not per account, so a phone/computer that was previously
+    // signed in as a different person (or where this same person's store
+    // assignment changed) can carry over a store id that isn't in this
+    // account's accessibleStores at all. Without this check that stale id
+    // just sits there forever (the old "only reset if empty" version never
+    // corrected it), and any page that resolves the current store by
+    // looking it up in accessibleStores — e.g. QrCodeDisplayPage — quietly
+    // renders as "no store selected" while the header's StoreSwitcher still
+    // looks fine (it shows accessibleStores[0].name directly whenever
+    // there's exactly one, without checking currentStoreId at all).
+    if (accessibleStores.length && !accessibleStores.some((s) => s.id === currentStoreId)) {
       setCurrentStoreId(accessibleStores[0].id)
     }
   }, [accessibleStores]) // eslint-disable-line react-hooks/exhaustive-deps
