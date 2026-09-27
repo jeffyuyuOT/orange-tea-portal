@@ -16,6 +16,7 @@ import MyInformationPage from '../modules/dashboard/my-information/MyInformation
 import LearningTrackerPage from '../modules/shop-management/learning-tracker/LearningTrackerPage'
 import StaffListPage from '../modules/shop-management/staff-information/StaffListPage'
 import TrainingCodePage from '../modules/shop-management/training-code/TrainingCodePage'
+import ShopTrainingDatabasePage from '../modules/shop-management/shop-training-database/ShopTrainingDatabasePage'
 
 import MyRosterPage from '../modules/roster-hub/my-roster/MyRosterPage'
 import ManageRosterPage from '../modules/roster-hub/manage-roster/ManageRosterPage'
@@ -25,7 +26,6 @@ import RosterSettingsPage from '../modules/roster-hub/settings/RosterSettingsPag
 
 import FormulaDatabasePage from '../modules/admin-center/formula-database/FormulaDatabasePage'
 import QuizBankPage from '../modules/admin-center/quiz-bank/QuizBankPage'
-import ShopTrainingDatabasePage from '../modules/admin-center/shop-training-database/ShopTrainingDatabasePage'
 import FileRepositoryPage from '../modules/admin-center/file-repository/FileRepositoryPage'
 import UserManagementPage from '../modules/admin-center/user-management/UserManagementPage'
 import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
@@ -67,6 +67,10 @@ export default function AppRoutes() {
         <Route path="/shop-management/learning-tracker" element={guarded('shop_management.learning_tracker', <LearningTrackerPage />)} />
         <Route path="/shop-management/staff-information" element={guarded('shop_management.staff_information', <StaffListPage />)} />
         <Route path="/shop-management/training-code" element={guarded('shop_management.training_code', <TrainingCodePage />)} />
+        <Route
+          path="/shop-management/shop-training-database"
+          element={guarded('shop_management.shop_training_database', <ShopTrainingDatabasePage />)}
+        />
 
         <Route path="/roster-hub/my-roster" element={guarded('roster_hub.my_roster', <MyRosterPage />)} />
         <Route path="/roster-hub/manage-roster" element={guarded('roster_hub.manage_roster', <ManageRosterPage />)} />
@@ -76,7 +80,6 @@ export default function AppRoutes() {
 
         <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
         <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <QuizBankPage />)} />
-        <Route path="/admin-center/shop-training-database" element={guarded('admin_center.shop_training_database', <ShopTrainingDatabasePage />)} />
         <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
         <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
         <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />

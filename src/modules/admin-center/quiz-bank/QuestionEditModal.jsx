@@ -67,11 +67,16 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
 
   useEffect(() => {
     if (groupKey === 'shop_training') {
+      // Since migration 0052 each store has its own copy of a title (e.g.
+      // 5 separate "POS Note" rows), so the store name is appended to tell
+      // otherwise-identical options apart.
       supabase
         .from('shop_training_items')
-        .select('id, title')
+        .select('id, title, stores ( name )')
         .order('title')
-        .then(({ data }) => setItems((data ?? []).map((d) => ({ id: d.id, label: d.title }))))
+        .then(({ data }) =>
+          setItems((data ?? []).map((d) => ({ id: d.id, label: d.stores?.name ? `${d.title} — ${d.stores.name}` : d.title })))
+        )
     } else {
       let q = supabase.from('formula_items').select('id, name_en').eq('group_key', groupKey)
       q = categoryId ? q.eq('category_id', categoryId) : q.is('category_id', null)

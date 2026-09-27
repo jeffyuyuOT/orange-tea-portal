@@ -1,12 +1,17 @@
 import { useState } from 'react'
 import Button from '../../../components/ui/Button'
+import { useAuth } from '../../../lib/AuthContext'
 import { IMPORT_TYPES, downloadTemplate, readWorkbookForImport, detectImportType } from '../../../lib/importTemplates'
 
 const TYPE_OPTIONS = Object.values(IMPORT_TYPES)
 
 export default function ImportFilePanel() {
+  const { accessibleStores } = useAuth()
   const [downloadType, setDownloadType] = useState(TYPE_OPTIONS[0].key)
   const [pending, setPending] = useState(null) // { fileName, rows, rowCount, detectedKey, chosenKey }
+  // Only used for import types that need a target store (currently just
+  // Shop Training, since migration 0052 made each item belong to one store).
+  const [importStoreId, setImportStoreId] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null) // { summary, errors }
 
@@ -27,11 +32,13 @@ export default function ImportFilePanel() {
   async function confirmImport() {
     const type = IMPORT_TYPES[pending.chosenKey]
     if (!type) return
+    if (type.needsStore && !importStoreId) return
     setBusy(true)
     try {
-      const outcome = await type.run(pending.rows)
+      const outcome = await type.run(pending.rows, { storeId: importStoreId || null })
       setResult(outcome)
       setPending(null)
+      setImportStoreId('')
     } catch (err) {
       setResult({ summary: null, errors: [err.message] })
     } finally {
@@ -101,11 +108,36 @@ export default function ImportFilePanel() {
               ))}
             </select>
           </div>
+          {IMPORT_TYPES[pending.chosenKey]?.needsStore && (
+            <label className="mb-3 block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">
+                Import into which store? (each item now belongs to one store)
+              </span>
+              <select className="input w-64" value={importStoreId} onChange={(e) => setImportStoreId(e.target.value)}>
+                <option value="">— Select store —</option>
+                {accessibleStores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="flex gap-2">
-            <Button onClick={confirmImport} disabled={busy || !pending.chosenKey}>
+            <Button
+              onClick={confirmImport}
+              disabled={busy || !pending.chosenKey || (IMPORT_TYPES[pending.chosenKey]?.needsStore && !importStoreId)}
+            >
               {busy ? 'Importing…' : 'Import'}
             </Button>
-            <Button variant="secondary" onClick={() => setPending(null)} disabled={busy}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPending(null)
+                setImportStoreId('')
+              }}
+              disabled={busy}
+            >
               Cancel
             </Button>
           </div>

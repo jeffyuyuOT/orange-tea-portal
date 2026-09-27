@@ -27,6 +27,7 @@ export const SECTIONS = {
       learning_tracker: 'Learning Tracker',
       staff_information: 'Staff Information',
       training_code: 'Training Code',
+      shop_training_database: 'Shop Training Database',
     },
   },
   roster_hub: {
@@ -44,7 +45,6 @@ export const SECTIONS = {
     pages: {
       formula_database: 'Formula Database',
       quiz_bank: 'Quiz Bank',
-      shop_training_database: 'Shop Training Database',
       file_repository: 'File Repository',
       user_management: 'User Management',
       store_management: 'Store Management',

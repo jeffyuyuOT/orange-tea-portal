@@ -106,6 +106,10 @@ export const IMPORT_TYPES = {
     columns: ['Title', 'Content (plain text or simple HTML)', 'Visible to Training (yes/no)'],
     exampleRows: [['Opening Checklist', '<p>1. Turn on machines...</p>', 'no']],
     colWidths: [28, 50, 22],
+    // Since migration 0052, Shop Training items belong to one store each —
+    // there's no more "global" list to import into, so the panel must ask
+    // which store this batch is for before running it.
+    needsStore: true,
     run: importShopTraining,
   },
   staff: {
@@ -415,7 +419,18 @@ async function importQuiz(rows) {
   const { data: categories } = await supabase.from('formula_categories').select('id, name').eq('group_key', 'drink')
   const categoryByName = new Map((categories ?? []).map((c) => [c.name.toLowerCase(), c.id]))
   const { data: formulaItems } = await supabase.from('formula_items').select('id, name_en, group_key, category_id')
-  const { data: trainingItems } = await supabase.from('shop_training_items').select('id, title')
+  // Since migration 0052 there's one shop_training_items row PER STORE, so a
+  // title like "POS Note" now matches up to 5 rows (one per store) instead
+  // of exactly one. This import format has no per-row store column for the
+  // shop_training group (only the existing "Store Codes" column, which
+  // controls quiz_question_stores — which stores can see the QUESTION, not
+  // which store's training item it organizes under), so ties are broken by
+  // preferring a title match in one of that row's Store Codes, falling back
+  // to an arbitrary match if none of those codes have that title. This link
+  // is purely for browsing/organizing in Quiz Bank — quiz generation itself
+  // never reads shop_training_item_id — so an arbitrary tie-break here has
+  // no effect on what questions get asked.
+  const { data: trainingItems } = await supabase.from('shop_training_items').select('id, title, store_id')
   const { data: stores } = await supabase.from('stores').select('id, code')
   const storeByCode = new Map((stores ?? []).map((s) => [s.code.toLowerCase(), s.id]))
 
@@ -444,11 +459,18 @@ async function importQuiz(rows) {
     let formulaItemId = null
     let shopTrainingItemId = null
     if (group === 'shop_training') {
-      const match = (trainingItems ?? []).find((t) => t.title.toLowerCase() === linkedName.toLowerCase())
-      if (!match) {
+      const titleMatches = (trainingItems ?? []).filter((t) => t.title.toLowerCase() === linkedName.toLowerCase())
+      if (!titleMatches.length) {
         errors.push(`"${question.slice(0, 30)}…": Shop Training item "${linkedName}" not found`)
         continue
       }
+      // Same title now exists once per store — prefer a copy at one of this
+      // row's Store Codes (if given), otherwise just take the first.
+      const preferredStoreIds = String(row['Store Codes (comma separated, blank = all stores)'] ?? '')
+        .split(',')
+        .map((c) => storeByCode.get(c.trim().toLowerCase()))
+        .filter(Boolean)
+      const match = titleMatches.find((t) => preferredStoreIds.includes(t.store_id)) ?? titleMatches[0]
       shopTrainingItemId = match.id
     } else {
       const match = (formulaItems ?? []).find(
@@ -504,8 +526,16 @@ async function importQuiz(rows) {
 }
 
 // --- Shop Training import ---
-async function importShopTraining(rows) {
-  const { count: existingCount } = await supabase.from('shop_training_items').select('id', { count: 'exact', head: true })
+// Since migration 0052, items belong to one store each, so this needs to
+// know which store the batch is for — `extra.storeId`, set by the store
+// picker ImportFilePanel shows for this import type (IMPORT_TYPES.shop_training.needsStore).
+async function importShopTraining(rows, extra) {
+  const storeId = extra?.storeId
+  if (!storeId) return { summary: null, errors: ['No store selected — choose which store to import these items into.'] }
+  const { count: existingCount } = await supabase
+    .from('shop_training_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('store_id', storeId)
   let sortOrder = existingCount ?? 0
   let created = 0
   const errors = []
@@ -516,7 +546,7 @@ async function importShopTraining(rows) {
     const visible = ['yes', 'y', 'true', '1'].includes(String(row['Visible to Training (yes/no)'] ?? '').trim().toLowerCase())
     const { error } = await supabase
       .from('shop_training_items')
-      .insert({ title, content_html: content, visible_to_training: visible, sort_order: sortOrder })
+      .insert({ title, content_html: content, visible_to_training: visible, sort_order: sortOrder, store_id: storeId })
     if (error) errors.push(`"${title}": ${error.message}`)
     else {
       created += 1

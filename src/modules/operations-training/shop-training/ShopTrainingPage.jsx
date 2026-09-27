@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
-import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Modal from '../../../components/ui/Modal'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
@@ -16,19 +15,18 @@ export default function ShopTrainingPage() {
   useEffect(() => {
     let active = true
     async function load() {
-      let query = supabase.from('shop_training_items').select('*').order('sort_order')
-      // Training-role accounts only ever see content an admin marked visible.
+      if (!currentStoreId) return
+      // Since migration 0052, training content is owned by the store itself
+      // (store_id) rather than one shared global list with an optional
+      // "visible at these stores" restriction — so this is just a plain
+      // per-store filter now, same as everything else scoped by
+      // currentStoreId.
+      let query = supabase.from('shop_training_items').select('*').eq('store_id', currentStoreId).order('sort_order')
+      // Training-role accounts only ever see content an admin/manager marked visible.
       if (profile?.role === 'training') query = query.eq('visible_to_training', true)
       const { data: itemRows } = await query
-      const ids = (itemRows ?? []).map((i) => i.id)
-      let restrictionRows = []
-      if (ids.length) {
-        const { data } = await supabase.from('shop_training_item_stores').select('*').in('shop_training_item_id', ids)
-        restrictionRows = data ?? []
-      }
       if (!active) return
-      const visible = filterVisibleForStore(itemRows ?? [], restrictionRows, 'shop_training_item_id', currentStoreId)
-      setItems(visible)
+      setItems(itemRows ?? [])
       setLoading(false)
     }
     load()
