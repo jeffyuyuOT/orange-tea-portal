@@ -18,7 +18,7 @@ import {
   pendingAsStaff,
   pendingRosterName,
 } from '../../../lib/excelRoster'
-import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
+import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 
 export default function ManageRosterPage() {
   const { currentStoreId, accessibleStores, profile, refreshRosterUpdates } = useAuth()
@@ -55,34 +55,21 @@ export default function ManageRosterPage() {
     return () => document.removeEventListener('click', handleOutsideClick)
   }, [actionMenuOpen])
 
-  // Staff/Pending-staff ids hidden from THIS week's grid — RosterEntryGrid's
-  // ✕ button (`removeRow`) already clears a staff/pending row's hours and
-  // calls `onHideStaff`, but this page never passed that prop (nor
-  // `hiddenStaff`/`onRestoreStaff`), so the call silently did nothing and
-  // the row just came right back on the next render, still listed with its
-  // hours blanked out — looking exactly like "can't delete this person".
-  // This is scoped to the currently-selected week only (reset whenever
-  // `weekStart` changes, including via "Load period" from History) — it
-  // doesn't persist once you leave/reopen this page, so reopening the same
-  // saved week later still starts from the full current staff list, same
-  // as before.
-  const [hiddenStaffIds, setHiddenStaffIds] = useState(new Set())
-  useEffect(() => {
-    setHiddenStaffIds(new Set())
-  }, [weekStart])
-
-  function hideStaffRow(row) {
-    const id = row.profileId || row.pendingId
-    if (!id) return
-    setHiddenStaffIds((prev) => new Set(prev).add(id))
-  }
-
-  function restoreStaffRow(h) {
-    setHiddenStaffIds((prev) => {
-      const next = new Set(prev)
-      next.delete(h.id)
-      return next
-    })
+  // Staff/Pending-staff removed from THIS store's roster altogether — a ✕
+  // next to their name (RosterEntryGrid's `removeRow`) now persists
+  // `hidden_from_roster` on their user_stores/roster_pending_staff row
+  // (migration 0059_roster_staff_order_and_hide.sql) instead of only
+  // hiding them for the currently-open week in local state — a manager
+  // restores them (and adds them back into the ordering list) from
+  // Roster Hub > Setting > Roster Staff Order, not from here.
+  async function persistHideStaff(row) {
+    if (row.profileId) {
+      await supabase.from('user_stores').update({ hidden_from_roster: true }).match({ profile_id: row.profileId, store_id: currentStoreId })
+      setStaff((prev) => prev.filter((s) => s.id !== row.profileId))
+    } else if (row.pendingId) {
+      await supabase.from('roster_pending_staff').update({ hidden_from_roster: true }).eq('id', row.pendingId)
+      setPendingStaff((prev) => prev.filter((p) => p.id !== row.pendingId))
+    }
   }
 
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
@@ -115,21 +102,34 @@ export default function ManageRosterPage() {
       // under a different name at each, set from that store's Staff
       // Information. Folded back onto the embedded profile below so
       // rosterDisplayName() just reads `.roster_display_name` either way.
-      .select('roster_display_name, profiles(id, first_name, last_name, email, is_active, role)')
+      // roster_order/hidden_from_roster (migration
+      // 0059_roster_staff_order_and_hide.sql) are Roster Hub > Setting >
+      // Roster Staff Order's doing — a ✕ in this grid sets
+      // hidden_from_roster (see persistHideStaff above), so someone hidden
+      // that way is excluded here entirely rather than only for one week.
+      // qualified (profiles.qualified, migration 0049_staff_qualified.sql)
+      // is what RosterEntryGrid uses to show a not-yet-Qualified staff
+      // member's name/shift time in red.
+      .select('roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified)')
       .eq('store_id', currentStoreId)
+      .order('roster_order')
       .then(({ data }) => {
         // training/qr_code_maker accounts don't get scheduled at all (per
         // Jeff — they don't work store shifts), so they never auto-populate
-        // onto this grid the way real staff do.
+        // onto this grid the way real staff do. developer is deliberately
+        // NOT in this list (see NON_ROSTER_STAFF_ROLES) — it can be
+        // scheduled like any other role once assigned to a store.
         const list = (data ?? [])
-          .filter((r) => r.profiles?.is_active && !NON_PICKABLE_STAFF_ROLES.includes(r.profiles.role))
-          .map((r) => ({ ...r.profiles, roster_display_name: r.roster_display_name }))
+          .filter((r) => r.profiles?.is_active && !NON_ROSTER_STAFF_ROLES.includes(r.profiles.role) && !r.hidden_from_roster)
+          .map((r) => ({ ...r.profiles, roster_display_name: r.roster_display_name, roster_order: r.roster_order }))
         setStaff(list)
       })
     supabase
       .from('roster_pending_staff')
       .select('*')
       .eq('store_id', currentStoreId)
+      .eq('hidden_from_roster', false)
+      .order('roster_order')
       .then(({ data }) => setPendingStaff(data ?? []))
     supabase
       .from('roster_staffing_rules')
@@ -175,7 +175,12 @@ export default function ManageRosterPage() {
   // Pending staff show up in the downloadable template and "current grid"
   // export too, same as on-screen, so a not-yet-formal hire can be
   // scheduled ahead of time whichever way the roster gets filled in.
-  const templateStaff = [...staff, ...pendingAsStaff(pendingStaff)]
+  // Sorted by roster_order (Roster Hub > Setting > Roster Staff Order) so
+  // the template/export lists people in the same order the on-screen grid
+  // does (RosterEntryGrid does its own equivalent merge of `staff` +
+  // `pendingStaff`) rather than always putting every Pending person after
+  // every real staff member regardless of the order set there.
+  const templateStaff = [...staff, ...pendingAsStaff(pendingStaff)].sort((a, b) => (a.roster_order ?? 0) - (b.roster_order ?? 0))
 
   function knownNames() {
     return [
@@ -474,17 +479,12 @@ export default function ManageRosterPage() {
       </div>
 
       <RosterEntryGrid
-        staff={staff.filter((s) => !hiddenStaffIds.has(s.id))}
-        pendingStaff={pendingStaff.filter((p) => !hiddenStaffIds.has(p.id))}
+        staff={staff}
+        pendingStaff={pendingStaff}
         weekDates={weekDates}
         entries={entries}
         setEntries={setEntries}
-        hiddenStaff={[
-          ...staff.filter((s) => hiddenStaffIds.has(s.id)).map((s) => ({ id: s.id, name: rosterDisplayName(s) })),
-          ...pendingStaff.filter((p) => hiddenStaffIds.has(p.id)).map((p) => ({ id: p.id, name: pendingRosterName(p) })),
-        ]}
-        onHideStaff={hideStaffRow}
-        onRestoreStaff={restoreStaffRow}
+        onHideStaff={persistHideStaff}
       />
       <UnderstaffedWarnings entries={entries} rules={rules} />
 

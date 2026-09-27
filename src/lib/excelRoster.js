@@ -133,7 +133,11 @@ export function rosterDisplayName(s) {
 export function pendingAsStaff(pendingStaff) {
   return pendingStaff.map((p) => {
     const name = p.roster_display_name || p.display_name
-    return { id: '', first_name: name, last_name: '', roster_display_name: name }
+    // roster_order carried through so callers merging this onto `staff`
+    // (e.g. ManageRosterPage's templateStaff) can sort the combined list by
+    // it — see migration 0059_roster_staff_order_and_hide.sql / Roster Hub
+    // > Setting > Roster Staff Order.
+    return { id: '', first_name: name, last_name: '', roster_display_name: name, roster_order: p.roster_order ?? 0 }
   })
 }
 
@@ -321,6 +325,27 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
         const wb = XLSX.read(e.target.result, { type: 'array' })
         const sheet = findStoreSheet(wb, storeName)
         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+        // SheetJS's array read only puts a value in a merged range's
+        // TOP-LEFT cell — every other cell the merge covers comes back as
+        // '' (via defval above) even though Excel visually shows the same
+        // value across the whole merge. A manager merging, say, a Break
+        // row's day cells together (the same break often applies every
+        // day that week), or merging a Name cell vertically across the
+        // Shift+Break row pair, would otherwise silently read as "no
+        // break recorded" / "no name" for every cell but the first one in
+        // that merge — which is exactly what Jeff ran into. Propagate
+        // each merge's corner value across every cell it covers before
+        // the row-by-row parsing below reads any of it.
+        ;(sheet['!merges'] || []).forEach((m) => {
+          const corner = aoa[m.s.r]?.[m.s.c]
+          for (let r = m.s.r; r <= m.e.r; r++) {
+            if (!aoa[r]) aoa[r] = []
+            for (let c = m.s.c; c <= m.e.c; c++) {
+              if (r === m.s.r && c === m.s.c) continue
+              aoa[r][c] = corner
+            }
+          }
+        })
         const byName = new Map(staff.map((s) => [rosterDisplayName(s).toLowerCase(), s]))
 
         const entries = []

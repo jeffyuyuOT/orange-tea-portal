@@ -12,8 +12,11 @@ export default function AppShell() {
   // Admin Center pages (Formula Database, Store Management, User Management,
   // ...) manage every store's data at once — there's nothing to "switch"
   // into, so the per-store picker is hidden there instead of implying a
-  // scope that doesn't apply.
-  const isAdminCenter = location.pathname.startsWith('/admin-center')
+  // scope that doesn't apply. Developer Tools (currently just Payroll) is
+  // the same — that app has its own separate notion of "store" entirely
+  // unrelated to OT Portal's stores, so the switcher would be misleading
+  // there too.
+  const isAdminCenter = location.pathname.startsWith('/admin-center') || location.pathname.startsWith('/developer-tools')
 
   // Below the sidebar's md breakpoint there was previously no way at all to
   // reach anything but whatever page you landed on — the sidebar (and every

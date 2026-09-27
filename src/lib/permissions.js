@@ -159,10 +159,26 @@ export const ROLE_LABELS = {
 // a weekly-code account with its own separate content visibility (not
 // someone whose study/quiz/clock-in progress a manager reviews),
 // qr_code_maker is a device account, not a person at all, and developer is
-// Jeff's own account for the payroll app, not scheduled staff. Shared by
-// every such picker (Learning Tracker, Staff Time Logs, …) so they can't
-// drift apart on which roles count as "real staff".
+// usually Jeff's own account for the payroll app, not scheduled staff.
+// Shared by every such picker (Learning Tracker, Staff Time Logs, Staff
+// Information, …) so they can't drift apart on which roles count as "real
+// staff" — EXCEPT roster contexts, which use NON_ROSTER_STAFF_ROLES below
+// instead, because a developer account genuinely can be scheduled and
+// shown on the roster like a real staff member once User Management
+// assigns it a store (Jeff: "jeff chuang有勾取Also on the roster at
+// sunnybank, toowong, 和brookside，但班表跟名字排序都沒看到" — that turned
+// out to be this same exclusion, reused a bit too broadly).
 export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'developer']
+
+// Manage Roster / Roster Staff Order / roster history & multi-store
+// exports use this narrower list instead of NON_PICKABLE_STAFF_ROLES
+// above — same reasoning for training (never actually works a shift) and
+// qr_code_maker (a device, not a person), but developer is deliberately
+// left OUT here: unlike the other pickers, a developer account is meant
+// to be schedulable on the roster once it's assigned to a store via
+// User Management's "Also on the roster at" checkboxes, the same as any
+// other role.
+export const NON_ROSTER_STAFF_ROLES = ['training', 'qr_code_maker']
 
 // Every ROLE_LABELS entry EXCEPT 'developer', unless the viewer IS a
 // developer. Used everywhere a role picker is shown (User Management's

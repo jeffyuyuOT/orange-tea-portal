@@ -4,6 +4,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import LeaveLimitsTab from './LeaveLimitsTab'
+import RosterStaffOrderTab from './RosterStaffOrderTab'
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -71,10 +72,13 @@ function buildTicks(open, close) {
 
 export default function RosterSettingsPage() {
   const { currentStoreId } = useAuth()
-  // Two tabs: Labour allocation (the staffing-rules timeline below,
-  // unchanged) and Leave limits. Display-name editing lives in Shop
-  // Management > Staff Information (StaffDetailModal / PendingStaffDetailModal)
-  // — it does not have a tab here.
+  // Three tabs: Labour allocation (the staffing-rules timeline below,
+  // unchanged), Leave limits, and Roster Staff Order (the order
+  // staff/Pending staff appear in on the Manage Roster grid, plus who's
+  // hidden from it — migration 0059_roster_staff_order_and_hide.sql).
+  // Display-name editing lives in Shop Management > Staff Information
+  // (StaffDetailModal / PendingStaffDetailModal) — it does not have a tab
+  // here.
   const [tab, setTab] = useState('labour')
   const [rules, setRules] = useState([])
   // weekdayFrom === weekdayTo means a single day — same as before; picking
@@ -207,10 +211,15 @@ export default function RosterSettingsPage() {
         <TabButton active={tab === 'leave'} onClick={() => setTab('leave')}>
           Leave limits
         </TabButton>
+        <TabButton active={tab === 'staffOrder'} onClick={() => setTab('staffOrder')}>
+          Roster Staff Order
+        </TabButton>
       </div>
 
       {tab === 'leave' ? (
         <LeaveLimitsTab />
+      ) : tab === 'staffOrder' ? (
+        <RosterStaffOrderTab />
       ) : (
         <>
           <p className="mb-4 text-sm text-gray-500">

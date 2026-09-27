@@ -5,7 +5,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import { exportMultiStoreWorkbook, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
-import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
+import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { thisWeekStart } from '../shared/rosterWeeks'
 
 export default function MultiStoreExportModal({ onClose }) {
@@ -36,13 +36,19 @@ export default function MultiStoreExportModal({ onClose }) {
         // roster_display_name is per-store (user_stores), not on profiles —
         // fold it back onto each profile below so rosterDisplayName() can
         // keep just reading `.roster_display_name` either way.
-        supabase.from('user_stores').select('profile_id, roster_display_name, profiles(id, first_name, last_name, is_active, role)').eq('store_id', storeId),
+        supabase
+          .from('user_stores')
+          .select('profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role)')
+          .eq('store_id', storeId)
+          .order('roster_order'),
       ])
       const nameByProfile = new Map((memberships ?? []).map((m) => [m.profile_id, m.roster_display_name]))
       // Same filter as History's single-store export and Manage Roster:
-      // training/qr_code_maker accounts don't get scheduled.
+      // training/qr_code_maker accounts don't get scheduled, and neither
+      // does anyone currently hidden from this store's roster (Roster Hub
+      // > Setting > Roster Staff Order).
       const staffList = (memberships ?? [])
-        .filter((m) => m.profiles?.is_active && !NON_PICKABLE_STAFF_ROLES.includes(m.profiles.role))
+        .filter((m) => m.profiles?.is_active && !NON_ROSTER_STAFF_ROLES.includes(m.profiles.role) && !m.hidden_from_roster)
         .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
       let entries = []
       if (period) {

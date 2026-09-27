@@ -22,7 +22,11 @@ export default function RequireAuth({ children }) {
   // silently show nothing useful), hold them here until an Admin sets
   // their store in User Management. Admins are exempt: an admin
   // genuinely can be store-less and still meant to see everything.
-  if (profile.role !== 'admin' && !profile.primary_store_id) {
+  // Developer is the same exemption, for the same reason — it's admin's
+  // superset (see permissions.js), not a store-scoped role, and a fresh
+  // developer account has no store either (see migration
+  // 0057_developer_role_and_payroll.sql / 0058_developer_is_admin_superset.sql).
+  if (profile.role !== 'admin' && profile.role !== 'developer' && !profile.primary_store_id) {
     return <PendingStoreAssignment onSignOut={signOut} />
   }
 

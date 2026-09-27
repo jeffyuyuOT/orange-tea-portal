@@ -74,7 +74,11 @@ export function AuthProvider({ children }) {
 
       let storeIds = new Set()
       if (profileRow.primary_store_id) storeIds.add(profileRow.primary_store_id)
-      if (profileRow.role === 'admin') {
+      // developer is admin's superset (see permissions.js / migration
+      // 0058_developer_is_admin_superset.sql) — same "sees every store"
+      // treatment, not scoped to whatever user_stores rows it happens to
+      // have (it may have none at all, same as a fresh admin account).
+      if (profileRow.role === 'admin' || profileRow.role === 'developer') {
         const { data: allStores } = await supabase.from('stores').select('id, name, code').eq('is_active', true)
         setAccessibleStores(allStores ?? [])
       } else {

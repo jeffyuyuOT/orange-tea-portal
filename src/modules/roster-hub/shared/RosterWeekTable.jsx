@@ -27,7 +27,10 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     setLoading(true)
     let q = supabase
       .from('roster_entries')
-      .select('*, profiles(first_name, last_name)')
+      // qualified (profiles.qualified, migration 0049_staff_qualified.sql)
+      // is what shows a not-yet-Qualified person's name/shift time in red
+      // below — same flag Manage Roster's grid uses.
+      .select('*, profiles(first_name, last_name, qualified)')
       .eq('roster_period_id', period.id)
     if (onlyProfileId) q = q.eq('profile_id', onlyProfileId)
     // roster_display_name is per-store — fetch it for THIS period's store
@@ -67,7 +70,11 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     new Map(
       entries.map((e) => [
         e.profile_id ?? e.staff_name_raw,
-        { name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw, isStaff: !!e.profile_id },
+        {
+          name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
+          isStaff: !!e.profile_id,
+          qualified: e.profiles?.qualified === true,
+        },
       ])
     )
   ).sort(([, a], [, b]) => {
@@ -93,40 +100,49 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-brand-50">
-          {staffNames.map(([key, info]) => (
-            <tr key={key}>
-              <td className="sticky left-0 z-10 bg-white px-3 py-2 font-medium text-gray-700">
-                <div>{info.name || 'Unassigned'}</div>
-                {/* "Break" label lives once under the name (in red) instead of being
-                    repeated in every day cell — each cell below then only needs to
-                    show the count, per Jeff, since everyone already knows what it
-                    refers to and one break = 30 min. */}
-                <div className="text-xs font-normal text-red-500">Break</div>
-              </td>
-              {days.map((d) => {
-                const dayStr = format(d, 'yyyy-MM-dd')
-                const shift = entries.find(
-                  (e) => (e.profile_id ?? e.staff_name_raw) === key && e.work_date === dayStr
-                )
-                return (
-                  <td key={dayStr} className="px-3 py-2 text-gray-600">
-                    {shift ? (
-                      <>
-                        <div className="whitespace-nowrap">
-                          {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
-                        </div>
-                        {shift.break_half_hours ? (
-                          <div className="text-xs text-red-500">x{shift.break_half_hours}</div>
-                        ) : null}
-                      </>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
+          {staffNames.map(([key, info]) => {
+            // Not-yet-Qualified (profiles.qualified) real staff get their
+            // name and shift time shown in red — same flag/reasoning as
+            // Manage Roster's grid. Pending/imported/manual names
+            // (isStaff false) never carry this concept.
+            const notQualified = info.isStaff && !info.qualified
+            return (
+              <tr key={key}>
+                <td className="sticky left-0 z-10 bg-white px-3 py-2 font-medium text-gray-700">
+                  <div className={notQualified ? 'text-red-600' : undefined} title={notQualified ? 'Not yet Qualified' : undefined}>
+                    {info.name || 'Unassigned'}
+                  </div>
+                  {/* "Break" label lives once under the name (in red) instead of being
+                      repeated in every day cell — each cell below then only needs to
+                      show the count, per Jeff, since everyone already knows what it
+                      refers to and one break = 30 min. */}
+                  <div className="text-xs font-normal text-red-500">Break</div>
+                </td>
+                {days.map((d) => {
+                  const dayStr = format(d, 'yyyy-MM-dd')
+                  const shift = entries.find(
+                    (e) => (e.profile_id ?? e.staff_name_raw) === key && e.work_date === dayStr
+                  )
+                  return (
+                    <td key={dayStr} className="px-3 py-2 text-gray-600">
+                      {shift ? (
+                        <>
+                          <div className={`whitespace-nowrap ${notQualified ? 'text-red-600 font-medium' : ''}`}>
+                            {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
+                          </div>
+                          {shift.break_half_hours ? (
+                            <div className="text-xs text-red-500">x{shift.break_half_hours}</div>
+                          ) : null}
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  )
+                })}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
