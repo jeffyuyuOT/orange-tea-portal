@@ -269,6 +269,40 @@ export function downloadRosterTemplate(storeName, staff, weekDates, filename) {
   XLSX.writeFile(wb, filename || `roster-template-${weekDates[0] || ''}.xlsx`)
 }
 
+// Finds the sheet matching THIS store — every sheet this app ever writes
+// is named after the store that owns it, capped at 31 characters the same
+// way Excel itself caps tab names (see downloadRosterTemplate/
+// exportRosterGrid/exportMultiStoreWorkbook below, all
+// `(storeName || 'Roster').slice(0, 31)`), so the same truncation is
+// applied here before comparing, case/whitespace insensitive.
+//
+// This is what makes uploading a multi-store export (admin's "one sheet
+// per store" workbook — exportMultiStoreWorkbook) into ONE store's Manage
+// Roster only ever pull that store's own tab — it used to always read
+// wb.SheetNames[0] regardless of which store's page the upload happened
+// on, so a manager at, say, Toowong could silently end up importing
+// whichever store's tab happened to come first in the file instead of
+// Toowong's own.
+//
+// A single-sheet file is always accepted as-is (there's no ambiguity to
+// get wrong), even if its one tab isn't named exactly what's expected —
+// covers a template someone renamed by hand, or `storeName` not being
+// known yet. With more than one sheet, though, silently falling back to
+// "just take the first one" would recreate the exact bug this is fixing,
+// so that case throws instead, telling the caller which tabs actually
+// exist.
+function findStoreSheet(wb, storeName) {
+  if (wb.SheetNames.length === 1) return wb.Sheets[wb.SheetNames[0]]
+  const target = (storeName || '').trim().slice(0, 31).toLowerCase()
+  if (target) {
+    const matchName = wb.SheetNames.find((n) => n.trim().toLowerCase() === target)
+    if (matchName) return wb.Sheets[matchName]
+  }
+  throw new Error(
+    `Couldn't find a "${storeName || 'this store'}" tab in that file — it has: ${wb.SheetNames.join(', ')}. Make sure you're uploading the right file, and that the tab for this store is named exactly "${storeName}".`
+  )
+}
+
 // ---- upload / parse -------------------------------------------------------
 // Parses a workbook built in this same grid shape back into flat shift
 // records: { profileId, staffName, date, startTime, endTime, breakHours }.
@@ -277,14 +311,15 @@ export function downloadRosterTemplate(storeName, staff, weekDates, filename) {
 // it still shows up as its own row in the grid (e.g. a casual not yet in
 // Staff Information) rather than being silently dropped — ManageRosterPage
 // runs those through buildReconcilePlan afterwards to catch typos and
-// confirm genuinely new names.
-export function parseRosterGrid(file, staff, weekDates) {
+// confirm genuinely new names. `storeName` decides WHICH sheet gets read
+// when the file has more than one — see findStoreSheet above.
+export function parseRosterGrid(file, staff, weekDates, storeName) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array' })
-        const sheet = wb.Sheets[wb.SheetNames[0]]
+        const sheet = findStoreSheet(wb, storeName)
         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
         const byName = new Map(staff.map((s) => [rosterDisplayName(s).toLowerCase(), s]))
 

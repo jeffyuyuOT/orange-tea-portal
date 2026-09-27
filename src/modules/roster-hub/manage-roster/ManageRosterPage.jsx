@@ -212,7 +212,17 @@ export default function ManageRosterPage() {
   }
 
   async function handleUpload(file) {
-    const parsed = await parseRosterGrid(file, staff, weekDates)
+    let parsed
+    try {
+      // storeName picks which tab gets read when the uploaded file has more
+      // than one sheet (e.g. the admin's one-sheet-per-store export) — see
+      // findStoreSheet in excelRoster.js. A single-sheet file is always
+      // accepted regardless of its tab's name.
+      parsed = await parseRosterGrid(file, staff, weekDates, storeName)
+    } catch (err) {
+      alert(err.message)
+      return
+    }
     // parseRosterGrid only matches against active staff — anything left
     // with no profileId either fuzzy-matches an existing name (typo,
     // auto-applied) or needs the manager to confirm it's genuinely new.
