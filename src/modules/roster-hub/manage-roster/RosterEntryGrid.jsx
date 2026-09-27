@@ -172,7 +172,6 @@ export default function RosterEntryGrid({
               <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
                 WKD hr
               </th>
-              <th rowSpan={2} className="border border-brand-100"></th>
             </tr>
             <tr>
               {weekDates.map((d) => (
@@ -207,7 +206,6 @@ export default function RosterEntryGrid({
                 Total
               </td>
               <td className="border border-brand-100 px-2 py-1.5 text-center">{grandTotal || ''}</td>
-              <td className="border border-brand-100"></td>
               <td className="border border-brand-100"></td>
             </tr>
           </tfoot>
@@ -305,16 +303,29 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
     <>
       <tr>
         <td className="border border-brand-100 px-2 py-1.5 font-medium text-gray-800">
-          {row.profileId ? (
-            row.name || <span className="text-gray-400">Unnamed</span>
-          ) : (
-            <input
-              className="input !py-1"
-              placeholder="Name"
-              value={row.name}
-              onChange={(e) => renameRow(row, e.target.value)}
-            />
-          )}
+          {/* ✕ lives right next to the name now (used to be all the way at
+              the end of this very wide row, past 14 day columns + both
+              totals — easy to lose track of which row it belonged to, and
+              on desktop meant scrolling all the way right just to remove
+              someone). Mobile's card already had it up near the name; this
+              just makes desktop match. */}
+          <div className="flex items-center gap-1.5">
+            <div className="min-w-0 flex-1">
+              {row.profileId ? (
+                row.name || <span className="text-gray-400">Unnamed</span>
+              ) : (
+                <input
+                  className="input !py-1"
+                  placeholder="Name"
+                  value={row.name}
+                  onChange={(e) => renameRow(row, e.target.value)}
+                />
+              )}
+            </div>
+            <button onClick={() => removeRow(row)} className="shrink-0 text-gray-300 hover:text-red-500" title="Clear this row's hours">
+              ✕
+            </button>
+          </div>
         </td>
         {weekDates.map((date) => {
           const entry = findEntry(row, date)
@@ -334,11 +345,6 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
         </td>
         <td rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center text-gray-500">
           {wkd || ''}
-        </td>
-        <td rowSpan={2} className="border border-brand-100 px-1 text-center">
-          <button onClick={() => removeRow(row)} className="text-gray-300 hover:text-red-500" title="Clear this row's hours">
-            ✕
-          </button>
         </td>
       </tr>
       <tr className="bg-gray-50/70">
@@ -378,24 +384,26 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
   return (
     <div className="space-y-2 p-3">
       <div className="flex items-center gap-2">
-        {row.profileId ? (
-          <span className="flex-1 truncate font-medium text-gray-800">
-            {row.name || <span className="text-gray-400">Unnamed</span>}
-          </span>
-        ) : (
-          <input
-            className="input !py-1 flex-1"
-            placeholder="Name"
-            value={row.name}
-            onChange={(e) => renameRow(row, e.target.value)}
-          />
-        )}
-        <span className="shrink-0 text-xs text-gray-400">
-          Wk {total || 0}h{wkd ? ` · WKD ${wkd}h` : ''}
-        </span>
+        <div className="min-w-0 flex-1">
+          {row.profileId ? (
+            <span className="truncate font-medium text-gray-800">
+              {row.name || <span className="text-gray-400">Unnamed</span>}
+            </span>
+          ) : (
+            <input
+              className="input !py-1"
+              placeholder="Name"
+              value={row.name}
+              onChange={(e) => renameRow(row, e.target.value)}
+            />
+          )}
+        </div>
         <button onClick={() => removeRow(row)} className="shrink-0 text-gray-300 hover:text-red-500" title="Clear this row's hours">
           ✕
         </button>
+        <span className="shrink-0 text-xs text-gray-400">
+          Wk {total || 0}h{wkd ? ` · WKD ${wkd}h` : ''}
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2">
         <label className="block">
