@@ -4,6 +4,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { STAFF_DOC_TYPES } from '../../../lib/staffDocumentTypes'
 import Button from '../../../components/ui/Button'
+import MyStaffIdModal from './MyStaffIdModal'
 
 const DOC_TYPES = STAFF_DOC_TYPES
 
@@ -14,6 +15,7 @@ export default function MyInformationPage() {
   const [saving, setSaving] = useState(false)
   const [docs, setDocs] = useState({})
   const [templates, setTemplates] = useState({})
+  const [showStaffId, setShowStaffId] = useState(false)
 
   useEffect(() => {
     if (profile) {
@@ -96,6 +98,13 @@ export default function MyInformationPage() {
 
   return (
     <div className="max-w-2xl space-y-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-gray-900">My Information</h1>
+        <Button variant="secondary" onClick={() => setShowStaffId(true)}>
+          🪪 My Staff ID
+        </Button>
+      </div>
+
       <section>
         <h2 className="mb-3 text-sm font-semibold text-brand-700">Personal Details</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -170,6 +179,8 @@ export default function MyInformationPage() {
           ))}
         </div>
       </section>
+
+      {showStaffId && <MyStaffIdModal onClose={() => setShowStaffId(false)} />}
     </div>
   )
 }

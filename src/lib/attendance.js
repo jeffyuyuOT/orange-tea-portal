@@ -18,12 +18,21 @@ export const QR_REFRESH_MS = 15000
 // small business.
 export const QR_FRESHNESS_MS = QR_REFRESH_MS + 5000
 
+// `type` tags which of the two kinds of rotating QR this is (see
+// buildStaffIdPayload below for the other one) — without it, a Staff ID
+// code and a store code both happen to be small JSON objects with a `ts`,
+// and a Staff ID payload also carries an (optional) `storeId`, so a scanner
+// that only checked "does it have a storeId and a ts" could be fooled into
+// accepting someone's personal Staff ID badge as if it were the store's own
+// clock-in code. The two parse functions below each check `type` first and
+// reject anything else outright, so a code can only ever be validated by
+// the scanner it was actually meant for.
 export function buildQrPayload(store) {
-  return JSON.stringify({ storeId: store.id, storeName: store.name, ts: new Date().toISOString() })
+  return JSON.stringify({ type: 'store_clock', storeId: store.id, storeName: store.name, ts: new Date().toISOString() })
 }
 
 // Returns the parsed { storeId, storeName, ts } or null if the scanned code
-// isn't one of ours (wrong shape) or is too old.
+// isn't one of ours (wrong shape/type) or is too old.
 export function parseAndValidateQrPayload(raw) {
   let parsed
   try {
@@ -31,7 +40,44 @@ export function parseAndValidateQrPayload(raw) {
   } catch {
     return null
   }
-  if (!parsed?.storeId || !parsed?.ts) return null
+  if (parsed?.type !== 'store_clock' || !parsed?.storeId || !parsed?.ts) return null
+  const age = Date.now() - new Date(parsed.ts).getTime()
+  if (!Number.isFinite(age) || age < -5000 || age > QR_FRESHNESS_MS) return null
+  return parsed
+}
+
+// A person's own rotating "Staff ID" badge (My Information > My Staff ID) —
+// the reverse direction of the store's code above: here a PERSON is proving
+// who they are and which store they're currently at, and the store's 2D
+// Code Maker phone scans THEM (its own "Scan Staff ID" button on
+// QrCodeDisplayPage.jsx). Same QR_REFRESH_MS/QR_FRESHNESS_MS cadence as the
+// store code, for the same reason (a screenshotted badge stops working
+// after one refresh cycle). `store` is whichever store this person
+// currently has selected — for someone who works at more than one, that's
+// on them to have switched to the right one before showing this.
+export function buildStaffIdPayload(profile, store) {
+  return JSON.stringify({
+    type: 'staff_id',
+    profileId: profile.id,
+    name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim(),
+    storeId: store?.id ?? null,
+    storeName: store?.name ?? null,
+    ts: new Date().toISOString(),
+  })
+}
+
+// Returns the parsed { profileId, name, storeId, storeName, ts } or null if
+// the scanned code isn't a Staff ID code (wrong shape/type — e.g. someone
+// pointed the scanner at the store's own clock-in code instead) or is too
+// old.
+export function parseAndValidateStaffIdPayload(raw) {
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (parsed?.type !== 'staff_id' || !parsed?.profileId || !parsed?.name || !parsed?.ts) return null
   const age = Date.now() - new Date(parsed.ts).getTime()
   if (!Number.isFinite(age) || age < -5000 || age > QR_FRESHNESS_MS) return null
   return parsed

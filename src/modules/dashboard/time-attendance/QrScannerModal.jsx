@@ -10,8 +10,17 @@ import Button from '../../../components/ui/Button'
 // grabs frames onto an offscreen canvas and runs jsQR on them until a code
 // decodes, then reports the raw scanned string back to the caller — which
 // is responsible for deciding whether it's a valid, fresh Orange Tea QR
-// (see src/lib/attendance.js's parseAndValidateQrPayload).
-export default function QrScannerModal({ onScan, onClose }) {
+// (see src/lib/attendance.js's parseAndValidateQrPayload /
+// parseAndValidateStaffIdPayload — this modal is generic between the two,
+// the caller just passes the wording that fits which one it's scanning
+// for). `title`/`hint` default to the original Clock In/Out wording so the
+// existing call site there doesn't need to change.
+export default function QrScannerModal({
+  onScan,
+  onClose,
+  title = 'Scan QR Code',
+  hint = "Point the camera at the QR code on the store's screen",
+}) {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const rafRef = useRef(null)
@@ -70,7 +79,7 @@ export default function QrScannerModal({ onScan, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title="Scan QR Code"
+      title={title}
       footer={
         <Button variant="secondary" onClick={onClose}>
           Cancel
@@ -83,7 +92,7 @@ export default function QrScannerModal({ onScan, onClose }) {
         <div className="relative">
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video ref={videoRef} playsInline muted className="w-full rounded-lg bg-black" />
-          <p className="mt-2 text-center text-xs text-gray-400">Point the camera at the QR code on the store's screen</p>
+          <p className="mt-2 text-center text-xs text-gray-400">{hint}</p>
         </div>
       )}
     </Modal>
