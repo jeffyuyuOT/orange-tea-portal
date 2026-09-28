@@ -163,6 +163,39 @@ export function dailyTotals(sessions) {
   return totals
 }
 
+// Plain sum of every completed session's minutes — a still-open session (no
+// clock-out yet) doesn't count, same as dailyTotals above. This is the
+// "hours worked" figure Jeff's Learning Tracker/Bulletin/Progress Chart
+// features (2026-09) are all built on: how long someone's actually been on
+// shift since hire, as a fairer yardstick than calendar days for judging
+// training pace (a 2-day-a-week part-timer and a full-timer shouldn't be
+// held to the same calendar clock).
+export function totalWorkedMinutes(sessions) {
+  return sessions.reduce((sum, s) => sum + (s.minutes ?? 0), 0)
+}
+
+// Batch version of "how many minutes has each of these people worked,
+// ever" — one query for the whole list instead of one per profile, for
+// Learning Tracker's staff list and Bulletin's training-hours reminders,
+// both of which need this for every unqualified staff member at a store at
+// once. Returns a plain { profileId: minutes } map; a profile with no
+// attendance_events rows at all (never clocked in, or hired before
+// migration 0054 introduced this table) simply doesn't appear in the map —
+// callers should treat a missing key as 0, not as an error.
+export async function getWorkedMinutesByProfile(profileIds) {
+  if (!profileIds?.length) return {}
+  const { data } = await supabase.from('attendance_events').select('*').in('profile_id', profileIds)
+  const byProfile = {}
+  ;(data ?? []).forEach((ev) => {
+    ;(byProfile[ev.profile_id] ??= []).push(ev)
+  })
+  const result = {}
+  Object.entries(byProfile).forEach(([profileId, events]) => {
+    result[profileId] = totalWorkedMinutes(pairEventsIntoSessions(events))
+  })
+  return result
+}
+
 export function formatMinutes(minutes) {
   if (minutes == null) return '—'
   const h = Math.floor(minutes / 60)
@@ -170,4 +203,114 @@ export function formatMinutes(minutes) {
   if (h === 0) return `${m}m`
   if (m === 0) return `${h}h`
   return `${h}h ${m}m`
+}
+
+// Groups paired sessions into one "cell" per (date, store) — Jeff, 2026-09:
+// someone who works at more than one store should see every store's
+// punches, but grouped so a day's break-separated in/out pairs at the SAME
+// store sit together, while the same day at a DIFFERENT store gets its own
+// box. A session's store is whichever side of the pair actually has one
+// (normally both clockIn and clockOut agree — they're only ever recorded
+// at the store the scanned QR belonged to, see submitClockEvent above — so
+// this is just which side to trust if one end is missing, e.g. still
+// clocked in).
+export function groupSessionsIntoCells(sessions) {
+  const cells = new Map() // `${date}|${storeId}` -> { date, storeId, sessions: [] }
+  for (const s of sessions) {
+    const storeId = s.clockIn?.store_id ?? s.clockOut?.store_id ?? null
+    if (!s.date || !storeId) continue
+    const key = `${s.date}|${storeId}`
+    if (!cells.has(key)) cells.set(key, { date: s.date, storeId, sessions: [] })
+    cells.get(key).sessions.push(s)
+  }
+  return Array.from(cells.values())
+}
+
+// Combines a plain 'yyyy-MM-dd' date with a "HH:mm" time-of-day into an ISO
+// timestamp, in the browser's own local time zone — same as how every
+// existing occurred_at gets displayed elsewhere in this feature
+// (`new Date(occurred_at).toLocaleString()` etc.), so a manager typing
+// "9:00 AM" here lines up with what that already shows.
+export function combineDateAndTime(dateStr, timeStr) {
+  return new Date(`${dateStr}T${timeStr}:00`).toISOString()
+}
+
+// The three functions below are the manager/admin correction path (Jeff,
+// 2026-09: "以防有員工忘記log in and out回報需要更改或新增log in and out時
+// 間") — each one writes the punch itself (attendance_events) AND a
+// matching row in attendance_event_edits (migration 0062) so every
+// correction has a visible "who / when / why" audit trail. RLS on both
+// tables independently enforces who's actually allowed to call these
+// (can_edit_attendance_logs_check(), scoped to the editor's own stores) —
+// these helpers don't re-check that client-side, they just shape the two
+// writes consistently so the three call sites (add/edit/delete a punch)
+// can't drift on what a history row looks like.
+
+export async function addAttendanceEvent({ profileId, storeId, eventType, occurredAt, note, editor }) {
+  const { data: event, error } = await supabase
+    .from('attendance_events')
+    .insert({ profile_id: profileId, store_id: storeId, event_type: eventType, occurred_at: occurredAt })
+    .select()
+    .single()
+  if (error) return { error }
+  const { error: editError } = await supabase.from('attendance_event_edits').insert({
+    profile_id: profileId,
+    store_id: storeId,
+    event_date: format(new Date(occurredAt), 'yyyy-MM-dd'),
+    action: 'add',
+    event_id: event.id,
+    after_event_type: eventType,
+    after_occurred_at: occurredAt,
+    note,
+    edited_by: editor.id,
+    edited_by_name: editor.name,
+  })
+  return { error: editError }
+}
+
+export async function updateAttendanceEvent({ event, eventType, occurredAt, note, editor }) {
+  const { error } = await supabase
+    .from('attendance_events')
+    .update({ event_type: eventType, occurred_at: occurredAt })
+    .eq('id', event.id)
+  if (error) return { error }
+  const { error: editError } = await supabase.from('attendance_event_edits').insert({
+    profile_id: event.profile_id,
+    store_id: event.store_id,
+    // Filed under the punch's ORIGINAL date — the cell someone reviewing
+    // history would have been looking at when they made this change —
+    // even if the edit itself moved the punch to a different day.
+    event_date: format(new Date(event.occurred_at), 'yyyy-MM-dd'),
+    action: 'edit',
+    event_id: event.id,
+    before_event_type: event.event_type,
+    before_occurred_at: event.occurred_at,
+    after_event_type: eventType,
+    after_occurred_at: occurredAt,
+    note,
+    edited_by: editor.id,
+    edited_by_name: editor.name,
+  })
+  return { error: editError }
+}
+
+export async function deleteAttendanceEvent({ event, note, editor }) {
+  // Logged BEFORE the delete — attendance_event_edits.event_id is ON
+  // DELETE SET NULL (not cascade) specifically so this history row
+  // survives with its own before_* snapshot once the punch itself is gone.
+  const { error: editError } = await supabase.from('attendance_event_edits').insert({
+    profile_id: event.profile_id,
+    store_id: event.store_id,
+    event_date: format(new Date(event.occurred_at), 'yyyy-MM-dd'),
+    action: 'delete',
+    event_id: event.id,
+    before_event_type: event.event_type,
+    before_occurred_at: event.occurred_at,
+    note,
+    edited_by: editor.id,
+    edited_by_name: editor.name,
+  })
+  if (editError) return { error: editError }
+  const { error } = await supabase.from('attendance_events').delete().eq('id', event.id)
+  return { error }
 }

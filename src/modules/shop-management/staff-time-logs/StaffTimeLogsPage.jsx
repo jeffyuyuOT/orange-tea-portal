@@ -11,7 +11,18 @@ import AttendanceLogTable from '../../dashboard/time-attendance/AttendanceLogTab
 // not primary_store_id" pattern as Staff Information, so someone assigned
 // to more than one store shows up here at each of them.
 export default function StaffTimeLogsPage() {
-  const { currentStoreId } = useAuth()
+  const { profile, currentStoreId, accessibleStores } = useAuth()
+  // Admin/developer can correct punches at any store (is_admin() bypasses
+  // the store check at the RLS layer — see migration 0062), so they get no
+  // store narrowing on the "+ Add record" picker (editorAccessibleStoreIds
+  // stays null). A shop_manager can only ever write punches at a store
+  // they're themselves assigned to, AND only once explicitly granted the
+  // "Edit attendance logs" permission (profile.can_edit_attendance_logs —
+  // see UserDetailModal.jsx; off by default per Jeff).
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'developer'
+  const canEdit = isAdmin || (profile?.role === 'shop_manager' && !!profile?.can_edit_attendance_logs)
+  const editor = profile ? { id: profile.id, name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email } : null
+  const editorAccessibleStoreIds = isAdmin ? null : accessibleStores.map((s) => s.id)
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -92,7 +103,12 @@ export default function StaffTimeLogsPage() {
           <h2 className="mb-2 text-sm font-semibold text-brand-700">
             {selected.first_name} {selected.last_name}
           </h2>
-          <AttendanceLogTable profileId={selected.id} storeId={currentStoreId} />
+          <AttendanceLogTable
+            profileId={selected.id}
+            canEdit={canEdit}
+            editor={editor}
+            editorAccessibleStoreIds={editorAccessibleStoreIds}
+          />
         </div>
       )}
     </div>

@@ -41,6 +41,22 @@ export default function UserManagementPage() {
       setUsers(data ?? [])
       return
     }
+    // Jeff, 2026-09: a synthetic filter, not a real store id — "unassigned"
+    // means no store link AT ALL, neither the direct primary_store_id fk
+    // nor a user_stores membership (someone with only a secondary
+    // user_stores assignment and no primary_store_id — e.g. an admin added
+    // to a store without setting a home store — still counts as assigned,
+    // same as everywhere else in this app that checks store access).
+    if (storeFilter === 'unassigned') {
+      const [{ data: candidateRows, error: err1 }, { data: memberships, error: err2 }] = await Promise.all([
+        supabase.from('profiles').select('*, stores!profiles_primary_store_id_fkey(name)').is('primary_store_id', null),
+        supabase.from('user_stores').select('profile_id'),
+      ])
+      if (err1 || err2) console.error('load users failed', err1 ?? err2)
+      const assignedIds = new Set((memberships ?? []).map((m) => m.profile_id))
+      setUsers((candidateRows ?? []).filter((p) => !assignedIds.has(p.id)).sort((a, b) => (a.first_name ?? '').localeCompare(b.first_name ?? '')))
+      return
+    }
     // A person can now be on a store's roster via user_stores without it
     // being their primary_store_id (see migration 0027 — e.g. an admin
     // added to a second store without changing their home store), so
@@ -58,6 +74,16 @@ export default function UserManagementPage() {
   }
 
   async function loadPending() {
+    // "Unassigned" is a synthetic filter, not a real store — a pending
+    // staff row always belongs to one specific store (see addPending
+    // below), so nothing here could ever match it; skip straight to an
+    // empty list rather than sending 'unassigned' as a store_id (which
+    // Postgres would reject outright — it's not a valid uuid).
+    if (storeFilter === 'unassigned') {
+      setPendingList([])
+      setStaffByStore({})
+      return
+    }
     let q = supabase.from('roster_pending_staff').select('*, stores(name)').order('created_at')
     if (storeFilter !== 'all') q = q.eq('store_id', storeFilter)
     const { data } = await q
@@ -86,7 +112,7 @@ export default function UserManagementPage() {
 
   async function addPending() {
     const name = newPendingName.trim()
-    if (!name || storeFilter === 'all') return
+    if (!name || storeFilter === 'all' || storeFilter === 'unassigned') return
     setAddingPending(true)
     const { data } = await supabase
       .from('roster_pending_staff')
@@ -136,6 +162,7 @@ export default function UserManagementPage() {
       <div className="mb-4 flex flex-wrap gap-2">
         <select className="input w-56" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
           <option value="all">All stores</option>
+          <option value="unassigned">Unassigned (no store)</option>
           {accessibleStores.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -217,13 +244,19 @@ export default function UserManagementPage() {
           className="input max-w-xs"
           placeholder="Name"
           value={newPendingName}
-          disabled={storeFilter === 'all'}
+          disabled={storeFilter === 'all' || storeFilter === 'unassigned'}
           onChange={(e) => setNewPendingName(e.target.value)}
         />
-        <Button variant="secondary" disabled={storeFilter === 'all' || addingPending || !newPendingName.trim()} onClick={addPending}>
+        <Button
+          variant="secondary"
+          disabled={storeFilter === 'all' || storeFilter === 'unassigned' || addingPending || !newPendingName.trim()}
+          onClick={addPending}
+        >
           + Add pending staff
         </Button>
-        {storeFilter === 'all' && <span className="text-xs text-gray-400">Pick a specific store above to add one.</span>}
+        {(storeFilter === 'all' || storeFilter === 'unassigned') && (
+          <span className="text-xs text-gray-400">Pick a specific store above to add one.</span>
+        )}
       </div>
     </div>
   )

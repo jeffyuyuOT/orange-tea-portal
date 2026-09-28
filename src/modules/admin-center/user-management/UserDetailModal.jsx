@@ -25,6 +25,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // RLS, see migration 0060_accountant_role_and_profile_fields.sql) can
   // leave this person out of what that role sees entirely.
   const [cashInHand, setCashInHand] = useState(user.cash_in_hand ?? false)
+  // A capability WITHIN Shop Management > Staff Time Logs, not a whole page
+  // of its own (see migration 0062_attendance_log_editing.sql) — lets this
+  // person correct/backfill attendance punches with a required reason.
+  // Same per-profile-column pattern as cash_in_hand above rather than the
+  // page_key/permission_overrides system, since it isn't a page. Defaults
+  // off for everyone (including shop_manager) per Jeff's spec; admin/
+  // developer already have edit rights unconditionally at the RLS layer,
+  // so this checkbox is a no-op for them either way.
+  const [canEditAttendanceLogs, setCanEditAttendanceLogs] = useState(user.can_edit_attendance_logs ?? false)
   const [overrides, setOverrides] = useState({}) // page_key -> boolean (explicit override) or undefined
   // Store(s) this person shows up on the roster for, beyond their primary
   // Store above — e.g. an admin who only actually works a couple of
@@ -75,7 +84,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
 
   async function save() {
     setSaving(true)
-    await supabase
+    // Jeff, 2026-09: this used to fire-and-forget every write in save(),
+    // so when THIS specific update failed (e.g. a stale PostgREST schema
+    // cache right after a migration added a new profiles column — see
+    // handoff notes), nothing told Jeff it hadn't saved — the modal just
+    // closed as if it had, and the very next writes below (permission
+    // overrides, user_stores) went ahead regardless, silently splitting
+    // one "Save" into a half-applied change. Now it stops and surfaces the
+    // error immediately, the same way StaffDetailModal.jsx already does.
+    const { error: profileError } = await supabase
       .from('profiles')
       .update({
         first_name: firstName.trim(),
@@ -84,8 +101,14 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         primary_store_id: storeId || null,
         is_active: isActive,
         cash_in_hand: cashInHand,
+        can_edit_attendance_logs: canEditAttendanceLogs,
       })
       .eq('id', user.id)
+    if (profileError) {
+      alert(`Save failed: ${profileError.message}`)
+      setSaving(false)
+      return
+    }
     await supabase.from('permission_overrides').delete().eq('profile_id', user.id)
     const meName = `${me.first_name ?? ''} ${me.last_name ?? ''}`.trim() || me.email
     const rows = Object.entries(overrides).map(([page_key, allowed]) => ({
@@ -104,7 +127,14 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     const storeIds = Array.from(new Set([storeId, ...extraStoreIds].filter(Boolean)))
     await supabase.from('user_stores').delete().eq('profile_id', user.id)
     if (storeIds.length) {
-      await supabase.from('user_stores').insert(storeIds.map((id) => ({ profile_id: user.id, store_id: id })))
+      const { error: storeError } = await supabase
+        .from('user_stores')
+        .insert(storeIds.map((id) => ({ profile_id: user.id, store_id: id })))
+      if (storeError) {
+        alert(`Save failed while updating stores: ${storeError.message}`)
+        setSaving(false)
+        return
+      }
     }
 
     setSaving(false)
@@ -253,6 +283,16 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                   </label>
                 )
               })}
+              {sectionKey === 'shop_management' && (
+                <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={canEditAttendanceLogs}
+                    onChange={(e) => setCanEditAttendanceLogs(e.target.checked)}
+                  />
+                  Edit attendance logs
+                </label>
+              )}
             </div>
           </div>
         ))}

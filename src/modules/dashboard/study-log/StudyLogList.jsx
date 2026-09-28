@@ -3,7 +3,6 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
-import Button from '../../../components/ui/Button'
 import FormulaItemDetail from '../../operations-training/formula/FormulaItemDetail'
 
 // Same top-level formula classification used in Operations & Training >
@@ -31,20 +30,21 @@ const TOP10_CATEGORY_ID = '__top10__'
 //
 // `qualified`: a Qualified staff member (profiles.qualified — migration
 // 0049, granted via a passed Formal Quiz or directly by a manager in
-// StaffStudyDetail) is treated as having every item memorized automatically
-// (including items added later) — the checkboxes render checked-and-locked
-// rather than reflecting individual study_progress rows. This replaces the
-// old `senior`/profiles.is_senior concept (Jeff, 2026-09): there was never
-// a reachable UI to set is_senior, so it was dead weight — Qualified
-// already existed, already had a grant/revoke flow, and covers the same
-// "this person knows everything" case.
-// `onProgressChange`: fired after a (non-qualified) toggle persists, so a
-// parent tracking overall memorized % (e.g. the forced-quiz-every-10%
-// check in StudyLogPage) can re-evaluate immediately.
+// StaffStudyDetail) had every item that was active *at the moment they
+// became Qualified* snapshotted as memorized (StaffStudyDetail's
+// markAllCurrentItemsMemorized) — real study_progress rows, not a locked
+// overlay (Jeff, 2026-09: the old auto-checked-and-disabled behavior meant
+// a Qualified person could never un-memorize something they forgot, or
+// manually tick a formula added after they qualified). So `qualified` here
+// only affects the badge text below — every checkbox always reflects and
+// edits its own real study_progress row, qualified or not.
+// `onProgressChange`: fired after a toggle persists, so a parent tracking
+// overall memorized % (e.g. the forced-quiz-every-10% check in
+// StudyLogPage) can re-evaluate immediately.
 // `headerActions`: optional content (e.g. StudyLogPage's Quick Quiz/Formal
 // Quiz buttons) rendered at the right end of the group-tabs row, so a
 // caller isn't stuck putting its own controls below the whole list.
-export default function StudyLogList({ profileId, allowBulkSelect = false, qualified = false, onProgressChange, headerActions }) {
+export default function StudyLogList({ profileId, qualified = false, onProgressChange, headerActions }) {
   const { currentStoreId } = useAuth()
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([]) // drink-group sub-categories, for the filter dropdown
@@ -106,7 +106,6 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, quali
   }, [items, group, categoryId])
 
   async function toggle(itemId, value) {
-    if (qualified) return // locked — Qualified status covers every item automatically
     setProgress((prev) => ({ ...prev, [itemId]: { ...prev[itemId], memorized: value } }))
     await supabase.from('study_progress').upsert(
       {
@@ -120,14 +119,10 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, quali
     onProgressChange?.()
   }
 
-  async function bulkSet(value) {
-    await Promise.all(filteredItems.map((i) => toggle(i.id, value)))
-  }
-
   if (loading) return <LoadingSpinner />
   if (!items.length) return <EmptyState label="No formula items to study yet." />
 
-  const memorizedCount = qualified ? filteredItems.length : filteredItems.filter((i) => progress[i.id]?.memorized).length
+  const memorizedCount = filteredItems.filter((i) => progress[i.id]?.memorized).length
 
   return (
     <div>
@@ -177,18 +172,8 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, quali
           <p className="text-sm text-gray-500">
             {memorizedCount} of {filteredItems.length} memorized
           </p>
-          {qualified && <span className="text-xs font-medium text-brand-500">Qualified — all items auto-memorized</span>}
+          {qualified && <span className="text-xs font-medium text-brand-500">Qualified</span>}
         </div>
-        {allowBulkSelect && !qualified && (
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => bulkSet(true)}>
-              Mark all memorized
-            </Button>
-            <Button variant="secondary" onClick={() => bulkSet(false)}>
-              Clear all
-            </Button>
-          </div>
-        )}
       </div>
 
       {!filteredItems.length ? (
@@ -209,8 +194,7 @@ export default function StudyLogList({ profileId, allowBulkSelect = false, quali
                 Memorized
                 <input
                   type="checkbox"
-                  checked={qualified || !!progress[item.id]?.memorized}
-                  disabled={qualified}
+                  checked={!!progress[item.id]?.memorized}
                   onChange={(e) => toggle(item.id, e.target.checked)}
                 />
               </label>

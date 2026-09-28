@@ -30,7 +30,11 @@ function nameOf(profile) {
 export default function AnnouncementDetailModal({ announcementId, storeId, onClose, onSaved }) {
   const { profile } = useAuth()
   const isNew = !announcementId
-  const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager'
+  // developer counts as manager/admin here too — see BulletinPage.jsx's
+  // matching comment (Jeff, 2026-09: developer couldn't edit/delete their
+  // own post's manager-only bits, or see "View history", for the same
+  // reason posting was broken for them).
+  const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager' || profile?.role === 'developer'
   const [editing, setEditing] = useState(isNew)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
