@@ -40,6 +40,13 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // stores, not every store the way `role: admin` used to imply for roster
   // purposes. Backed by user_stores (see migration 0027).
   const [extraStoreIds, setExtraStoreIds] = useState([])
+  // Jeff, 2026-09: "Join store activity" — one flag for the whole person
+  // (not per extra store), governing whether their ADDITIONAL stores above
+  // treat them as a full active participant (schedulable, in Roster Staff
+  // Order, can post Bulletin messages there) or just someone who can view
+  // that store's data. Their primary Store above is always fully active
+  // regardless of this (see storeVisibility.js's isActiveStoreMember).
+  const [joinStoreActivity, setJoinStoreActivity] = useState(user.join_store_activity ?? true)
   const [saving, setSaving] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
 
@@ -102,6 +109,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         is_active: isActive,
         cash_in_hand: cashInHand,
         can_edit_attendance_logs: canEditAttendanceLogs,
+        join_store_activity: joinStoreActivity,
       })
       .eq('id', user.id)
     if (profileError) {
@@ -222,7 +230,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
 
       {accessibleStores.length > 1 && (
         <div className="mb-5">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Also on the roster at (in addition to Store above)</span>
+          <span className="mb-1 block text-xs font-medium text-gray-500">also belong to (in addition to Store above)</span>
           <div className="flex flex-wrap gap-3">
             {accessibleStores
               .filter((s) => s.id !== storeId)
@@ -233,9 +241,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                 </label>
               ))}
           </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={joinStoreActivity} onChange={(e) => setJoinStoreActivity(e.target.checked)} />
+            Join store activity
+          </label>
           <p className="mt-1 text-xs text-gray-400">
-            For someone (e.g. an admin) working more than one store — they only show up on a store's Manage
-            Roster / Name display if it's their Store above or checked here.
+            For someone (e.g. an admin) working more than one store. Checked — they're a full active participant
+            at every store above: schedulable on Manage Roster, listed in Roster Staff Order, and can post their
+            own Bulletin messages there. Unchecked — they can still switch to and view those stores, but won't be
+            selectable in any of that (their Store above is unaffected either way).
           </p>
         </div>
       )}

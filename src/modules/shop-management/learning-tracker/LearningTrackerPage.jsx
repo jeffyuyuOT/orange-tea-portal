@@ -6,6 +6,7 @@ import Badge from '../../../components/ui/Badge'
 import { rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { getWorkedMinutesByProfile } from '../../../lib/attendance'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import StaffStudyDetail from './StaffStudyDetail'
 
 // Jeff, 2026-09: past this many hours worked, still unqualified, the hours
@@ -42,7 +43,10 @@ export default function LearningTrackerPage() {
       .then(({ data }) => {
         const rows = (data ?? [])
           .map((m) => (m.profiles?.is_active ? { ...m.profiles, roster_display_name: m.roster_display_name } : null))
-          .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role))
+          // Join store activity unchecked at this (additional) store means
+          // they can still view it, but don't count as this store's staff
+          // for Learning Tracker (migration 0064, isActiveStoreMember).
+          .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role) && isActiveStoreMember(p, currentStoreId))
         // Re-sort by the same display name shown below, so the list order
         // matches what's actually on screen instead of each person's
         // (possibly different) raw first name.

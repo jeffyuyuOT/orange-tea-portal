@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { getWorkedMinutesByProfile } from '../../../lib/attendance'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import Button from '../../../components/ui/Button'
 import Badge from '../../../components/ui/Badge'
 import Modal from '../../../components/ui/Modal'
@@ -66,8 +67,16 @@ export default function BulletinPage() {
   const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager' || profile?.role === 'developer'
   // Staff can post too now (migration 0056, per Jeff) — they just can only
   // edit/delete the posts they themselves created afterwards (enforced in
-  // AnnouncementDetailModal.jsx + RLS), not anyone else's.
-  const canPost = isManagerOrAdmin || profile?.role === 'staff'
+  // AnnouncementDetailModal.jsx + RLS), not anyone else's. Jeff, 2026-09:
+  // "Join store activity" (migration 0064) narrowed the underlying "staff
+  // insert own announcements" RLS policy to active_store_ids() — a staff
+  // member switched into an ADDITIONAL store they belong to but aren't
+  // Join-store-activity-checked at would now have their insert rejected by
+  // the database, so this mirrors that same check client-side rather than
+  // showing a "New" button that silently fails on submit. Manager/admin
+  // aren't affected (their own write policy, and is_admin(), weren't
+  // touched by that migration), so this only narrows the staff branch.
+  const canPost = isManagerOrAdmin || (profile?.role === 'staff' && isActiveStoreMember(profile, currentStoreId))
 
   async function load() {
     if (!currentStoreId || !profile) return
@@ -181,12 +190,17 @@ export default function BulletinPage() {
     if (isManagerOrAdmin) {
       const { data } = await supabase
         .from('user_stores')
-        .select('profiles(id, first_name, last_name, role, qualified, is_active)')
+        .select('profiles(id, first_name, last_name, role, qualified, is_active, primary_store_id, join_store_activity)')
         .eq('store_id', currentStoreId)
       const byId = new Map()
       ;(data ?? []).forEach((m) => {
         const p = m.profiles
-        if (p && p.is_active && !p.qualified && !NON_PICKABLE_STAFF_ROLES.includes(p.role)) byId.set(p.id, p)
+        // Join store activity unchecked at this (additional) store —
+        // migration 0064 — matches the same exclusion Learning Tracker's
+        // own staff list applies (see comment above this block).
+        if (p && p.is_active && !p.qualified && !NON_PICKABLE_STAFF_ROLES.includes(p.role) && isActiveStoreMember(p, currentStoreId)) {
+          byId.set(p.id, p)
+        }
       })
       trainingHourStaff = Array.from(byId.values())
     } else if (profile && !profile.qualified && !NON_PICKABLE_STAFF_ROLES.includes(profile.role)) {

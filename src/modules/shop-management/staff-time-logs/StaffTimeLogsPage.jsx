@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import AttendanceLogTable from '../../dashboard/time-attendance/AttendanceLogTable'
 
 // Manager-facing view of the same Attendance Logs table each employee sees
@@ -42,7 +43,10 @@ export default function StaffTimeLogsPage() {
         if (!active) return
         const rows = (data ?? [])
           .map((m) => m.profiles)
-          .filter((p) => p && p.is_active && !NON_PICKABLE_STAFF_ROLES.includes(p.role))
+          // Join store activity unchecked at this (additional) store —
+          // migration 0064, isActiveStoreMember — same reasoning as Staff
+          // Information/Learning Tracker.
+          .filter((p) => p && p.is_active && !NON_PICKABLE_STAFF_ROLES.includes(p.role) && isActiveStoreMember(p, currentStoreId))
           .sort((a, b) => (a.first_name ?? '').localeCompare(b.first_name ?? ''))
         setStaff(rows)
         setLoading(false)

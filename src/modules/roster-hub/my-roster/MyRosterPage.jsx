@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react'
+import { addDays, format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import RosterWeekTable from '../shared/RosterWeekTable'
 import { fetchSubmittedPeriod, thisWeekStart, nextWeekStart } from '../shared/rosterWeeks'
+
+// Jeff, 2026-09: "my roster this week跟next week後面也顯示日期，跟my
+// availability一樣" — same "(d MMM – d MMM)" label My Availability's section
+// headers already show, so the two pages read consistently.
+function weekRangeLabel(weekStartStr) {
+  const start = parseISO(weekStartStr)
+  const end = addDays(start, 6)
+  return `${format(start, 'd MMM')} – ${format(end, 'd MMM')}`
+}
 
 export default function MyRosterPage() {
   const { currentStoreId, profile, refreshRosterUpdates } = useAuth()
@@ -36,11 +46,15 @@ export default function MyRosterPage() {
 
       <div className="space-y-6">
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-gray-700">This Week</h3>
+          <h3 className="mb-2 text-sm font-semibold text-gray-700">
+            This Week <span className="font-normal text-gray-400">({weekRangeLabel(thisWeekStart())})</span>
+          </h3>
           <RosterWeekTable period={thisWeek} onlyProfileId={profile?.id} />
         </div>
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-gray-700">Next Week</h3>
+          <h3 className="mb-2 text-sm font-semibold text-gray-700">
+            Next Week <span className="font-normal text-gray-400">({weekRangeLabel(nextWeekStart())})</span>
+          </h3>
           <RosterWeekTable period={nextWeek} onlyProfileId={profile?.id} />
         </div>
       </div>

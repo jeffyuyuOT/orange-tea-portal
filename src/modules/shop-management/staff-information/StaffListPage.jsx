@@ -5,6 +5,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import Badge from '../../../components/ui/Badge'
 import { ROLE_LABELS, NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import StaffDetailModal from './StaffDetailModal'
 import PendingStaffDetailModal from './PendingStaffDetailModal'
 
@@ -40,7 +41,11 @@ export default function StaffListPage() {
       // or show up in Bulletin Board, so they're kept out of this list too
       // (their store assignment is still managed the normal way from
       // Admin Center > User Management, they just don't clutter this page).
-      .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role))
+      // Join store activity unchecked at this (additional) store means they
+      // can still be switched to/viewed here, but don't count as this
+      // store's staff (migration 0064, isActiveStoreMember) — same
+      // reasoning as the training/qr_code_maker exclusion above.
+      .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role) && isActiveStoreMember(p, currentStoreId))
       .sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0) || (a.first_name ?? '').localeCompare(b.first_name ?? ''))
     setStaff(staffRows)
     setPendingStaff(pendingRows ?? [])

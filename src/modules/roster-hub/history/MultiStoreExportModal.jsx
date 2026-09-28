@@ -6,6 +6,7 @@ import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import { exportMultiStoreWorkbook, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import { thisWeekStart } from '../shared/rosterWeeks'
 
 export default function MultiStoreExportModal({ onClose }) {
@@ -38,17 +39,26 @@ export default function MultiStoreExportModal({ onClose }) {
         // keep just reading `.roster_display_name` either way.
         supabase
           .from('user_stores')
-          .select('profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role)')
+          .select(
+            'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity)'
+          )
           .eq('store_id', storeId)
           .order('roster_order'),
       ])
       const nameByProfile = new Map((memberships ?? []).map((m) => [m.profile_id, m.roster_display_name]))
       // Same filter as History's single-store export and Manage Roster:
-      // training/qr_code_maker accounts don't get scheduled, and neither
-      // does anyone currently hidden from this store's roster (Roster Hub
-      // > Setting > Roster Staff Order).
+      // training/qr_code_maker accounts don't get scheduled, neither does
+      // anyone currently hidden from this store's roster (Roster Hub >
+      // Setting > Roster Staff Order), nor Join store activity unchecked at
+      // this (additional) store (migration 0064).
       const staffList = (memberships ?? [])
-        .filter((m) => m.profiles?.is_active && !NON_ROSTER_STAFF_ROLES.includes(m.profiles.role) && !m.hidden_from_roster)
+        .filter(
+          (m) =>
+            m.profiles?.is_active &&
+            !NON_ROSTER_STAFF_ROLES.includes(m.profiles.role) &&
+            !m.hidden_from_roster &&
+            isActiveStoreMember(m.profiles, storeId)
+        )
         .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
       let entries = []
       if (period) {

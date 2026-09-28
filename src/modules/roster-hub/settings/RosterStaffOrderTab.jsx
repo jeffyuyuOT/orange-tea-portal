@@ -6,6 +6,7 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { useDragReorder, DragHandle } from '../../../lib/useDragReorder'
 import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 
 // Manage Roster's staff list (real staff via user_stores + not-yet-formal
 // Pending staff via roster_pending_staff — the same two sources
@@ -30,7 +31,9 @@ export default function RosterStaffOrderTab() {
     const [{ data: staffRows }, { data: pendingRows }] = await Promise.all([
       supabase
         .from('user_stores')
-        .select('profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role)')
+        .select(
+          'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity)'
+        )
         .eq('store_id', currentStoreId),
       supabase.from('roster_pending_staff').select('*').eq('store_id', currentStoreId),
     ])
@@ -40,9 +43,17 @@ export default function RosterStaffOrderTab() {
     // they were never part of the roster to begin with. developer is
     // deliberately NOT excluded here — it can be scheduled/ordered like
     // any other role once assigned to a store (see NON_ROSTER_STAFF_ROLES'
-    // own comment in permissions.js).
+    // own comment in permissions.js). Someone whose Join store activity is
+    // unchecked at this (additional) store is excluded the same way —
+    // they're not on this store's roster at all (isActiveStoreMember,
+    // migration 0064), so there's nothing here for them to be ordered in.
     const staffAsItems = (staffRows ?? [])
-      .filter((r) => r.profiles?.is_active && !NON_ROSTER_STAFF_ROLES.includes(r.profiles.role))
+      .filter(
+        (r) =>
+          r.profiles?.is_active &&
+          !NON_ROSTER_STAFF_ROLES.includes(r.profiles.role) &&
+          isActiveStoreMember(r.profiles, currentStoreId)
+      )
       .map((r) => ({
         id: `staff:${r.profile_id}`,
         kind: 'staff',

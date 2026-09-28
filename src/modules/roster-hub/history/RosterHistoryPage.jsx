@@ -8,6 +8,7 @@ import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { exportRosterGrid, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import MultiStoreExportModal from './MultiStoreExportModal'
 
 export default function RosterHistoryPage() {
@@ -41,7 +42,9 @@ export default function RosterHistoryPage() {
       supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
       supabase
         .from('user_stores')
-        .select('profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role)')
+        .select(
+          'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity)'
+        )
         .eq('store_id', currentStoreId)
         .order('roster_order'),
     ])
@@ -52,9 +55,16 @@ export default function RosterHistoryPage() {
     // either, nor should anyone currently hidden from the roster (Roster
     // Hub > Setting > Roster Staff Order) — same reasoning: they're not
     // being scheduled right now, so a blank row for them here would be
-    // just as misleading as one on the live grid.
+    // just as misleading as one on the live grid. Same for Join store
+    // activity unchecked at this (additional) store (migration 0064).
     const staffList = (memberships ?? [])
-      .filter((m) => m.profiles?.is_active && !NON_ROSTER_STAFF_ROLES.includes(m.profiles.role) && !m.hidden_from_roster)
+      .filter(
+        (m) =>
+          m.profiles?.is_active &&
+          !NON_ROSTER_STAFF_ROLES.includes(m.profiles.role) &&
+          !m.hidden_from_roster &&
+          isActiveStoreMember(m.profiles, currentStoreId)
+      )
       .map((m) => ({ ...m.profiles, roster_display_name: m.roster_display_name }))
     const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(period.week_start_date), i), 'yyyy-MM-dd'))
     const entries = (rows ?? []).map((r) => ({

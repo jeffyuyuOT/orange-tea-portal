@@ -21,6 +21,7 @@ import {
 } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { loadWeekAvailabilityForProfiles } from '../../../lib/availability'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 
 export default function ManageRosterPage() {
   const { currentStoreId, accessibleStores, profile, refreshRosterUpdates, refreshBulletinUpdates } = useAuth()
@@ -120,7 +121,9 @@ export default function ManageRosterPage() {
       // qualified (profiles.qualified, migration 0049_staff_qualified.sql)
       // is what RosterEntryGrid uses to show a not-yet-Qualified staff
       // member's name/shift time in red.
-      .select('roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified)')
+      .select(
+        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity)'
+      )
       .eq('store_id', currentStoreId)
       .order('roster_order')
       .then(({ data }) => {
@@ -128,9 +131,19 @@ export default function ManageRosterPage() {
         // Jeff — they don't work store shifts), so they never auto-populate
         // onto this grid the way real staff do. developer is deliberately
         // NOT in this list (see NON_ROSTER_STAFF_ROLES) — it can be
-        // scheduled like any other role once assigned to a store.
+        // scheduled like any other role once assigned to a store. Someone
+        // whose "also belong to" membership at this store has Join store
+        // activity unchecked (isActiveStoreMember, migration 0064) can
+        // still view this store, but doesn't get auto-populated onto its
+        // roster grid.
         const list = (data ?? [])
-          .filter((r) => r.profiles?.is_active && !NON_ROSTER_STAFF_ROLES.includes(r.profiles.role) && !r.hidden_from_roster)
+          .filter(
+            (r) =>
+              r.profiles?.is_active &&
+              !NON_ROSTER_STAFF_ROLES.includes(r.profiles.role) &&
+              !r.hidden_from_roster &&
+              isActiveStoreMember(r.profiles, currentStoreId)
+          )
           .map((r) => ({ ...r.profiles, roster_display_name: r.roster_display_name, roster_order: r.roster_order }))
         setStaff(list)
       })
