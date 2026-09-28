@@ -13,6 +13,10 @@ import { format, parseISO } from 'date-fns'
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 // Column layout (0-indexed): Name, then 7×(S,E), then Total hr, then WKD hr.
+// This is what this app's OWN template/export (buildHeaderRows et al, below)
+// always produces — but an uploaded file doesn't have to be one of those; see
+// findDayColumns' comment for why parseRosterGrid can't just trust these
+// fixed indices for a file it didn't generate itself.
 const NAME_COL = 0
 const FIRST_DAY_COL = 1
 const TOTAL_COL = FIRST_DAY_COL + 7 * 2 // 15
@@ -307,6 +311,92 @@ function findStoreSheet(wb, storeName) {
   )
 }
 
+// ---- upload / parse: locating the real day columns ------------------------
+// Excel's own date epoch is 1899-12-30 (serial day 0); read via
+// sheet_to_json without `cellDates: true` (parseRosterGrid doesn't set it),
+// a date-formatted cell comes back as this kind of decimal serial number
+// rather than a JS Date or a string — the constant below is the day-count
+// offset to/from the JS epoch (1970-01-01) needed to compute it for a given
+// ISO date.
+const EXCEL_EPOCH_OFFSET_DAYS = 25569
+
+function excelSerialFromISODate(iso) {
+  const d = parseISO(iso)
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000) + EXCEL_EPOCH_OFFSET_DAYS
+}
+
+// Jeff (2026-09): parseRosterGrid used to just assume every uploaded file
+// has Monday's "S" column at FIRST_DAY_COL (immediately after Name) — true
+// for anything downloaded from this app's own "Download template"/"Export
+// current grid", but NOT for a roster spreadsheet someone maintains
+// independently. Jeff's own master roster file (one tab per store, dates
+// typed as real Excel dates, an extra blank spacer column between Name and
+// Monday, plus extra Public-Holiday tracking columns further right that
+// this app doesn't even have fields for) has Monday's "S" one column later
+// than that fixed assumption — which shifted every single day's columns:
+// each day's real "S" got read as the PREVIOUS day's "E", every real "E"
+// got read as the NEXT day's "S", and the Break row's values (still aligned
+// under the correct day columns) never lined up with where the fixed
+// layout expected them, so they silently came back empty. That's exactly
+// Jeff's "start time讀成end time、break的數值也讀不進去" report.
+//
+// Fix: don't assume — find each weekday's actual column by matching the
+// workbook's own header cells against the week actually being imported
+// (`weekDates`, always Monday-first, already known regardless of what's in
+// the file). A day's header column is recognized either by a raw Excel
+// date serial equal to that day's date (a workbook that stores real dates,
+// like Jeff's), or by this app's own "Mon 28-Sep"-style text label (a file
+// that came from this app's own template/export). Matching only looks at
+// columns after Name (c >= 1) and, for the text form, requires an exact
+// "Mon" match or "Mon " + something (a trailing space) rather than a bare
+// startsWith — so a staff member genuinely named e.g. "Monica" sitting in
+// the header's row-scan window can never be mistaken for the Monday
+// column. Returns null (caller falls back to the old fixed layout) if any
+// of the 7 days can't be found at all — a file whose dates don't match the
+// week being imported is a different, more serious problem than a shifted
+// column, and shouldn't be silently guessed at here.
+function findDayColumns(aoa, weekDates, headerRows = 8) {
+  const cols = weekDates.map((iso, i) => {
+    const serial = excelSerialFromISODate(iso)
+    const label = DAY_LABELS[i].toLowerCase()
+    for (let r = 0; r < Math.min(headerRows, aoa.length); r++) {
+      const row = aoa[r] ?? []
+      for (let c = 1; c < row.length; c++) {
+        const v = row[c]
+        if (typeof v === 'number' && Math.round(v) === serial) return c
+        if (typeof v === 'string') {
+          const text = v.trim().toLowerCase()
+          if (text === label || text.startsWith(`${label} `)) return c
+        }
+      }
+    }
+    return null
+  })
+  if (cols.some((c) => c === null)) return null
+  // Sanity check: real weekday columns are always in Monday→Sunday order,
+  // whatever else surrounds them — if that's not true, something matched
+  // by coincidence rather than really being this week's header row.
+  for (let i = 1; i < cols.length; i++) {
+    if (cols[i] <= cols[i - 1]) return null
+  }
+  return cols
+}
+
+// Once Monday's column is known, finds where the header block actually
+// ends: both this app's own template (2 header rows: day+date combined,
+// then S/E) and Jeff's master file (3 header rows: date, day name, S/E)
+// put an exact "S" label directly above the first real data row, in
+// Monday's own column — so the row right after that "S" is always where
+// staff rows start, regardless of how many rows came before it. Returns
+// null (caller falls back to the old fixed 2-row assumption) if no such
+// row shows up within the scanned window.
+function findFirstDataRow(aoa, mondayCol, headerRows = 8) {
+  for (let r = 0; r < Math.min(headerRows, aoa.length); r++) {
+    if (String(aoa[r]?.[mondayCol] ?? '').trim() === 'S') return r + 1
+  }
+  return null
+}
+
 // ---- upload / parse -------------------------------------------------------
 // Parses a workbook built in this same grid shape back into flat shift
 // records: { profileId, staffName, date, startTime, endTime, breakHours }.
@@ -379,10 +469,25 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
             }
           }
         })
+        // Jeff (2026-09): locate each weekday's real column and the real
+        // first data row from the file's own header instead of trusting
+        // this app's own fixed layout — see findDayColumns' long comment
+        // above for why (Jeff's own master roster spreadsheet, not
+        // generated by this app, has Monday's "S" one column later than
+        // that fixed assumption, which silently shifted every day's
+        // start/end/break reading by one column). Falls back to the old
+        // fixed positions if detection can't find all 7 days or the
+        // header's "S" row — e.g. a file with no recognizable dates at
+        // all — so nothing already working regresses.
+        const detectedDayCols = findDayColumns(aoa, weekDates)
+        const detectedFirstDataRow = detectedDayCols ? findFirstDataRow(aoa, detectedDayCols[0]) : null
+        const dayCols = detectedDayCols && detectedFirstDataRow !== null ? detectedDayCols : weekDates.map((_, di) => FIRST_DAY_COL + di * 2)
+        const firstDataRow = detectedDayCols && detectedFirstDataRow !== null ? detectedFirstDataRow : 2
+
         const byName = new Map(staff.map((s) => [rosterDisplayName(s).toLowerCase(), s]))
 
         const entries = []
-        let i = 2 // skip the two header rows
+        let i = firstDataRow
         while (i < aoa.length) {
           const row = aoa[i] ?? []
           const name = String(row[NAME_COL] ?? '').trim()
@@ -392,7 +497,12 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
           }
           let breakRow = null
           const next = aoa[i + 1]
-          if (next && String(next[NAME_COL] ?? '').trim().toLowerCase().startsWith('break')) {
+          // The "Break" label isn't always in the Name column itself —
+          // Jeff's own master file puts it one column over instead (see
+          // findDayColumns' comment) — so this checks every column before
+          // the first real day column rather than just NAME_COL.
+          const nextIsBreakRow = next && next.slice(0, dayCols[0]).some((v) => String(v ?? '').trim().toLowerCase().startsWith('break'))
+          if (nextIsBreakRow) {
             breakRow = next
             i += 2
           } else {
@@ -400,7 +510,7 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
           }
           const match = byName.get(name.toLowerCase())
           weekDates.forEach((date, di) => {
-            const c = FIRST_DAY_COL + di * 2
+            const c = dayCols[di]
             const startTime = parseHourCell(row[c])
             const endTime = parseHourCell(row[c + 1])
             const breakHours = breakRow ? parseHourCell(breakRow[c]) : ''
@@ -416,7 +526,30 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
             })
           })
         }
-        resolve(entries)
+        // Jeff (2026-09): his own master roster file turned out to have the
+        // ENTIRE grid duplicated a second time further down the same sheet
+        // (rows 1–34 and rows 35–68 were identical, one written as decimal
+        // hours and the mirrored copy as "HH:MM" text — probably an Excel
+        // formula view he kept for his own reading, syncing off the first
+        // block) — this app's sheet only ever has one such block and never
+        // stops looking once it hits the bottom of it, so it kept right on
+        // reading that second copy as if it were more staff rows, doubling
+        // every entry. There's no reliable, generic way to detect "a second
+        // copy of the same grid starts here" up front, so instead: this
+        // app's whole data model already only supports one shift per person
+        // per day (Total hr/WKD hr, dayHours() etc. all assume that), so
+        // de-duping down to one entry per (person, date) — keeping
+        // whichever comes FIRST in the file — is always safe and also
+        // guards against any other accidental duplicate row, not just this
+        // specific shape of file.
+        const seenPersonDate = new Set()
+        const deduped = entries.filter((e) => {
+          const key = `${e.profileId || e.staffName}::${e.date}`
+          if (seenPersonDate.has(key)) return false
+          seenPersonDate.add(key)
+          return true
+        })
+        resolve(deduped)
       } catch (err) {
         reject(err)
       }
