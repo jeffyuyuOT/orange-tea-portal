@@ -109,6 +109,19 @@ const ROLE_DEFAULTS = {
   // name; to anyone else it reads as "Admin".
   developer: ALL,
 
+  // Jeff, 2026-09: this list forgot 'developer_tools.payroll' — shop_manager
+  // got it by default (like every other key ALL.filter() doesn't explicitly
+  // exclude), so the Page Access checkbox showed it ticked for any
+  // shop_manager account nobody had manually patched with a per-account
+  // permission_overrides row (Angel Cheah / "jeff test" already had one,
+  // set to false — that was exactly this bug, worked around one account at
+  // a time instead of fixed at the root). The page itself is just an iframe
+  // into the standalone payroll app (PayrollPage.jsx) whose real boundary is
+  // payroll_*'s RLS (is_developer()), so a shop_manager with this leaked
+  // page access could reach the tab/route but the app underneath would
+  // deny/empty everything — Jeff's "有勾取，只是進不去". Now excluded here
+  // the same way admin already is above, so the checkbox/Sidebar
+  // link/route all agree: only `developer` gets Payroll by default.
   shop_manager: ALL.filter(
     (key) =>
       ![
@@ -118,6 +131,7 @@ const ROLE_DEFAULTS = {
         'admin_center.store_management',
         'admin_center.system_setting',
         'shop_management.qr_code',
+        'developer_tools.payroll',
       ].includes(key)
   ),
 
