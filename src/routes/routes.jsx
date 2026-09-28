@@ -12,6 +12,8 @@ import ShopTrainingPage from '../modules/operations-training/shop-training/ShopT
 
 import DashboardLayout from '../modules/dashboard/DashboardLayout'
 import BulletinPage from '../modules/dashboard/bulletin/BulletinPage'
+import MessagePage from '../modules/dashboard/message/MessagePage'
+import SupportPage from '../modules/support/SupportPage'
 import StudyLogPage from '../modules/dashboard/study-log/StudyLogPage'
 import TimeAttendancePage from '../modules/dashboard/time-attendance/TimeAttendancePage'
 import MyInformationPage from '../modules/dashboard/my-information/MyInformationPage'
@@ -82,10 +84,16 @@ export default function AppRoutes() {
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<Navigate to="bulletin" replace />} />
           <Route path="bulletin" element={guarded('dashboard.bulletin', <BulletinPage />)} />
+          <Route path="message" element={guarded('dashboard.message', <MessagePage />)} />
           <Route path="study-log" element={guarded('dashboard.study_log', <StudyLogPage />)} />
           <Route path="time-attendance" element={guarded('dashboard.time_attendance', <TimeAttendancePage />)} />
           <Route path="my-information" element={guarded('dashboard.my_information', <MyInformationPage />)} />
         </Route>
+
+        {/* Jeff, 2026-09: its own top-level section — "跟my dashboard同等
+            級，不是在my dashboard下" — not nested under /dashboard the way
+            it briefly was. */}
+        <Route path="/support/submit-request" element={guarded('support.submit_request', <SupportPage />)} />
 
         <Route path="/shop-management/learning-tracker" element={guarded('shop_management.learning_tracker', <LearningTrackerPage />)} />
         <Route path="/shop-management/staff-information" element={guarded('shop_management.staff_information', <StaffListPage />)} />

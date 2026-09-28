@@ -13,7 +13,7 @@ import Badge from '../ui/Badge'
 // in Admin Center > System Setting, rather than SECTIONS' own literal order
 // in permissions.js.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, sidebarOrder } = useAuth()
+  const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, sidebarOrder } = useAuth()
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -59,6 +59,11 @@ export function SidebarNavLinks({ onNavigate }) {
                     {fullKey === 'dashboard.bulletin' && hasBulletinUpdates && (
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" aria-label="Update" />
                     )}
+                    {/* Jeff, 2026-09: circled unread count next to Message —
+                        see AuthContext.jsx's unreadMessageCount. Personal
+                        scope, so this is never store-filtered the way the
+                        Bulletin dot above is. */}
+                    {fullKey === 'dashboard.message' && unreadMessageCount > 0 && <Badge color="red">{unreadMessageCount}</Badge>}
                   </NavLink>
                 )
               })}

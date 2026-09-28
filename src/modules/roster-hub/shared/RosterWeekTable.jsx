@@ -3,6 +3,8 @@ import { supabase } from '../../../lib/supabaseClient'
 import { addDays, format, parseISO } from 'date-fns'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
+import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
+import { isActiveStoreMember } from '../../../lib/storeVisibility'
 
 // Renders one week's schedule as a grid: staff down the side, weekdays
 // across the top. Used by both "My Roster" (filtered to one staff member)
@@ -12,6 +14,20 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
   const [loading, setLoading] = useState(true)
   const [orderByProfile, setOrderByProfile] = useState(new Map())
   const [orderByPendingName, setOrderByPendingName] = useState(new Map())
+  // Jeff, 2026-09: "沒有時間的人也是要顯示出來(如果在manage roster有出現名字
+  // 的話)" — a staff/pending person can appear on Manage Roster's grid
+  // (they're on this store's active roster) with literally zero hours
+  // entered for the whole week, and until now that meant zero
+  // roster_entries rows, so they never showed up here at all — this view
+  // used to be built purely FROM roster_entries. `activeRoster` is that
+  // same "who'd show up as a row in Manage Roster" list (same filters
+  // ManageRosterPage applies to its own `staff`/`pendingStaff`), fetched
+  // here too so it can be unioned onto the entries-derived list below.
+  // Only for the store-wide view — onlyProfileId (My Roster) keeps its
+  // existing "no shifts recorded" behavior for a genuinely shift-less week,
+  // since that page is about THIS person's own shifts, not who's on the
+  // roster in general.
+  const [activeRoster, setActiveRoster] = useState([])
 
   useEffect(() => {
     // No published period for this week (e.g. next week's roster hasn't
@@ -22,6 +38,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     // and the spinner would just spin forever instead.
     if (!period) {
       setEntries([])
+      setActiveRoster([])
       setLoading(false)
       return
     }
@@ -44,10 +61,21 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     // numbering space (Roster Hub > Setting > Roster Staff Order reorders
     // them together), matched onto ad-hoc `staff_name_raw` entries by name
     // below since roster_entries itself has no pending-staff id to join on.
+    // Also select the extra fields needed to rebuild "who's on this store's
+    // active roster at all" (same shape ManageRosterPage's own staff/
+    // pendingStaff queries use) — see activeRoster above.
     Promise.all([
       q.order('work_date'),
-      supabase.from('user_stores').select('profile_id, roster_display_name, roster_order').eq('store_id', period.store_id),
-      supabase.from('roster_pending_staff').select('display_name, roster_display_name, roster_order').eq('store_id', period.store_id),
+      supabase
+        .from('user_stores')
+        .select(
+          'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(first_name, last_name, is_active, role, qualified, primary_store_id, join_store_activity)'
+        )
+        .eq('store_id', period.store_id),
+      supabase
+        .from('roster_pending_staff')
+        .select('id, display_name, roster_display_name, roster_order, hidden_from_roster')
+        .eq('store_id', period.store_id),
     ]).then(([{ data }, { data: nameRows }, { data: pendingRows }]) => {
       if (!active) return
       const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
@@ -61,6 +89,39 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
       )
       setOrderByProfile(orderByProfile)
       setOrderByPendingName(orderByPendingName)
+      if (onlyProfileId) {
+        setActiveRoster([])
+      } else {
+        // Same filters as ManageRosterPage's own staff query: active,
+        // schedulable role, not hidden from this store's roster, and
+        // counted as an active participant here (isActiveStoreMember,
+        // migration 0064/0067).
+        const activeStaff = (nameRows ?? [])
+          .filter(
+            (r) =>
+              r.profiles?.is_active &&
+              !NON_ROSTER_STAFF_ROLES.includes(r.profiles.role) &&
+              !r.hidden_from_roster &&
+              isActiveStoreMember(r.profiles, period.store_id)
+          )
+          .map((r) => ({
+            key: r.profile_id,
+            name: rosterDisplayName({ ...r.profiles, roster_display_name: r.roster_display_name }),
+            isStaff: true,
+            qualified: r.profiles.qualified === true,
+            order: r.roster_order,
+          }))
+        const activePending = (pendingRows ?? [])
+          .filter((p) => !p.hidden_from_roster)
+          .map((p) => ({
+            key: pendingRosterName(p),
+            name: pendingRosterName(p),
+            isStaff: false,
+            qualified: false,
+            order: p.roster_order,
+          }))
+        setActiveRoster([...activeStaff, ...activePending])
+      }
       setLoading(false)
     })
     return () => {
@@ -70,7 +131,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
 
   if (loading) return <LoadingSpinner />
   if (!period) return <EmptyState label="Not available — this week's roster hasn't been published yet." />
-  if (!entries.length) return <EmptyState label="No shifts recorded for this week." />
+  if (!entries.length && !activeRoster.length) return <EmptyState label="No shifts recorded for this week." />
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(parseISO(period.week_start_date), i))
   // Sorted by Roster Hub > Setting > Roster Staff Order (migration
@@ -86,19 +147,24 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
   // first". Anyone with no order on record at all (a one-off name typed
   // straight into Manage Roster that was never added to Pending staff)
   // falls back to alphabetical, after everyone with a real position.
-  const staffNames = Array.from(
-    new Map(
-      entries.map((e) => [
-        e.profile_id ?? e.staff_name_raw,
-        {
-          name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
-          isStaff: !!e.profile_id,
-          qualified: e.profiles?.qualified === true,
-          order: e.profile_id ? orderByProfile.get(e.profile_id) : orderByPendingName.get((e.staff_name_raw || '').toLowerCase()),
-        },
-      ])
-    )
-  ).sort(([, a], [, b]) => {
+  const byKey = new Map(
+    entries.map((e) => [
+      e.profile_id ?? e.staff_name_raw,
+      {
+        name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
+        isStaff: !!e.profile_id,
+        qualified: e.profiles?.qualified === true,
+        order: e.profile_id ? orderByProfile.get(e.profile_id) : orderByPendingName.get((e.staff_name_raw || '').toLowerCase()),
+      },
+    ])
+  )
+  // Union on anyone who's on this store's active roster but has no shift
+  // at all this week (see activeRoster above) — never overwrites someone
+  // who already has real entries.
+  activeRoster.forEach((r) => {
+    if (!byKey.has(r.key)) byKey.set(r.key, r)
+  })
+  const staffNames = Array.from(byKey).sort(([, a], [, b]) => {
     if (a.order != null && b.order != null) return a.order - b.order
     if ((a.order != null) !== (b.order != null)) return a.order != null ? -1 : 1
     return (a.name || '').localeCompare(b.name || '')

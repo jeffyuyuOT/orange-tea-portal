@@ -17,9 +17,27 @@ export const SECTIONS = {
     label: 'My Dashboard',
     pages: {
       bulletin: 'Bulletin Board',
+      // Jeff, 2026-09: private messaging moved out of Bulletin Board into
+      // its own My Dashboard tab (Inbox/Sent) — see MessagePage.jsx and
+      // migration 0066_bulletin_messages.sql. Personal scope, so this page
+      // is never store-filtered the way Bulletin Board is.
+      message: 'Message',
       study_log: 'Study Log',
       time_attendance: 'Time & Attendance',
       my_information: 'My Information',
+    },
+  },
+  // Jeff, 2026-09: its own top-level section — "跟my dashboard同等級，不是
+  // 在my dashboard下" — a plain "submit a request" form (SupportPage.jsx)
+  // that hands off to the private Message system in `dashboard` above for
+  // delivery (a message to the developer role + a case-number badge), so
+  // it doesn't need its own inbox/RLS story. One page for now; room to add
+  // siblings here later (the original spec's HR/Admin Request Database)
+  // without touching this section's shape.
+  support: {
+    label: 'Support',
+    pages: {
+      submit_request: 'Submit Request',
     },
   },
   shop_management: {
@@ -107,9 +125,11 @@ const ROLE_DEFAULTS = {
     'operations_training.formula',
     'operations_training.shop_training',
     'dashboard.bulletin',
+    'dashboard.message',
     'dashboard.study_log',
     'dashboard.time_attendance',
     'dashboard.my_information',
+    'support.submit_request',
     'roster_hub.my_roster',
     'roster_hub.my_availability',
     'roster_hub.leave_management',

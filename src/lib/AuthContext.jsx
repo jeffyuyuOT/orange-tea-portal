@@ -62,6 +62,14 @@ export function AuthProvider({ children }) {
   // them as "unviewed" either, since they're a standing status rather than
   // a one-off post.
   const [hasBulletinUpdates, setHasBulletinUpdates] = useState(false)
+  // Circled number on the Message nav entry (Jeff, 2026-09 — Message moved
+  // out of Bulletin Board into its own personal "My Dashboard" tab, see
+  // MessagePage.jsx). Unlike hasBulletinUpdates above, this is NOT
+  // store-scoped — a message follows the person, not the currently
+  // switched-to store — so it only depends on profile.id, and counts
+  // (rather than just flags) every message_recipients row for this person
+  // with read_at still null, across every store at once.
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0)
   // Shared Sidebar section/page order (migration 0055) — global, not tied
   // to who's logged in, so it's fetched once independently of profile/store
   // rather than inside loadProfileData. Starts as SECTIONS' own literal
@@ -290,6 +298,27 @@ export function AuthProvider({ children }) {
     refreshBulletinUpdates()
   }, [refreshBulletinUpdates])
 
+  // Recomputes the Message unread badge for the current person — called on
+  // login, and again by MessagePage right after it marks something read (or
+  // sends/receives), so the badge updates without a full page reload. Not
+  // tied to currentStoreId — see the state comment above.
+  const refreshUnreadMessages = useCallback(async () => {
+    if (!profile?.id) {
+      setUnreadMessageCount(0)
+      return
+    }
+    const { count } = await supabase
+      .from('message_recipients')
+      .select('id', { count: 'exact', head: true })
+      .eq('profile_id', profile.id)
+      .is('read_at', null)
+    setUnreadMessageCount(count ?? 0)
+  }, [profile?.id])
+
+  useEffect(() => {
+    refreshUnreadMessages()
+  }, [refreshUnreadMessages])
+
   const signIn = useCallback(async (email, password) => {
     sessionStorage.removeItem('ot_training_verified')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -341,6 +370,8 @@ export function AuthProvider({ children }) {
     refreshFormulaUpdates,
     hasBulletinUpdates,
     refreshBulletinUpdates,
+    unreadMessageCount,
+    refreshUnreadMessages,
     sidebarOrder,
     refreshSidebarOrder,
   }

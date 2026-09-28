@@ -41,12 +41,25 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // purposes. Backed by user_stores (see migration 0027).
   const [extraStoreIds, setExtraStoreIds] = useState([])
   // Jeff, 2026-09: "Join store activity" — one flag for the whole person
-  // (not per extra store), governing whether their ADDITIONAL stores above
-  // treat them as a full active participant (schedulable, in Roster Staff
-  // Order, can post Bulletin messages there) or just someone who can view
-  // that store's data. Their primary Store above is always fully active
-  // regardless of this (see storeVisibility.js's isActiveStoreMember).
+  // (not per store), governing whether Store above AND every "also belong
+  // to" store below treat them as a full active participant (schedulable,
+  // in Roster Staff Order and staff availability, can apply for leave
+  // there, shown in Staff Information/Learning Tracker/Staff Time Logs) or
+  // just someone who can view that store's data. Originally the primary
+  // Store was always exempt from this (always fully active regardless) —
+  // changed by migration 0067 after Jeff's Janet example: she needs
+  // Underwood as her actual primary Store, not just an "also belong to"
+  // one, while still being excluded from scheduling there — so this now
+  // applies to Store above too, not just the "also belong to" list (see
+  // storeVisibility.js's isActiveStoreMember).
   const [joinStoreActivity, setJoinStoreActivity] = useState(user.join_store_activity ?? true)
+  // There was briefly a second, separate "Post and receive Bulletin
+  // messages" checkbox (join_bulletin_activity, migrations 0065/0066) —
+  // Jeff removed it again the same day (migration
+  // 0068_remove_bulletin_activity_checkbox.sql): admin/manager always
+  // bypassed it anyway, so it only ever restricted a 'staff' account, and
+  // that was rare enough not to need its own toggle — someone who
+  // genuinely shouldn't use Bulletin at all just gets deactivated instead.
   const [saving, setSaving] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
 
@@ -245,11 +258,11 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
             <input type="checkbox" checked={joinStoreActivity} onChange={(e) => setJoinStoreActivity(e.target.checked)} />
             Join store activity
           </label>
-          <p className="mt-1 text-xs text-gray-400">
-            For someone (e.g. an admin) working more than one store. Checked — they're a full active participant
-            at every store above: schedulable on Manage Roster, listed in Roster Staff Order, and can post their
-            own Bulletin messages there. Unchecked — they can still switch to and view those stores, but won't be
-            selectable in any of that (their Store above is unaffected either way).
+          {/* Jeff, 2026-09 — exact verbatim wording, applies to Store above
+              AND every "also belong to" store checked here (see migration
+              0067 / storeVisibility.js's isActiveStoreMember). */}
+          <p className="mt-1 whitespace-pre-line text-xs text-gray-400">
+            {'Checked:  full active participant at Manage Roster (including applying for leave/staff availability/listed in Roster Staff Order)/shown in Staff Information/Learning Tracker/Staff Time Logs there. \nUnchecked: View-only access (can switch to the store, but excluded from all rosters and tracking).'}
           </p>
         </div>
       )}

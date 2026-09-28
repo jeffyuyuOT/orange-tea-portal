@@ -67,16 +67,17 @@ export default function BulletinPage() {
   const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager' || profile?.role === 'developer'
   // Staff can post too now (migration 0056, per Jeff) — they just can only
   // edit/delete the posts they themselves created afterwards (enforced in
-  // AnnouncementDetailModal.jsx + RLS), not anyone else's. Jeff, 2026-09:
-  // "Join store activity" (migration 0064) narrowed the underlying "staff
-  // insert own announcements" RLS policy to active_store_ids() — a staff
-  // member switched into an ADDITIONAL store they belong to but aren't
-  // Join-store-activity-checked at would now have their insert rejected by
-  // the database, so this mirrors that same check client-side rather than
-  // showing a "New" button that silently fails on submit. Manager/admin
-  // aren't affected (their own write policy, and is_admin(), weren't
-  // touched by that migration), so this only narrows the staff branch.
-  const canPost = isManagerOrAdmin || (profile?.role === 'staff' && isActiveStoreMember(profile, currentStoreId))
+  // AnnouncementDetailModal.jsx + RLS), not anyone else's. There was
+  // briefly a separate "Post and receive Bulletin messages" checkbox
+  // (join_bulletin_activity, migrations 0065/0066) narrowing this further
+  // — Jeff removed it the same day (migration
+  // 0068_remove_bulletin_activity_checkbox.sql): it only ever affected
+  // staff (admin/manager always bypassed the underlying RLS regardless),
+  // and that was rare enough not to need its own toggle — a staff member
+  // who genuinely shouldn't post/see Bulletin at all gets deactivated
+  // instead. So this is back to a plain role check; the RLS's
+  // current_store_ids() already guarantees they're actually at this store.
+  const canPost = isManagerOrAdmin || profile?.role === 'staff'
 
   async function load() {
     if (!currentStoreId || !profile) return
