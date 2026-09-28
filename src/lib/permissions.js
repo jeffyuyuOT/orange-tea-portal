@@ -40,6 +40,7 @@ export const SECTIONS = {
     label: 'Roster Hub',
     pages: {
       my_roster: 'My Roster',
+      my_availability: 'My Availability',
       manage_roster: 'Manage Roster',
       history: 'History',
       leave_management: 'Leave Management',
@@ -110,6 +111,7 @@ const ROLE_DEFAULTS = {
     'dashboard.time_attendance',
     'dashboard.my_information',
     'roster_hub.my_roster',
+    'roster_hub.my_availability',
     'roster_hub.leave_management',
   ],
 

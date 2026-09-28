@@ -24,6 +24,7 @@ import StaffTimeLogsPage from '../modules/shop-management/staff-time-logs/StaffT
 import QrCodeDisplayPage from '../modules/shop-management/qr-code-display/QrCodeDisplayPage'
 
 import MyRosterPage from '../modules/roster-hub/my-roster/MyRosterPage'
+import MyAvailabilityPage from '../modules/roster-hub/my-availability/MyAvailabilityPage'
 import ManageRosterPage from '../modules/roster-hub/manage-roster/ManageRosterPage'
 import RosterHistoryPage from '../modules/roster-hub/history/RosterHistoryPage'
 import LeaveManagementPage from '../modules/roster-hub/leave-management/LeaveManagementPage'
@@ -97,6 +98,7 @@ export default function AppRoutes() {
         <Route path="/shop-management/qr-code" element={guarded('shop_management.qr_code', <QrCodeDisplayPage />)} />
 
         <Route path="/roster-hub/my-roster" element={guarded('roster_hub.my_roster', <MyRosterPage />)} />
+        <Route path="/roster-hub/my-availability" element={guarded('roster_hub.my_availability', <MyAvailabilityPage />)} />
         <Route path="/roster-hub/manage-roster" element={guarded('roster_hub.manage_roster', <ManageRosterPage />)} />
         <Route path="/roster-hub/history" element={guarded('roster_hub.history', <RosterHistoryPage />)} />
         <Route path="/roster-hub/leave-management" element={guarded('roster_hub.leave_management', <LeaveManagementPage />)} />

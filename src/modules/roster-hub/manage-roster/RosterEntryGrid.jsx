@@ -1,6 +1,9 @@
 import { Fragment, useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { dayHours, rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
+import { shiftConflictsWithAvailability, minutesToLabel } from '../../../lib/availability'
+import Modal from '../../../components/ui/Modal'
+import Button from '../../../components/ui/Button'
 
 // Always read the weekday off the actual date, never off its position in the
 // week — "Week starting (Mon)" is only a hint for what to pick, it doesn't
@@ -32,11 +35,38 @@ export default function RosterEntryGrid({
   entries,
   setEntries,
   onHideStaff,
+  // { profileId: { 'yyyy-MM-dd': { dayRow, windows } } } — that week's
+  // declared availability for every real staff member on this roster (see
+  // ManageRosterPage), used only for the soft conflict check below. Absent
+  // (still loading, or nobody's declared anything) just means the check
+  // never fires — never blocks entering hours.
+  availabilityByProfile,
 }) {
   // "+ Add row" placeholders for a casual/one-off name not in Staff
   // Information yet. Keyed by a stable id (not by the typed name) so
   // typing into the Name field doesn't remount the row on every keystroke.
   const [manualRows, setManualRows] = useState([])
+
+  // Jeff, 2026-09: "排時間的時候如果跟該員的available time有衝突的話，也會
+  // 跳出警示窗提示該時間不在該員的available time裡並進行確認(還是可以排只是
+  // 會提示...班表可以正常先排)" — soft/overridable: the hours the manager
+  // typed are already saved in `entries` by the time this fires (on blur),
+  // this dialog is purely a heads-up they click past, never something that
+  // reverts or blocks the entry.
+  const [conflictWarning, setConflictWarning] = useState(null)
+
+  function checkConflict(row, date) {
+    if (!row.profileId || !availabilityByProfile) return
+    const entry = entries.find((e) => matches(row, e) && e.date === date)
+    const start = entry?.startTime
+    const end = entry?.endTime
+    if (start === '' || start == null || end === '' || end == null) return
+    const avail = availabilityByProfile[row.profileId]?.[date]
+    if (!avail) return
+    if (shiftConflictsWithAvailability(Number(start), Number(end), avail.dayRow, avail.windows)) {
+      setConflictWarning({ name: row.name, date, start: Number(start), end: Number(end) })
+    }
+  }
 
   const importedNames = useMemo(
     () => Array.from(new Set(entries.filter((e) => !e.profileId && e.staffName).map((e) => e.staffName))),
@@ -236,6 +266,7 @@ export default function RosterEntryGrid({
                   removeRow={removeRow}
                   total={total}
                   wkd={wkd}
+                  onCheckConflict={checkConflict}
                 />
               )
             })}
@@ -281,6 +312,7 @@ export default function RosterEntryGrid({
                 removeRow={removeRow}
                 total={total}
                 wkd={wkd}
+                onCheckConflict={checkConflict}
               />
             )
           })}
@@ -298,11 +330,31 @@ export default function RosterEntryGrid({
           For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
         </span>
       </div>
+
+      <Modal
+        open={!!conflictWarning}
+        onClose={() => setConflictWarning(null)}
+        title="Outside declared availability"
+        footer={
+          <Button variant="secondary" onClick={() => setConflictWarning(null)}>
+            OK, schedule it anyway
+          </Button>
+        }
+      >
+        {conflictWarning && (
+          <p className="text-sm text-gray-600">
+            {conflictWarning.name}'s shift on {format(parseISO(conflictWarning.date), 'EEE d MMM')} (
+            {minutesToLabel(Math.round(conflictWarning.start * 60))} – {minutesToLabel(Math.round(conflictWarning.end * 60))}) falls
+            outside the availability they declared for that day. You can still keep this shift — this is just a
+            heads-up in case their availability changed but hasn't been updated here yet.
+          </p>
+        )}
+      </Modal>
     </div>
   )
 }
 
-function HourInput({ value, onChange, disabled, className = '', title }) {
+function HourInput({ value, onChange, onBlur, disabled, className = '', title }) {
   return (
     <input
       type="number"
@@ -313,11 +365,12 @@ function HourInput({ value, onChange, disabled, className = '', title }) {
       className={`input !py-1 text-center ${className}`}
       value={value === '' || value == null ? '' : value}
       onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+      onBlur={onBlur}
     />
   )
 }
 
-function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd }) {
+function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -366,6 +419,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   value={entry?.startTime}
                   disabled={nameEmpty}
                   onChange={(v) => updateCell(row, date, { startTime: v })}
+                  onBlur={() => onCheckConflict?.(row, date)}
                   className={notQualified ? 'text-red-600 font-medium' : ''}
                 />
               </td>
@@ -374,6 +428,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   value={entry?.endTime}
                   disabled={nameEmpty}
                   onChange={(v) => updateCell(row, date, { endTime: v })}
+                  onBlur={() => onCheckConflict?.(row, date)}
                   className={notQualified ? 'text-red-600 font-medium' : ''}
                 />
               </td>
@@ -418,7 +473,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
 // instead of two wide table rows. Wk/WKD totals still reflect the whole
 // week (computed the same way as desktop) so switching days doesn't lose
 // sight of the running total.
-function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd }) {
+function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -460,6 +515,7 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
             value={entry?.startTime}
             disabled={nameEmpty}
             onChange={(v) => updateCell(row, date, { startTime: v })}
+            onBlur={() => onCheckConflict?.(row, date)}
             className={notQualified ? 'text-red-600 font-medium' : ''}
           />
         </label>
@@ -469,6 +525,7 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
             value={entry?.endTime}
             disabled={nameEmpty}
             onChange={(v) => updateCell(row, date, { endTime: v })}
+            onBlur={() => onCheckConflict?.(row, date)}
             className={notQualified ? 'text-red-600 font-medium' : ''}
           />
         </label>

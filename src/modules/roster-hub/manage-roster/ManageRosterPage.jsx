@@ -7,6 +7,7 @@ import Button from '../../../components/ui/Button'
 import RosterEntryGrid from './RosterEntryGrid'
 import UnderstaffedWarnings from './UnderstaffedWarnings'
 import ImportReconcileModal from './ImportReconcileModal'
+import StaffAvailabilityModal from './StaffAvailabilityModal'
 import {
   downloadRosterTemplate,
   parseRosterGrid,
@@ -19,6 +20,7 @@ import {
   pendingRosterName,
 } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
+import { loadWeekAvailabilityForProfiles } from '../../../lib/availability'
 
 export default function ManageRosterPage() {
   const { currentStoreId, accessibleStores, profile, refreshRosterUpdates, refreshBulletinUpdates } = useAuth()
@@ -45,6 +47,14 @@ export default function ManageRosterPage() {
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const actionMenuRef = useRef(null)
   const fileInputRef = useRef(null)
+  // "View Staff's Availability" — read-only, sits beside the Action
+  // dropdown rather than inside it since it's a lookup, not a
+  // destructive/file operation the way the other three menu items are.
+  const [availabilityModalOpen, setAvailabilityModalOpen] = useState(false)
+  // Feeds RosterEntryGrid's soft "outside declared availability" warning
+  // (task 29) — refetched whenever the staff list or the week being edited
+  // changes, so the check is always against the right week's declarations.
+  const [availabilityByProfile, setAvailabilityByProfile] = useState({})
 
   useEffect(() => {
     if (!actionMenuOpen) return
@@ -170,6 +180,23 @@ export default function ManageRosterPage() {
       )
     })()
   }, [location.state])
+
+  useEffect(() => {
+    if (!weekStart || !staff.length) {
+      setAvailabilityByProfile({})
+      return
+    }
+    let cancelled = false
+    loadWeekAvailabilityForProfiles(
+      staff.map((s) => s.id),
+      weekStart
+    ).then((result) => {
+      if (!cancelled) setAvailabilityByProfile(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [weekStart, staff])
 
   const weekDates = weekStart ? Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(weekStart), i), 'yyyy-MM-dd')) : []
   // Pending staff show up in the downloadable template and "current grid"
@@ -436,6 +463,10 @@ export default function ManageRosterPage() {
           <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
         </label>
 
+        <Button variant="secondary" onClick={() => setAvailabilityModalOpen(true)} disabled={!weekStart}>
+          View Staff's Availability
+        </Button>
+
         {/* Download template / Upload Excel / Export current grid, merged
             into one dropdown so the toolbar isn't three separate buttons —
             pick one and it runs immediately, same as before. */}
@@ -494,6 +525,7 @@ export default function ManageRosterPage() {
         entries={entries}
         setEntries={setEntries}
         onHideStaff={persistHideStaff}
+        availabilityByProfile={availabilityByProfile}
       />
       <UnderstaffedWarnings entries={entries} rules={rules} />
 
@@ -518,6 +550,15 @@ export default function ManageRosterPage() {
           known={importReview.known}
           onCancel={() => setImportReview(null)}
           onConfirm={confirmReview}
+        />
+      )}
+
+      {weekStart && (
+        <StaffAvailabilityModal
+          open={availabilityModalOpen}
+          onClose={() => setAvailabilityModalOpen(false)}
+          staff={staff}
+          weekStart={weekStart}
         />
       )}
     </div>
