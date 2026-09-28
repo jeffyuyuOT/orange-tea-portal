@@ -167,32 +167,38 @@ export const ROLE_LABELS = {
 // Roles that shouldn't show up in a "pick a staff member" list — training is
 // a weekly-code account with its own separate content visibility (not
 // someone whose study/quiz/clock-in progress a manager reviews),
-// qr_code_maker is a device account, not a person at all, and developer is
-// usually Jeff's own account for the payroll app, not scheduled staff.
+// qr_code_maker is a device account, not a person at all, and accountant is
+// an external bookkeeper's login, not a real front-line staff member.
 // Shared by every such picker (Learning Tracker, Staff Time Logs, Staff
 // Information, …) so they can't drift apart on which roles count as "real
-// staff" — EXCEPT roster contexts, which use NON_ROSTER_STAFF_ROLES below
-// instead, because a developer account genuinely can be scheduled and
-// shown on the roster like a real staff member once User Management
-// assigns it a store (Jeff: "jeff chuang有勾取Also on the roster at
-// sunnybank, toowong, 和brookside，但班表跟名字排序都沒看到" — that turned
-// out to be this same exclusion, reused a bit too broadly).
-// accountant joined this list for the same reason as qr_code_maker: it's
-// an external bookkeeper's login, not a real front-line staff member, so
-// it shouldn't clutter a "pick a staff member" list either.
-export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'developer', 'accountant']
+// staff".
+//
+// developer used to be excluded here too ("usually Jeff's own account for
+// the payroll app, not scheduled staff") — but a developer account can
+// genuinely BE a real front-line staff member with actual shifts, the same
+// as anyone else, once User Management assigns it a store. That wrong
+// assumption already caused this exact list to wrongly hide a developer
+// account from the roster once (Jeff: "jeff chuang有勾取Also on the roster
+// at sunnybank, toowong, 和brookside，但班表跟名字排序都沒看到"), which is
+// why NON_ROSTER_STAFF_ROLES below was created, carving developer back in
+// for roster contexts specifically. The same mistake then resurfaced here,
+// hiding a developer account from Learning Tracker too (Jeff: "jeff
+// chuang沒有在learning tracker裡所以沒辦法qualified") — since every picker
+// that shares THIS list has the identical "real staff, real progress to
+// track" reasoning the roster fix already established, developer is now
+// dropped from here for good instead of being carved out one picker at a
+// time as each one gets reported. A developer account being hidden from
+// role PICKERS in User Management (so admin can't see/assign "Developer"
+// as a role at all) is a separate, narrower rule — see visibleRoleEntries()
+// below — and is unaffected by this.
+export const NON_PICKABLE_STAFF_ROLES = ['training', 'qr_code_maker', 'accountant']
 
-// Manage Roster / Roster Staff Order / roster history & multi-store
-// exports use this narrower list instead of NON_PICKABLE_STAFF_ROLES
-// above — same reasoning for training (never actually works a shift) and
-// qr_code_maker (a device, not a person), but developer is deliberately
-// left OUT here: unlike the other pickers, a developer account is meant
-// to be schedulable on the roster once it's assigned to a store via
-// User Management's "Also on the roster at" checkboxes, the same as any
-// other role.
-// accountant is excluded here too, unlike developer — a bookkeeper login
-// is never scheduled or shown on a roster, even once assigned to a store.
-export const NON_ROSTER_STAFF_ROLES = ['training', 'qr_code_maker', 'accountant']
+// Manage Roster / Roster Staff Order / roster history & multi-store exports
+// use this — kept as its own named export (even though it's the same list
+// as NON_PICKABLE_STAFF_ROLES above now) since it's specifically about who
+// can be scheduled/shown on a roster, which could legitimately diverge from
+// "who's a real staff member" again in the future without that being a bug.
+export const NON_ROSTER_STAFF_ROLES = NON_PICKABLE_STAFF_ROLES
 
 // Every ROLE_LABELS entry EXCEPT 'developer', unless the viewer IS a
 // developer. Used everywhere a role picker is shown (User Management's

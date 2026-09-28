@@ -21,7 +21,7 @@ import {
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 
 export default function ManageRosterPage() {
-  const { currentStoreId, accessibleStores, profile, refreshRosterUpdates } = useAuth()
+  const { currentStoreId, accessibleStores, profile, refreshRosterUpdates, refreshBulletinUpdates } = useAuth()
   const location = useLocation()
   const [weekStart, setWeekStart] = useState('')
   const [entries, setEntries] = useState([])
@@ -381,6 +381,15 @@ export default function ManageRosterPage() {
             // would never see the Sidebar badge light up until they reload
             // or log back in. This makes it show immediately in this tab.
             await refreshRosterUpdates()
+            // Jeff (2026-09): hasBulletinUpdates (the Sidebar's Bulletin dot)
+            // had the exact same gap — BulletinPage.jsx itself refreshes it
+            // right after someone reads something there, but nothing ever
+            // told it a roster was just PUBLISHED from this entirely
+            // different page, so publishing here never lit the dot up until
+            // a reload/relogin recomputed it from scratch ("有新的內容
+            // bulletin分頁也沒有紅點"). Same fix, same reasoning as the line
+            // just above.
+            await refreshBulletinUpdates()
           }
         }
       }

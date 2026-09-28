@@ -486,12 +486,28 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
 
         const byName = new Map(staff.map((s) => [rosterDisplayName(s).toLowerCase(), s]))
 
+        // Jeff (2026-09): the row-loop below used to only ever skip a blank
+        // Name cell or the literal footer "Total" row — fine as long as
+        // every non-blank Name cell really was a person. That stopped being
+        // true once the hour-less-name fix just above started keeping a
+        // name alive even with zero data: his file's duplicated-second-copy
+        // block (see the dedup comment further down) repeats its OWN title
+        // row (the store's name, e.g. "Brookside") and its own "Name" header
+        // cell partway down the sheet, and both are non-blank, zero-data
+        // "name" cells exactly like a genuinely new hour-less employee would
+        // be — so without this, they'd now get pushed through as bogus
+        // "new person" placeholders (Jeff would be asked to add a phantom
+        // "Brookside" and "Name" to Pending staff). Neither can ever be a
+        // real person's name, so both are skipped outright here, the same
+        // way "Total" already was.
+        const skipNames = new Set(['total', 'name', (storeName || '').trim().toLowerCase()].filter(Boolean))
+
         const entries = []
         let i = firstDataRow
         while (i < aoa.length) {
           const row = aoa[i] ?? []
           const name = String(row[NAME_COL] ?? '').trim()
-          if (!name || name.toLowerCase() === 'total') {
+          if (!name || skipNames.has(name.toLowerCase())) {
             i += 1
             continue
           }
@@ -509,12 +525,14 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
             i += 1
           }
           const match = byName.get(name.toLowerCase())
+          let hadAnyData = false
           weekDates.forEach((date, di) => {
             const c = dayCols[di]
             const startTime = parseHourCell(row[c])
             const endTime = parseHourCell(row[c + 1])
             const breakHours = breakRow ? parseHourCell(breakRow[c]) : ''
             if (startTime === '' && endTime === '' && breakHours === '') return
+            hadAnyData = true
             entries.push({
               profileId: match?.id ?? '',
               staffName: match ? rosterDisplayName(match) : name,
@@ -525,6 +543,25 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
               notes: '',
             })
           })
+          // Jeff (2026-09): a row with a real name but literally no hours
+          // filled in for ANY day that week (someone new whose shifts just
+          // haven't started yet, or a manager who typed the name ahead of
+          // filling in hours) used to vanish from the import completely —
+          // zero entries for that name meant it never even reached
+          // findsNeedingReview below, so it could never be offered for
+          // Pending staff either ("brookside的leah沒有匯入" — Leah's row in
+          // his file had a name but every S/E/Break cell blank). An
+          // already-known person (`match` truthy) doesn't need this: they
+          // already show up on the grid via `staff` regardless of hours. So
+          // this only keeps a genuinely unmatched, hour-less name alive — as
+          // a zero-hour placeholder entry that ManageRosterPage's doPersist
+          // row filter (`startTime !== '' && endTime !== ''`) strips back
+          // out before anything is ever written to roster_entries — purely
+          // so the name itself survives to the same new-name review /
+          // Pending-staff flow as anyone whose hours WERE filled in.
+          if (!hadAnyData && !match) {
+            entries.push({ profileId: '', staffName: name, date: weekDates[0], startTime: '', endTime: '', breakHours: '', notes: '' })
+          }
         }
         // Jeff (2026-09): his own master roster file turned out to have the
         // ENTIRE grid duplicated a second time further down the same sheet

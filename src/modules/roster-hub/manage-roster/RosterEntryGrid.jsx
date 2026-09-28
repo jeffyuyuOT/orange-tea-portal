@@ -131,7 +131,27 @@ export default function RosterEntryGrid({
   }
 
   function renameRow(row, newName) {
-    setEntries((prev) => prev.map((e) => (matches(row, e) ? { ...e, staffName: newName } : e)))
+    // A manual "+ Add row" name used to only enter `entries` (and therefore
+    // ManageRosterPage's Save/Submit "is this a new person?" check) once an
+    // hour was actually typed for it — a name typed in and saved with no
+    // hours yet (someone new whose first shift isn't this week) silently
+    // vanished on save, never even offered for Pending staff (Jeff,
+    // 2026-09: "add row輸入新的名字儲存也沒有將新名字加入pending staff跟排
+    // 序裡"). Fix: the moment a manual row gets a non-blank name and doesn't
+    // have any entries yet, add a zero-hour placeholder for it too — same
+    // trick as the Excel-import fix for an hour-less name (see excelRoster.js
+    // parseRosterGrid) — so it reaches that same review flow. It's stripped
+    // back out by doPersist's row filter (start/end both required) before
+    // anything is written to roster_entries, so it can never create a bogus
+    // shift on its own.
+    const hasEntries = entries.some((e) => matches(row, e))
+    setEntries((prev) => {
+      const relabeled = prev.map((e) => (matches(row, e) ? { ...e, staffName: newName } : e))
+      if (newName.trim() && !hasEntries) {
+        return [...relabeled, { profileId: row.profileId, staffName: newName, date: weekDates[0], startTime: '', endTime: '', breakHours: '', notes: '' }]
+      }
+      return relabeled
+    })
     setManualRows((prev) => prev.map((m) => (m.key === row.key ? { ...m, name: newName } : m)))
   }
 

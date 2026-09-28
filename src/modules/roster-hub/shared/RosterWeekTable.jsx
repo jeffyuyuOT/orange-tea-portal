@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { addDays, format, parseISO } from 'date-fns'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
-import { rosterDisplayName } from '../../../lib/excelRoster'
+import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 
 // Renders one week's schedule as a grid: staff down the side, weekdays
 // across the top. Used by both "My Roster" (filtered to one staff member)
@@ -10,6 +10,8 @@ import { rosterDisplayName } from '../../../lib/excelRoster'
 export default function RosterWeekTable({ period, onlyProfileId }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
+  const [orderByProfile, setOrderByProfile] = useState(new Map())
+  const [orderByPendingName, setOrderByPendingName] = useState(new Map())
 
   useEffect(() => {
     // No published period for this week (e.g. next week's roster hasn't
@@ -36,18 +38,29 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     // roster_display_name is per-store — fetch it for THIS period's store
     // separately and fold it onto each entry's profile below, since a
     // roster_entries row itself carries no store_id of its own.
+    // roster_order (migration 0059_roster_staff_order_and_hide.sql) comes
+    // from the same user_stores row for real staff, and from
+    // roster_pending_staff for a not-yet-formal name — both share one
+    // numbering space (Roster Hub > Setting > Roster Staff Order reorders
+    // them together), matched onto ad-hoc `staff_name_raw` entries by name
+    // below since roster_entries itself has no pending-staff id to join on.
     Promise.all([
       q.order('work_date'),
-      supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', period.store_id),
-    ]).then(([{ data }, { data: nameRows }]) => {
+      supabase.from('user_stores').select('profile_id, roster_display_name, roster_order').eq('store_id', period.store_id),
+      supabase.from('roster_pending_staff').select('display_name, roster_display_name, roster_order').eq('store_id', period.store_id),
+    ]).then(([{ data }, { data: nameRows }, { data: pendingRows }]) => {
       if (!active) return
       const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
+      const orderByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_order]))
+      const orderByPendingName = new Map((pendingRows ?? []).map((p) => [pendingRosterName(p).toLowerCase(), p.roster_order]))
       setEntries(
         (data ?? []).map((e) => ({
           ...e,
           profiles: e.profiles ? { ...e.profiles, roster_display_name: nameByProfile.get(e.profile_id) } : e.profiles,
         }))
       )
+      setOrderByProfile(orderByProfile)
+      setOrderByPendingName(orderByPendingName)
       setLoading(false)
     })
     return () => {
@@ -60,12 +73,19 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
   if (!entries.length) return <EmptyState label="No shifts recorded for this week." />
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(parseISO(period.week_start_date), i))
-  // Real staff (has a profile_id) first, then everyone else (Pending
-  // staff/imported/manual names, which roster_entries can't tell apart from
-  // each other) — both groups alphabetical by the same display name shown
-  // on screen. This is the same rule Manage Roster's staff list now sorts
-  // by (see ManageRosterPage.jsx), so this table lines up with it instead
-  // of showing names in Supabase's arbitrary default order.
+  // Sorted by Roster Hub > Setting > Roster Staff Order (migration
+  // 0059_roster_staff_order_and_hide.sql) — the same order Manage Roster's
+  // own grid uses — instead of alphabetically: Jeff (2026-09) pointed out
+  // this table (shared by Bulletin Board's Roster view and My Roster) had
+  // fallen out of step with that setting, so a manager reordering staff
+  // there never showed up here. A real staff member's order comes from
+  // their user_stores row; a not-yet-formal name's comes from
+  // roster_pending_staff, matched by name since roster_entries only carries
+  // a raw typed name, not a pending-staff id — both share one numbering
+  // space, so they interleave correctly rather than "real staff always
+  // first". Anyone with no order on record at all (a one-off name typed
+  // straight into Manage Roster that was never added to Pending staff)
+  // falls back to alphabetical, after everyone with a real position.
   const staffNames = Array.from(
     new Map(
       entries.map((e) => [
@@ -74,11 +94,13 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
           name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
           isStaff: !!e.profile_id,
           qualified: e.profiles?.qualified === true,
+          order: e.profile_id ? orderByProfile.get(e.profile_id) : orderByPendingName.get((e.staff_name_raw || '').toLowerCase()),
         },
       ])
     )
   ).sort(([, a], [, b]) => {
-    if (a.isStaff !== b.isStaff) return a.isStaff ? -1 : 1
+    if (a.order != null && b.order != null) return a.order - b.order
+    if ((a.order != null) !== (b.order != null)) return a.order != null ? -1 : 1
     return (a.name || '').localeCompare(b.name || '')
   })
 
