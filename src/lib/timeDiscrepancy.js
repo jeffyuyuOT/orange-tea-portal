@@ -19,6 +19,11 @@ function todayStr() {
   return format(new Date(), 'yyyy-MM-dd')
 }
 
+function nowMinutesOfDay() {
+  const now = new Date()
+  return now.getHours() * 60 + now.getMinutes()
+}
+
 // end_time - start_time, net of break_half_hours (1 unit = 30 min — same
 // unit RosterEntryGrid/excelRoster.js already use), in minutes. Handles a
 // shift that crosses midnight (end_time < start_time) by adding a day. null
@@ -33,6 +38,22 @@ export function scheduledNetMinutes(entry) {
   return Math.max(0, mins - breakMins)
 }
 
+// Minutes-since-midnight this shift is scheduled to END, for deciding
+// whether "today" has reached it yet — separate from scheduledNetMinutes
+// above, which returns a DURATION, not a clock time. Returns null for a
+// shift that crosses midnight (end_time < start_time): by wall-clock, that
+// shift can never "already be over" within the same calendar day, so today
+// should keep being skipped for it same as before this fix.
+function shiftEndMinutesOfDay(entry) {
+  if (!entry?.start_time || !entry?.end_time) return null
+  const [sh, sm] = entry.start_time.slice(0, 5).split(':').map(Number)
+  const [eh, em] = entry.end_time.slice(0, 5).split(':').map(Number)
+  const startMinutes = sh * 60 + sm
+  const endMinutes = eh * 60 + em
+  if (endMinutes < startMinutes) return null
+  return endMinutes
+}
+
 // Returns { [profileId]: { days: [{ date, scheduledMinutes, actualMinutes, diffMinutes }], latestSignal } }
 // — only for profiles that actually have at least one flagged day in the
 // window. `latestSignal` is an ISO timestamp (or null) — the most recent of
@@ -44,13 +65,22 @@ export function scheduledNetMinutes(entry) {
 // 'submitted') — a draft shift isn't a real commitment staff were told to
 // work, so it's not a fair thing to flag someone's punches against.
 //
-// Today itself, and any day where this profile still has an open (no
-// clock-out yet) session, are skipped — the day isn't over yet, so a
-// mismatch there would just mean "hasn't clocked out", not a real problem.
+// Today's own shifts are only skipped while they're still SCHEDULED to be
+// in progress (current wall-clock time hasn't reached that shift's own
+// end_time yet) — once a shift should already be over, a no-show or an
+// early clock-out today is just as real a discrepancy as any past day's
+// (Jeff, 2026-09-29: "brookside的gretl為什麼今天沒有clock in/out但沒有提示
+// 跟班表不一樣" / "ava也是一樣" — both had already-finished shifts today
+// with zero punches and neither was flagged, because this used to skip
+// TODAY wholesale regardless of whether the shift had actually ended).
+// Any day where this profile still has an open (no clock-out yet) session
+// is still always skipped — that's someone still genuinely on shift right
+// now, not a discrepancy.
 export async function getStaffTimeDiscrepancies(storeId, profileIds) {
   if (!storeId || !profileIds?.length) return {}
 
   const today = todayStr()
+  const nowMinutes = nowMinutesOfDay()
   const fromDate = format(addDays(new Date(), -(DISCREPANCY_WINDOW_DAYS - 1)), 'yyyy-MM-dd')
   // Periods are weekly (Monday-start) — a period covering the window's start
   // date can begin up to 6 days before it.
@@ -120,7 +150,11 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
 
   const result = {}
   for (const entry of entryRows ?? []) {
-    if (!entry.profile_id || entry.work_date >= today) continue // today itself isn't over yet
+    if (!entry.profile_id || entry.work_date > today) continue // future shift — nothing to compare yet
+    if (entry.work_date === today) {
+      const endMinutes = shiftEndMinutesOfDay(entry)
+      if (endMinutes == null || nowMinutes < endMinutes) continue // shift hasn't finished yet (or crosses midnight)
+    }
     if (openDatesByProfile.get(entry.profile_id)?.has(entry.work_date)) continue // still clocked in that day
 
     const scheduledMinutes = scheduledNetMinutes(entry)
