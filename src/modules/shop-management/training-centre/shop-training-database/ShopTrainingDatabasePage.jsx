@@ -124,8 +124,19 @@ export default function ShopTrainingDatabasePage() {
                     Copy to store…
                   </Button>
                 )}
-                <Button variant="danger" onClick={() => remove(item.id)}>
-                  Delete
+                {/* Jeff, 2026-09-30: "手機板的...shop training database的
+                    商品刪除鍵改成X，這樣可以讓前面空間大一點" — icon-only
+                    instead of the "Delete" text label so this shrink:0
+                    button cluster takes less width, leaving more room for
+                    the title button to its left (min-w-0 flex-1, above). */}
+                <Button
+                  variant="danger"
+                  className="px-2.5"
+                  title="Delete"
+                  aria-label="Delete"
+                  onClick={() => remove(item.id)}
+                >
+                  ✕
                 </Button>
               </div>
             </div>

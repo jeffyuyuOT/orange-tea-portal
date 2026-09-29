@@ -184,8 +184,21 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
                     <Button variant="secondary" onClick={() => copy(item)}>
                       Copy
                     </Button>
-                    <Button variant="danger" onClick={() => remove(item.id)}>
-                      Delete
+                    {/* Jeff, 2026-09-30: "手機板的...formula database的商品
+                        刪除鍵改成X，這樣可以讓前面空間大一點" — icon-only
+                        instead of the "Delete" text label, so this fixed-width
+                        button cluster takes less room and the item name button
+                        to its left (flex-1, the only element that grows/
+                        shrinks in this row) gets more space on a narrow
+                        screen. Same treatment as ShopTrainingDatabasePage.jsx. */}
+                    <Button
+                      variant="danger"
+                      className="px-2.5"
+                      title="Delete"
+                      aria-label="Delete"
+                      onClick={() => remove(item.id)}
+                    >
+                      ✕
                     </Button>
                   </div>
                 )}

@@ -1766,13 +1766,40 @@ async function loadAllData(){
     };
     await idbPut("settings", currentSettings);
   }
-  currentStores = await idbAll("stores");
+  currentStores = sortStores(await idbAll("stores"));
+  await ensureStoreOrder(); // one-off backfill for stores saved before the order feature existed
   currentEmployees = await idbAll("employees");
   await loadRealStores();
 }
+// Existing stores (saved before this feature) have no `.order` at all --
+// give each one its current (creation-order) position as a starting value,
+// once, so the very first ↑/↓ click has a real distinct number to swap
+// against instead of silently doing nothing (undefined <-> undefined).
+// currentStores is already sortStores()-sorted when this runs, and a
+// stable sort with every key missing (treated as 0) leaves creation order
+// untouched -- so this backfill doesn't visibly reorder anything for Jeff,
+// it just makes the order concrete.
+async function ensureStoreOrder(){
+  if(!currentStores.some(s=>s.order==null)) return;
+  for(let i=0;i<currentStores.length;i++){
+    if(currentStores[i].order==null){ currentStores[i].order = i; await idbPut("stores", currentStores[i]); }
+  }
+}
 async function saveSettings(){ await idbPut("settings", currentSettings); }
-async function saveStore(s){ await idbPut("stores", s); currentStores = await idbAll("stores"); autoBackupIfEnabled(); }
-async function deleteStoreRec(id){ await idbDelete("stores", id); currentStores = await idbAll("stores"); }
+// Jeff, 2026-09-30: "payroll的分店管理裡可以設置分店排序，計算薪水紀錄表的tab
+// 順序按照這裡的順序" -- currentStores is kept sorted by `.order` (same
+// swap-based manual-order pattern already used for employees, see
+// reorderEmp()/renderEmpList()) everywhere it's (re)loaded, so every list
+// built straight from currentStores (分店管理's own table, the QLD public
+// holiday store checkboxes, 支援款項紀錄's store tabs) follows this order
+// for free with no per-call-site sorting needed. Tab 1's calc-sheet store
+// tabs are the one exception -- see tab1Html()'s storeIds, which sorts
+// Object.keys(ws.stores) against this same `.order` separately, since that
+// list's underlying order comes from whatever sequence stores were
+// imported/added to that specific calc sheet, not from currentStores itself.
+function sortStores(stores){ return [...stores].sort((a,b)=>(a.order??0)-(b.order??0)); }
+async function saveStore(s){ await idbPut("stores", s); currentStores = sortStores(await idbAll("stores")); autoBackupIfEnabled(); }
+async function deleteStoreRec(id){ await idbDelete("stores", id); currentStores = sortStores(await idbAll("stores")); }
 async function saveEmployee(e){ await idbPut("employees", e); currentEmployees = await idbAll("employees"); autoBackupIfEnabled(); }
 
 /* --- Staff Information 同步 (見 NON_PAYROLL_STAFF_ROLES 上方註解) --- */
@@ -2184,7 +2211,20 @@ function tab1Html(){
     </div>`;
   }
   const ws = workingSheet;
-  const storeIds = Object.keys(ws.stores||{});
+  // Jeff, 2026-09-30: "計算薪水紀錄表的tab順序按照這裡的順序" -- this calc
+  // sheet's own store list (ws.stores) has no ordering of its own (its key
+  // order just reflects whatever sequence stores were imported/added to
+  // THIS sheet), so sort it against currentStores' `.order` (set in 分店
+  // 管理, see sortStores()) instead. A sid with no match in currentStores
+  // (shouldn't normally happen -- stores are always created/synced into
+  // currentStores first) sorts after every matched store, in its original
+  // order, rather than crashing or jumping to the front.
+  const storeOrderIndex = new Map(currentStores.map((s,i)=>[s.id,i]));
+  const storeIds = Object.keys(ws.stores||{}).sort((a,b)=>{
+    const ia = storeOrderIndex.has(a) ? storeOrderIndex.get(a) : Infinity;
+    const ib = storeOrderIndex.has(b) ? storeOrderIndex.get(b) : Infinity;
+    return ia-ib;
+  });
   if(!activeOutputStoreId || !ws.stores[activeOutputStoreId]) activeOutputStoreId = storeIds[0]||null;
   const statusPill = ws.status==="completed" ? `<span class="pill completed">已完成</span>` : `<span class="pill draft">待提交</span>`;
   let storeTabsHtml = "";
@@ -2502,7 +2542,8 @@ function wireTab1(){
         const range = await defaultDateRangeForNew();
         const skeleton = await buildSkeletonForNewSheet(range.from, range.to);
         workingSheet = {id:null, dateFrom:range.from, dateTo:range.to, status:"draft", stores:skeleton, notes:[]};
-        activeOutputStoreId = Object.keys(skeleton)[0]||null; editingOutput=false;
+        // Jeff, 2026-09-30: let tab1Html() pick the sorted first tab.
+        activeOutputStoreId = null; editingOutput=false;
         renderMain();
       } else if(v==="loadDraft" || v==="loadCompleted"){
         const status = v==="loadDraft" ? "draft" : "completed";
@@ -2510,7 +2551,11 @@ function wireTab1(){
         const list = all.filter(s=>s.status===status).sort((a,b)=> a.dateFrom<b.dateFrom?1:-1);
         showSheetPickerModal(list, (sheet)=>{
           workingSheet = JSON.parse(JSON.stringify(sheet));
-          activeOutputStoreId = Object.keys(workingSheet.stores)[0]||null;
+          // Jeff, 2026-09-30: let tab1Html() pick the initial active tab --
+          // it already sorts storeIds by 分店管理's order and falls back to
+          // storeIds[0] whenever activeOutputStoreId is null, so the
+          // highlighted tab on load matches the leftmost (first-in-order) tab.
+          activeOutputStoreId = null;
           editingOutput=false;
           renderMain();
         });
@@ -3009,7 +3054,7 @@ async function ingestParsedStores(parsedStores, warnings){
     let isNewStore = false;
     if(!store){
       const id = "store_"+await nextId("store");
-      store = {id, name: ps.storeName||("分店"+id), publicHolidays:[]};
+      store = {id, name: ps.storeName||("分店"+id), publicHolidays:[], order: currentStores.length};
       isNewStore = true;
     }
     pending.push({ps, store, isNewStore});
@@ -3101,7 +3146,10 @@ async function ingestParsedStores(parsedStores, warnings){
     bdayNotes.forEach(n=>warnings.push(n));
     if(pendingTransfers.length) applyCrossStoreTransfers(pendingTransfers, warnings);
     if(directPools.size) applyDirectPools(directPools, warnings);
-    activeOutputStoreId = Object.keys(workingSheet.stores)[0]||activeOutputStoreId;
+    // Jeff, 2026-09-30: same as the loadDraft/loadCompleted picker above --
+    // let tab1Html() choose the sorted first tab instead of Object.keys()'
+    // insertion order.
+    activeOutputStoreId = null;
     renderMain();
     const warnBox = document.getElementById("t1-import-warn");
     if(warnBox && warnings.length){
@@ -3532,7 +3580,8 @@ function renderT2Detail(){
   </div>`;
   $("#t2-import").onclick = ()=>{
     workingSheet = JSON.parse(JSON.stringify(s));
-    activeOutputStoreId = Object.keys(workingSheet.stores)[0]||null;
+    // Jeff, 2026-09-30: same as above -- let tab1Html() pick the sorted first tab.
+    activeOutputStoreId = null;
     editingOutput=false;
     activeTopTab="t1";
     renderApp();
@@ -3699,12 +3748,15 @@ function renderBranchMgmt(container){
   container.innerHTML = `
   <div class="panel">
     <div class="row between"><h3>分店管理</h3><button class="primary" id="addstore">新增分店</button></div>
-    <div class="table-wrap"><table><thead><tr><th>分店名稱</th><th>員工數</th><th>公眾假期數</th><th></th></tr></thead><tbody>
-      ${currentStores.map(s=>{
+    <div class="small muted" style="margin-bottom:6px;">用 ↑↓ 調整的順序，會套用到「薪水計算表」頁分店分頁的排列順序。</div>
+    <div class="table-wrap"><table><thead><tr><th></th><th>分店名稱</th><th>員工數</th><th>公眾假期數</th><th></th></tr></thead><tbody>
+      ${currentStores.map((s,i)=>{
         const cnt = currentEmployees.filter(e=>e.storeId===s.id && !e.resignDate).length;
-        return `<tr><td>${escapeHtml(s.name)}</td><td>${cnt}</td><td>${(s.publicHolidays||[]).length}</td>
+        return `<tr>
+        <td><button class="iconbtn" data-storeup="${s.id}" ${i===0?'disabled':''}>↑</button><button class="iconbtn" data-storedown="${s.id}" ${i===currentStores.length-1?'disabled':''}>↓</button></td>
+        <td>${escapeHtml(s.name)}</td><td>${cnt}</td><td>${(s.publicHolidays||[]).length}</td>
         <td><button class="ghost" data-edit="${s.id}">編輯</button><button class="danger" data-del="${s.id}">刪除</button></td></tr>`;
-      }).join("") || `<tr><td colspan="4" class="muted">尚無分店，請點選「新增分店」</td></tr>`}
+      }).join("") || `<tr><td colspan="5" class="muted">尚無分店，請點選「新增分店」</td></tr>`}
     </tbody></table></div>
   </div>
   <div class="panel">
@@ -3722,6 +3774,8 @@ function renderBranchMgmt(container){
     <div id="qldImportResult"></div>
   </div>`;
   $("#addstore").onclick = ()=>openStoreModal(null);
+  $all("[data-storeup]",container).forEach(b=>b.onclick=()=>reorderStore(b.dataset.storeup,-1,container));
+  $all("[data-storedown]",container).forEach(b=>b.onclick=()=>reorderStore(b.dataset.storedown,1,container));
   $all("[data-edit]",container).forEach(b=>b.onclick=()=>openStoreModal(currentStores.find(s=>s.id===b.dataset.edit)));
   $all("[data-del]",container).forEach(b=>b.onclick=async ()=>{
     const has = currentEmployees.some(e=>e.storeId===b.dataset.del);
@@ -3751,9 +3805,22 @@ function renderBranchMgmt(container){
     if(resultBox) resultBox.innerHTML = `<div class="helpbox">已完成匯入。<br>${summary.map(s=>escapeHtml(s)).join("<br>")}</div>`;
   };
 }
+// Jeff, 2026-09-30: same swap-based manual-order pattern as reorderEmp() --
+// find the store's neighbour in currentStores (already sortStores()-sorted),
+// swap their `.order` values, persist both, then re-render this table so
+// the ↑/↓ buttons' disabled state (top/bottom row) is recomputed too.
+async function reorderStore(id, dir, container){
+  const idx = currentStores.findIndex(s=>s.id===id);
+  const swapWith = currentStores[idx+dir];
+  if(!swapWith) return;
+  const a = currentStores[idx], b = swapWith;
+  const tmp = a.order; a.order=b.order; b.order=tmp;
+  await saveStore(a); await saveStore(b);
+  renderBranchMgmt(container);
+}
 function openStoreModal(store){
   const isNew = !store;
-  store = store ? JSON.parse(JSON.stringify(store)) : {id:null, name:"", publicHolidays:[]};
+  store = store ? JSON.parse(JSON.stringify(store)) : {id:null, name:"", publicHolidays:[], order: currentStores.length};
   const m = openModal(`
     <div class="modal-header"><h3>${isNew?'新增分店':'編輯分店'}</h3><button class="close-x" id="mclose">✕</button></div>
     <div class="field"><label>分店名稱</label><input id="sname" value="${escapeHtml(store.name)}"></div>
@@ -4227,7 +4294,7 @@ async function commitEmployeeImport(results){
     let store = currentStores.find(s=>s.name.trim().toLowerCase()===r.storeName.trim().toLowerCase());
     if(!store){
       const id = "store_"+await nextId("store");
-      store = {id, name:r.storeName, publicHolidays:[]};
+      store = {id, name:r.storeName, publicHolidays:[], order: currentStores.length};
       await saveStore(store);
       storesCreated++;
     }
