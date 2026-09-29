@@ -65,7 +65,16 @@ export default function SupportPage() {
         .single()
       if (requestError) throw requestError
 
-      const { data: developers, error: devError } = await supabase.from('profiles').select('id').eq('role', 'developer').eq('is_active', true)
+      // Jeff, 2026-09-29: this used to be a plain `profiles` query, but a
+      // plain staff submitter's own `profiles` RLS only lets them read
+      // their OWN row (admin/shop_manager could read every row, so THEY
+      // never saw the bug) — for everyone else this silently came back
+      // empty and threw "No active developer account" even when Jeff's
+      // account was active. `active_developer_ids()` (migration
+      // 0078_support_request_active_developers.sql) is a narrow RPC that
+      // isn't gated by `profiles` RLS at all — exposes only which id(s)
+      // are the active developer/support inbox, nothing else.
+      const { data: developers, error: devError } = await supabase.rpc('active_developer_ids')
       if (devError) throw devError
       if (!developers?.length) throw new Error('No active developer account to receive this — contact Jeff directly.')
 
