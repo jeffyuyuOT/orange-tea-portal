@@ -1,6 +1,6 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { canAccessSection, canAccessPage } from '../../lib/permissions'
-import { orderedSectionEntries, orderedPageEntries } from '../../lib/sidebarOrder'
+import { orderedSectionEntries, logicalPageEntries } from '../../lib/sidebarOrder'
 import { useAuth } from '../../lib/AuthContext'
 import Badge from '../ui/Badge'
 
@@ -14,6 +14,7 @@ import Badge from '../ui/Badge'
 // in permissions.js.
 export function SidebarNavLinks({ onNavigate }) {
   const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, sidebarOrder } = useAuth()
+  const { pathname } = useLocation()
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -23,7 +24,37 @@ export function SidebarNavLinks({ onNavigate }) {
           <div key={sectionKey}>
             <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-brand-400">{section.label}</div>
             <div className="space-y-0.5">
-              {orderedPageEntries(sectionKey, sidebarOrder).map(([pageKey, pageLabel]) => {
+              {logicalPageEntries(sectionKey, sidebarOrder).map((entry) => {
+                if (entry.type === 'group') {
+                  // Jeff, 2026-09: "shop management下只要有training center，
+                  // 不要出現quiz bank跟training code" — one Sidebar row for
+                  // the whole group (see sidebarOrder.js's PAGE_GROUPS),
+                  // landing on whichever member this person can actually
+                  // reach first (in the group's own fixed order), and
+                  // staying highlighted while they're on ANY of the group's
+                  // pages — not just whichever one the link happens to
+                  // point at — since TrainingCentreLayout.jsx lets them tab
+                  // between all of them without ever leaving this row's
+                  // section of the Sidebar.
+                  const accessibleMembers = entry.pages.filter((p) => canAccessPage(effectivePages, `${sectionKey}.${p}`))
+                  if (accessibleMembers.length === 0) return null
+                  const memberPaths = accessibleMembers.map((p) => `/${sectionKey.replace(/_/g, '-')}/${p.replace(/_/g, '-')}`)
+                  const isActive = memberPaths.includes(pathname)
+                  return (
+                    <NavLink
+                      key={entry.key}
+                      to={memberPaths[0]}
+                      onClick={onNavigate}
+                      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${
+                        isActive ? 'bg-brand-500 text-white font-medium' : 'text-gray-600 hover:bg-brand-100 hover:text-brand-800'
+                      }`}
+                    >
+                      {entry.label}
+                    </NavLink>
+                  )
+                }
+
+                const { key: pageKey, label: pageLabel } = entry
                 const fullKey = `${sectionKey}.${pageKey}`
                 if (!canAccessPage(effectivePages, fullKey)) return null
                 return (

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../lib/AuthContext'
 import { SECTIONS } from '../../../lib/permissions'
-import { fetchSidebarOrder, saveSidebarOrder } from '../../../lib/sidebarOrder'
+import { fetchSidebarOrder, saveSidebarOrder, logicalPageEntries } from '../../../lib/sidebarOrder'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 
@@ -11,6 +11,17 @@ function move(arr, index, dir) {
   const next = [...arr]
   ;[next[index], next[target]] = [next[target], next[index]]
   return next
+}
+
+// A logicalPageEntries() row is either one real page key ({type:'page'}) or
+// a whole PAGE_GROUPS group folded into one row ({type:'group', pages: [...]});
+// this turns a reordered list of those rows back into the flat list of real
+// page keys pageOrder actually stores, expanding each group back into its
+// members (always in the group's own fixed canonical order — see
+// sidebarOrder.js — since that order has no independent meaning anymore
+// once the pages share one row).
+function flattenEntries(entries) {
+  return entries.flatMap((e) => (e.type === 'group' ? e.pages : [e.key]))
 }
 
 // One shared order for the whole app (migration 0055) — not per role or per
@@ -34,12 +45,17 @@ export default function SidebarOrderPanel() {
     setOrder((prev) => ({ ...prev, sectionOrder: move(prev.sectionOrder, index, dir) }))
   }
 
+  // Moves a logical row (a plain page, or a whole grouped row — see
+  // logicalPageEntries) — recomputed from `prev` inside the updater rather
+  // than from whatever `entries` render last saw, so this can't act on a
+  // stale list if state changed in between.
   function movePage(sectionKey, index, dir) {
     setMessage('')
-    setOrder((prev) => ({
-      ...prev,
-      pageOrder: { ...prev.pageOrder, [sectionKey]: move(prev.pageOrder[sectionKey] ?? [], index, dir) },
-    }))
+    setOrder((prev) => {
+      const entries = logicalPageEntries(sectionKey, prev)
+      const reordered = move(entries, index, dir)
+      return { ...prev, pageOrder: { ...prev.pageOrder, [sectionKey]: flattenEntries(reordered) } }
+    })
   }
 
   async function save() {
@@ -71,7 +87,7 @@ export default function SidebarOrderPanel() {
             // everywhere else this section is filtered — an admin reordering
             // the Sidebar shouldn't even see "Developer" listed here.
             if (sectionKey === 'developer_tools' && profile?.role !== 'developer') return null
-            const pages = order.pageOrder[sectionKey] ?? []
+            const entries = logicalPageEntries(sectionKey, order)
             const isExpanded = expanded === sectionKey
             return (
               <div key={sectionKey} className="rounded-lg border border-gray-200">
@@ -104,8 +120,8 @@ export default function SidebarOrderPanel() {
                 </div>
                 {isExpanded && (
                   <div className="space-y-1 border-t border-gray-100 p-2 pl-8">
-                    {pages.map((pageKey, j) => (
-                      <div key={pageKey} className="flex items-center gap-2">
+                    {entries.map((entry, j) => (
+                      <div key={entry.key} className="flex items-center gap-2">
                         <div className="flex shrink-0 flex-col">
                           <button
                             onClick={() => movePage(sectionKey, j, -1)}
@@ -117,14 +133,19 @@ export default function SidebarOrderPanel() {
                           </button>
                           <button
                             onClick={() => movePage(sectionKey, j, 1)}
-                            disabled={j === pages.length - 1}
+                            disabled={j === entries.length - 1}
                             className="leading-none text-gray-400 hover:text-brand-600 disabled:pointer-events-none disabled:opacity-20"
                             title="Move down"
                           >
                             ▼
                           </button>
                         </div>
-                        <span className="text-sm text-gray-600">{section.pages[pageKey]}</span>
+                        {/* A grouped row (see PAGE_GROUPS in sidebarOrder.js)
+                            moves as this one single row — its members no
+                            longer have an independently-visible order, since
+                            the Sidebar itself only ever shows the group's
+                            one link. */}
+                        <span className="text-sm text-gray-600">{entry.label}</span>
                       </div>
                     ))}
                   </div>

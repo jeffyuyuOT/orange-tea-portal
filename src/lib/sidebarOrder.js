@@ -66,6 +66,51 @@ export function orderedPageEntries(sectionKey, order) {
   return pageOrder.map((key) => [key, section.pages[key]]).filter(([, label]) => label)
 }
 
+// Some pages share one Sidebar row even though each still has its own real
+// permission key underneath (permissions.js's shop_management.quiz_bank /
+// shop_training_database / training_code, grouped visually by
+// TrainingCentreLayout.jsx's shared tab bar). Jeff, 2026-09: "shop
+// management下只要有training center，不要出現quiz bank跟training code" — one
+// row in the Sidebar for the whole group, not three. Keyed by section; each
+// entry is a synthetic group (its `key` is NOT a real page/permission key,
+// just an id for this row) folding several real page keys into one link.
+// `pages` is this group's own fixed canonical order — matches
+// TrainingCentreLayout.jsx's TABS — used to pick which member the one link
+// lands on and is independent of pageOrder/movePage (see
+// logicalPageEntries and SidebarOrderPanel.jsx, which both move/fold the
+// group as a single unit rather than the three keys separately).
+export const PAGE_GROUPS = {
+  shop_management: [
+    { key: 'training_centre', label: 'Training Centre', pages: ['quiz_bank', 'shop_training_database', 'training_code'] },
+  ],
+}
+
+// Like orderedPageEntries, but any pages belonging to a PAGE_GROUPS entry
+// for this section fold into one logical row — { type: 'group', key, label,
+// pages } — in place of however many individual { type: 'page', key, label }
+// rows they'd otherwise be, positioned wherever the first member the stored
+// order encounters falls. Sidebar.jsx (desktop + the mobile drawer share one
+// component) and SidebarOrderPanel.jsx both render off this instead of
+// orderedPageEntries directly, so they can't drift apart on which pages
+// fold into which row.
+export function logicalPageEntries(sectionKey, order) {
+  const groups = PAGE_GROUPS[sectionKey] ?? []
+  const memberToGroup = new Map(groups.flatMap((g) => g.pages.map((p) => [p, g])))
+  const seen = new Set()
+  const result = []
+  for (const [pageKey, label] of orderedPageEntries(sectionKey, order)) {
+    const group = memberToGroup.get(pageKey)
+    if (!group) {
+      result.push({ type: 'page', key: pageKey, label })
+      continue
+    }
+    if (seen.has(group.key)) continue // already folded into its row above
+    seen.add(group.key)
+    result.push({ type: 'group', key: group.key, label: group.label, pages: group.pages })
+  }
+  return result
+}
+
 // The first page (in Sidebar order) this effectivePages set can reach, as
 // a route path like "/roster-hub/my-roster" — or null if none at all.
 // Shared by RootRedirect (landing on "/", e.g. right after login) and
