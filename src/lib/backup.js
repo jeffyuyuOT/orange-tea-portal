@@ -89,7 +89,11 @@ export async function exportBackup() {
 // project, or accept that it's additive/overwriting rather than a full
 // mirror.
 const CONFLICT_KEYS = {
-  quiz_settings: 'store_id',
+  // Jeff, 2026-09-30 (migration 0079_quiz_settings_global.sql): quiz_settings
+  // (and formal_quiz_settings, though that table was never added to
+  // BACKUP_TABLES above) dropped store_id and is a global singleton now,
+  // keyed on `singleton` instead.
+  quiz_settings: 'singleton',
   ingredient_format_rules: 'ingredient_id',
   formula_item_stores: 'formula_item_id,store_id',
   formula_item_sizes: 'formula_item_id,size_id',

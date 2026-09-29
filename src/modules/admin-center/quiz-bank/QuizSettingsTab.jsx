@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
-import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
@@ -12,27 +11,65 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 // route/permission key). Renamed from QuizSettingsPage → QuizSettingsTab to
 // match: no more own <h1>/route, it just renders as tab content now.
 //
-// Same per-store settings (quiz_settings/formal_quiz_settings/
-// quiz_excluded_ingredients, all keyed by currentStoreId from useAuth())
-// this always was — switch stores from any non-Admin-Center page first if
-// you need to edit a different store's quiz settings.
+// Jeff, 2026-09-30: this went through two false starts before landing here
+// — worth recording why, so a future "let's make it per-store again" idea
+// remembers what didn't work. First: "quiz setting不是在admin通用每個店嗎?
+// 為什麼會出現分店面的情形" — this page WAS per-store (one quiz_settings/
+// formal_quiz_settings row per store_id) but Brisbane One/Underwood had
+// simply never been saved from here, silently sitting on the code's
+// hardcoded defaults while the other three stores had real tuned numbers —
+// and there was no way to even fix that, since AppShell.jsx hides the
+// header's Store Switcher on every Admin Center route (correct for the rest
+// of Admin Center, which really is global) with no substitute here. So a
+// self-contained store picker + an "All Store" bulk-apply option were added
+// directly to this tab. Then: "我覺得還是要做到全店面通用，因為有時候如果要
+// 套用某一設定到所有店就會變成頁面的所有設定都套用，因為也沒有指定哪些設定
+// 套用的功能。所以很難做到每家店管理自己的頁面，而且現在又在admin下，基本
+// 都是所有分店統一設定" — Jeff's own conclusion: since there was never a way
+// to apply just SOME settings to just SOME stores (every save is the whole
+// form, to whichever store(s) are targeted), "per-store" never bought
+// anything real — every edit ended up getting reapplied to every store
+// anyway. Combined with this page already sitting inside Admin Center,
+// which is otherwise entirely global, the honest fix is to stop pretending
+// this is per-store at all.
 //
-// Jeff, 2026-09 (later, same request as the Admin Quiz Bank reinstatement):
-// "quiz bank Importance mix將quick quiz跟formal quiz合併成一個就好...兩種
-// quiz共用一個邏輯即可" — the two previously-separate Importance Mix ratios
-// (one for Quick Quiz, one for Formal Quiz) are now ONE shared setting,
-// relabelled "Importance mix — (% of questions)". No schema change: still
-// written to both quiz_settings.importance_ratio and
-// formal_quiz_settings.importance_ratio (same value, kept in sync here) so
-// QuickQuizModal.jsx/FormalQuizModal.jsx — which each already read their
-// own table's importance_ratio column — don't need to change how they read
-// it, only this page needed to change how it's edited/saved.
+// So (migration 0079_quiz_settings_global.sql): quiz_settings and
+// formal_quiz_settings are now true singletons — store_id dropped
+// entirely, replaced by a `singleton boolean primary key default true
+// check (singleton)` column that makes a second row physically impossible
+// to insert. One set of numbers, shared by every store, no store picker
+// here at all. Starting values carried over Brookside/Sunnybank's numbers
+// (Jeff's call — the two that already agreed with each other) rather than
+// Toowong's slightly different mix, so Toowong's Importance mix (was
+// 50/40/10) and Formal Quiz fill-in-blank ratio (was 80%) moved to match
+// the rest as of that migration.
+//
+// Jeff, 2026-09 (earlier, same request as the Admin Quiz Bank
+// reinstatement): "quiz bank Importance mix將quick quiz跟formal quiz合併成
+// 一個就好...兩種quiz共用一個邏輯即可" — the two previously-separate
+// Importance Mix ratios (one for Quick Quiz, one for Formal Quiz) are now
+// ONE shared setting, relabelled "Importance mix — (% of questions)". No
+// schema change beyond the singleton conversion above: still written to
+// both quiz_settings.importance_ratio and formal_quiz_settings.
+// importance_ratio (same value, kept in sync here) so QuickQuizModal.jsx/
+// FormalQuizModal.jsx — which each already read their own table's
+// importance_ratio column — don't need to change how they read it, only
+// this page needed to change how it's edited/saved.
+//
+// Jeff, 2026-09-30 (later the same day): "截圖裡就是合併的，昨天做的，現在繼
+// 續爭也沒有，要不就把它們兩合併好嗎" — the "% of Quick Quiz" / "% of Formal
+// Quiz" formula fill-in-the-blank ratios (until now genuinely two separate
+// values — see the removed `formulaRatio` state and the code comment that
+// used to sit here) are now merged into one shared value too, same pattern
+// as Importance mix above: one input, written identically to both
+// quiz_settings.formula_question_ratio and
+// formal_quiz_settings.fill_in_blank_ratio on save. No schema change —
+// still two columns under the hood, just kept in sync from here — so
+// QuickQuizModal.jsx/FormalQuizModal.jsx don't need to change how they read
+// their own column.
 export default function QuizSettingsTab() {
-  const { currentStoreId } = useAuth()
-
   // Quick Quiz's own settings (quiz_settings table).
   const [quickQuestionCount, setQuickQuestionCount] = useState(10)
-  const [formulaRatio, setFormulaRatio] = useState(0) // Quick Quiz's own formula-question %
 
   // Formal Quiz's own settings (formal_quiz_settings table), plus the quiz
   // reminder cadence — stored in quiz_settings for historical reasons, but
@@ -45,62 +82,58 @@ export default function QuizSettingsTab() {
   const [importanceRatio, setImportanceRatio] = useState({ 1: 50, 2: 30, 3: 20 })
 
   // Formula fill-in-the-blank block — genuinely shared mechanics (Top 10
-  // weight, excluded ingredients) plus each quiz type's own mix %.
-  const [fillBlankRatio, setFillBlankRatio] = useState(20) // Formal Quiz's own formula-question %
+  // weight, excluded ingredients, and now the mix % itself too — see the
+  // 2026-09-30 comment above) apply identically to both quiz types.
+  const [fillBlankRatio, setFillBlankRatio] = useState(20) // shared — % of quiz that's fill-in-the-blank
   const [top10Weight, setTop10Weight] = useState(3) // shared — see quizSelection.js
   const [showLogicDetails, setShowLogicDetails] = useState(false)
 
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!currentStoreId) return
     Promise.all([
-      supabase.from('quiz_settings').select('*').eq('store_id', currentStoreId).maybeSingle(),
-      supabase.from('formal_quiz_settings').select('*').eq('store_id', currentStoreId).maybeSingle(),
+      supabase.from('quiz_settings').select('*').maybeSingle(),
+      supabase.from('formal_quiz_settings').select('*').maybeSingle(),
     ]).then(([{ data: quick }, { data: formal }]) => {
       if (quick) {
         setQuickQuestionCount(quick.question_count)
-        setFormulaRatio(quick.formula_question_ratio ?? 0)
         setReminderMonths(quick.reminder_period_months ?? 3)
       }
       if (formal) {
         setFormalQuestionCount(formal.question_count)
-        setFillBlankRatio(formal.fill_in_blank_ratio)
         setTop10Weight(formal.top10_fill_blank_weight ?? 3)
       }
       // Either table's importance_ratio is the same shared value once this
       // has been saved at least once from this merged UI — prefer
       // quiz_settings' copy, fall back to formal_quiz_settings', then the
-      // default, so a store that only ever had one side saved still shows
-      // its real mix instead of silently resetting to 50/30/20.
+      // default.
       const ratio = quick?.importance_ratio ?? formal?.importance_ratio
       if (ratio) setImportanceRatio(ratio)
+      // Same precedence for the fill-in-the-blank mix % now that it's
+      // merged too — prefer quiz_settings.formula_question_ratio, fall back
+      // to formal_quiz_settings.fill_in_blank_ratio, then the default. Once
+      // this has been saved once from here both columns hold the same
+      // number anyway.
+      const blankRatio = quick?.formula_question_ratio ?? formal?.fill_in_blank_ratio
+      if (blankRatio != null) setFillBlankRatio(blankRatio)
     })
-  }, [currentStoreId])
+  }, [])
 
   async function save() {
     setSaving(true)
     const [{ error: quickError }, { error: formalError }] = await Promise.all([
-      supabase.from('quiz_settings').upsert(
-        {
-          store_id: currentStoreId,
-          question_count: quickQuestionCount,
-          importance_ratio: importanceRatio,
-          formula_question_ratio: formulaRatio,
-          reminder_period_months: reminderMonths,
-        },
-        { onConflict: 'store_id' }
-      ),
-      supabase.from('formal_quiz_settings').upsert(
-        {
-          store_id: currentStoreId,
-          question_count: formalQuestionCount,
-          importance_ratio: importanceRatio,
-          fill_in_blank_ratio: fillBlankRatio,
-          top10_fill_blank_weight: top10Weight,
-        },
-        { onConflict: 'store_id' }
-      ),
+      supabase.from('quiz_settings').update({
+        question_count: quickQuestionCount,
+        importance_ratio: importanceRatio,
+        formula_question_ratio: fillBlankRatio,
+        reminder_period_months: reminderMonths,
+      }).eq('singleton', true),
+      supabase.from('formal_quiz_settings').update({
+        question_count: formalQuestionCount,
+        importance_ratio: importanceRatio,
+        fill_in_blank_ratio: fillBlankRatio,
+        top10_fill_blank_weight: top10Weight,
+      }).eq('singleton', true),
     ])
     setSaving(false)
     if (quickError) alert(quickError.message)
@@ -112,7 +145,7 @@ export default function QuizSettingsTab() {
   return (
     <div>
       <p className="mb-4 text-sm text-gray-500">
-        Settings for this store's Quick Quiz and Formal Quiz, in My Dashboard &gt; Study Log.
+        Settings for every store's Quick Quiz and Formal Quiz, in My Dashboard &gt; Study Log.
       </p>
 
       <div className="max-w-2xl space-y-4">
@@ -192,31 +225,16 @@ export default function QuizSettingsTab() {
         </section>
 
         {/* Formula fill-in-the-blank questions — genuinely shared mechanics
-            (Top 10 weight, excluded ingredients) apply identically to BOTH
-            quiz types' auto-generated formula questions; each quiz type
-            keeps its own % of how much of the quiz is made of these. Placed
-            last — the excluded-ingredients checklist below needs the most
-            vertical room, so keeping it at the bottom avoids pushing every
-            other setting down the page. */}
+            (Top 10 weight, excluded ingredients, and now the mix % itself)
+            apply identically to both quiz types' auto-generated formula
+            questions. Placed last — the excluded-ingredients checklist
+            below needs the most vertical room, so keeping it at the bottom
+            avoids pushing every other setting down the page. */}
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <h3 className="mb-3 text-sm font-semibold text-amber-700">🧪 Formula fill-in-the-blank questions</h3>
           <div className="mb-4 flex flex-wrap items-end gap-4">
             <label className="block max-w-xs">
-              <span className="mb-1 block text-xs font-medium text-gray-500">% of Quick Quiz</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  className="input"
-                  value={formulaRatio}
-                  onChange={(e) => setFormulaRatio(Number(e.target.value))}
-                />
-                <span className="text-sm text-gray-400">%</span>
-              </div>
-            </label>
-            <label className="block max-w-xs">
-              <span className="mb-1 block text-xs font-medium text-gray-500">% of Formal Quiz</span>
+              <span className="mb-1 block text-xs font-medium text-gray-500">% of quiz questions</span>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
@@ -259,9 +277,10 @@ export default function QuizSettingsTab() {
       {showLogicDetails && (
         <Modal open onClose={() => setShowLogicDetails(false)} title="Quiz Logic & Weighting Details">
           <p className="text-sm text-gray-600">
-            Both "% of quiz" settings above control how much of that quiz type is auto-generated "fill in the
-            ingredient quantity" questions from Formula Database recipes, rather than ordinary questions pulled from
-            the Quiz Bank (Admin + Branch, weighted by the Importance mix above). The Top 10 weight — how many times
+            The "% of quiz questions" setting above controls how much of both Quick Quiz and Formal Quiz is
+            auto-generated "fill in the ingredient quantity" questions from Formula Database recipes, rather than
+            ordinary questions pulled from the Quiz Bank (Admin + Branch, weighted by the Importance mix above). The
+            Top 10 weight — how many times
             more likely a fill-in-the-blank question about a ⭐ Top 10 drink is to be picked, versus any other
             memorized item (1 = no boost, 3 = default) — and the excluded-ingredients list below both apply the same
             way to Quick Quiz and Formal Quiz. Quick Quiz's version of these questions is always multiple choice.

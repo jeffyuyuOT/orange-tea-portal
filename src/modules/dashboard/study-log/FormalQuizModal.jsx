@@ -53,7 +53,9 @@ async function buildFormalQuizSet(profileId, storeId) {
   ).map((i) => i.id)
   if (!memorizedIds.length) return { questions: [], reason: 'no_questions' }
 
-  const { data: settings } = await supabase.from('formal_quiz_settings').select('*').eq('store_id', storeId).maybeSingle()
+  // Jeff, 2026-09-30 (migration 0079_quiz_settings_global.sql): global
+  // singleton now — no more per-store store_id filter.
+  const { data: settings } = await supabase.from('formal_quiz_settings').select('*').maybeSingle()
   const questionCount = settings?.question_count ?? 30
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
   const fillBlankRatio = settings?.fill_in_blank_ratio ?? 20

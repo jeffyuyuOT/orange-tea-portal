@@ -349,6 +349,15 @@ function defaultSettings(){
     // never resigns one just because it's missing from Staff Information's
     // current (still-incomplete) data.
     syncStaffInfoFully:false,
+    // Jeff, 2026-09-30: 系統設置 > 匯入班表來源 -- which OT Portal data
+    // source Tab 1's "從 OT Portal 匯入" button pulls from: "roster" (Roster
+    // Hub's saved roster_periods/roster_entries) or "attendance" (actual
+    // clock in/out punches, attendance_events -- already reflects any
+    // manager/admin correction, since edits are applied in place there, see
+    // importFromOTPortal() below). No default selected until Jeff picks one
+    // and hits 確認 -- the import button refuses to run with this unset
+    // rather than silently guessing which source he meant.
+    otImportSource: null,
   };
 }
 
@@ -1740,6 +1749,7 @@ async function loadAllData(){
   if(!currentSettings){ currentSettings = defaultSettings(); await idbPut("settings", currentSettings); }
   if(!currentSettings.taxBrackets) currentSettings.taxBrackets = {withThreshold:annualBracketsWithThreshold(),noThreshold:annualBracketsNoThreshold(),medicareLevy:0.02};
   if(currentSettings.syncStaffInfoFully===undefined){ currentSettings.syncStaffInfoFully = false; await idbPut("settings", currentSettings); }
+  if(currentSettings.otImportSource===undefined){ currentSettings.otImportSource = null; await idbPut("settings", currentSettings); }
   // Migrate the old {permanent:{...}, casual:{...}} penalty shape (two
   // independently-configured multiplier sets) to the new flat shared shape
   // {saturday, sunday, publicHoliday, casualLoading} -- Casual no longer has
@@ -1898,6 +1908,202 @@ async function syncEmployeesFromStaffInfo(store, real){
   return { created, updated, resigned };
 }
 
+/* --- Tab 1「從 OT Portal 匯入」(Jeff, 2026-09-30) ---------------------------
+   Pulls the same {storeName, employees:[{name, dailyHours, dailyRaw}]} shape
+   parseRosterFromFiles()/parseRosterFromPaste() already produce, straight
+   from OT Portal's own tables instead of an Excel file -- so the result
+   feeds into the exact same ingestParsedStores() used by every other import
+   path, and gets its typo-detection / cross-store / "未登記員工" confirmation
+   modals for free, with no separate matching logic to maintain.
+
+   Matching is still by NAME (ingestParsedStores' pipeline has always matched
+   by name, not profileId) -- but names here come from `profiles.first_name/
+   last_name`, the exact same convention fetchRealStaffForStore() already
+   uses to build a synced employee's `.name`, so an employee that's been
+   linked via "🔄 從 Staff Information 同步" (員工資料管理) matches exactly,
+   no typo-detection needed. Jeff asked whether the "找不到員工資料" prompt
+   would realistically ever fire now that employee data is linked to OT
+   Portal -- answer: yes, still can, in three real cases: (1) a store's
+   employees haven't been synced from Staff Information yet (that sync is a
+   manual button, not automatic); (2) a roster_entries row has no profile_id
+   at all (staff_name_raw fallback -- happens when that roster itself was
+   imported from an Excel sheet whose name didn't match a profile at the
+   time); (3) someone appears in OT Portal but was never added as a Payroll
+   employee at all. So the existing "未登記" confirmation modal below still
+   matters and is deliberately left in the pipeline, not bypassed.
+
+   Break handling differs by source. roster_entries HAS a break column
+   (break_half_hours, migration 0008 -- half-hour units, same as the Excel
+   roster's "Break" row under each shift, e.g. 1 = 30min) so the Roster
+   source subtracts it exactly the same way the Excel import already does
+   (see fetchStoresFromRoster below). attendance_events has no break field
+   at all, but doesn't need one: a real unpaid break there shows up as a gap
+   between one clock-out and the next clock-in (two separate sessions that
+   day), which dailyHours already adds up correctly on its own -- so every
+   dailyRaw from the Attendance source gets brk:0 and that's correct, not a
+   gap. */
+function otPortalPersonName(prof){
+  if(!prof) return "(未命名)";
+  const n = `${prof.first_name||""} ${prof.last_name||""}`.trim();
+  return n || prof.email || "(未命名)";
+}
+// Local reimplementation of src/lib/attendance.js's pairEventsIntoSessions --
+// this static page has no build step / ES module imports from src/, so the
+// pairing logic (alternate clock_in/clock_out chronologically per profile,
+// tolerating an out-of-order anomaly rather than throwing) is duplicated
+// here rather than shared. Keep the two in sync by hand if the pairing rule
+// itself ever changes.
+function pairEventsIntoSessionsLocal(events){
+  const sorted = [...events].sort((a,b)=> new Date(a.occurred_at) - new Date(b.occurred_at));
+  const sessions = [];
+  let openIn = null;
+  for(const ev of sorted){
+    if(ev.event_type==="clock_in"){
+      if(openIn) sessions.push({clockIn:openIn, clockOut:null, inProgress:true});
+      openIn = ev;
+    } else {
+      sessions.push({clockIn:openIn, clockOut:ev, inProgress:false});
+      openIn = null;
+    }
+  }
+  if(openIn) sessions.push({clockIn:openIn, clockOut:null, inProgress:true});
+  return sessions.map(s=>({
+    ...s,
+    date: s.clockIn ? isoLocalDate(s.clockIn.occurred_at) : null,
+    minutes: (s.clockIn && s.clockOut) ? Math.max(0, Math.round((new Date(s.clockOut.occurred_at)-new Date(s.clockIn.occurred_at))/60000)) : null,
+  }));
+}
+function isoLocalDate(occurredAt){
+  const d = new Date(occurredAt);
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+}
+function fmtLocalHM(occurredAt){
+  const d = new Date(occurredAt);
+  return `${d.getHours()}:${pad2(d.getMinutes())}`;
+}
+// roster_entries has no unpaid-break column and no break-time information
+// anywhere else in OT Portal, so every roster-sourced shift is imported as
+// continuous (brk:0) -- see the header comment above.
+async function fetchStoresFromRoster(dateFrom, dateTo){
+  const warnings = [];
+  const storeIds = realStores.map(s=>s.id);
+  if(!storeIds.length) return {stores:[], warnings};
+  const { data: periods, error: perr } = await sb
+    .from('roster_periods')
+    .select('id, store_id, week_start_date, week_end_date')
+    .in('store_id', storeIds)
+    .lte('week_start_date', dateTo)
+    .gte('week_end_date', dateFrom);
+  if(perr) throw perr;
+  if(!periods || !periods.length) return {stores:[], warnings};
+  const periodIds = periods.map(p=>p.id);
+  const { data: entries, error: eerr } = await sb
+    .from('roster_entries')
+    .select('roster_period_id, profile_id, staff_name_raw, work_date, start_time, end_time, break_half_hours, profiles(first_name,last_name,email)')
+    .in('roster_period_id', periodIds)
+    .gte('work_date', dateFrom)
+    .lte('work_date', dateTo);
+  if(eerr) throw eerr;
+  const periodById = new Map(periods.map(p=>[p.id,p]));
+  const byStore = new Map(); // realStoreId -> {storeName, employees:Map(lowerName->{name,dailyHours,dailyRaw})}
+  for(const row of (entries||[])){
+    const period = periodById.get(row.roster_period_id);
+    if(!period) continue;
+    const realStore = realStores.find(s=>s.id===period.store_id);
+    if(!realStore) continue;
+    if(!row.start_time || !row.end_time){ continue; } // an entry with no times recorded contributes no hours
+    const sH = timeToHours(row.start_time.slice(0,5));
+    const eH = timeToHours(row.end_time.slice(0,5));
+    const name = row.profiles ? otPortalPersonName(row.profiles) : ((row.staff_name_raw||"").trim() || "(未命名)");
+    if(sH==null || eH==null || eH<=sH){
+      warnings.push(`[OT Portal 班表 / ${realStore.name}] ${name} 在 ${row.work_date} 的班表時間無法判讀（${row.start_time}–${row.end_time}），已略過這筆`);
+      continue;
+    }
+    // break_half_hours (migration 0008) is in HALF-HOUR units, same as the
+    // Excel roster import's "Break" row (brk) -- e.g. 1 = 30min, 2 = 1hr --
+    // so it subtracts the exact same way Jeff's Excel path already does.
+    const brk = Number(row.break_half_hours)||0;
+    let worked = (eH-sH) - brk*0.5;
+    if(worked<0) worked = 0;
+    let bucket = byStore.get(realStore.id);
+    if(!bucket){ bucket = {storeName: realStore.name, employees: new Map()}; byStore.set(realStore.id, bucket); }
+    const key = name.trim().toLowerCase();
+    let emp = bucket.employees.get(key);
+    if(!emp){ emp = {name, dailyHours:{}, dailyRaw:{}}; bucket.employees.set(key, emp); }
+    emp.dailyHours[row.work_date] = (emp.dailyHours[row.work_date]||0) + worked;
+    emp.dailyRaw[row.work_date] = {start: row.start_time.slice(0,5), end: row.end_time.slice(0,5), brk};
+  }
+  const stores = Array.from(byStore.values()).map(b=>({
+    storeName: b.storeName, employees: Array.from(b.employees.values()),
+    warnings: [], dateIssues: [], sourceLabel: "OT Portal 班表",
+  }));
+  return {stores, warnings};
+}
+// attendance_events already reflects any manager/admin correction (edits
+// are applied in place on the punch itself, migration 0062) -- no separate
+// "as edited" query needed, this IS the corrected data.
+async function fetchStoresFromAttendance(dateFrom, dateTo){
+  const warnings = [];
+  const storeIds = realStores.map(s=>s.id);
+  if(!storeIds.length) return {stores:[], warnings};
+  // Fetch each profile's FULL punch history at these stores (not bounded to
+  // the selected period) and pair chronologically before filtering to the
+  // period -- same reasoning as AttendanceLogTable.jsx: a session that
+  // started just before dateFrom, or is still open past dateTo, needs its
+  // other half to pair correctly; bounding the query itself risks silently
+  // splitting a real session in half at the query's own edge.
+  const { data: events, error } = await sb
+    .from('attendance_events')
+    .select('id, profile_id, store_id, event_type, occurred_at, profiles(first_name,last_name,email)')
+    .in('store_id', storeIds)
+    .order('occurred_at', { ascending: true });
+  if(error) throw error;
+  const byProfile = new Map();
+  (events||[]).forEach(ev=>{
+    if(!byProfile.has(ev.profile_id)) byProfile.set(ev.profile_id, []);
+    byProfile.get(ev.profile_id).push(ev);
+  });
+  const byStore = new Map();
+  let openCount = 0;
+  for(const [, evs] of byProfile){
+    const sessions = pairEventsIntoSessionsLocal(evs);
+    for(const s of sessions){
+      if(s.inProgress){ openCount++; continue; } // still clocked in, no clock-out yet -- not counted, same as dailyTotals()
+      if(!s.date || s.date<dateFrom || s.date>dateTo || s.minutes==null) continue;
+      const realStore = realStores.find(rs=>rs.id===(s.clockIn.store_id||s.clockOut.store_id));
+      if(!realStore) continue;
+      const name = otPortalPersonName(s.clockIn.profiles || s.clockOut.profiles);
+      let bucket = byStore.get(realStore.id);
+      if(!bucket){ bucket = {storeName: realStore.name, employees: new Map()}; byStore.set(realStore.id, bucket); }
+      const key = name.trim().toLowerCase();
+      let emp = bucket.employees.get(key);
+      if(!emp){ emp = {name, dailyHours:{}, dailyRaw:{}}; bucket.employees.set(key, emp); }
+      emp.dailyHours[s.date] = (emp.dailyHours[s.date]||0) + s.minutes/60;
+      emp.dailyRaw[s.date] = {start: fmtLocalHM(s.clockIn.occurred_at), end: fmtLocalHM(s.clockOut.occurred_at), brk:0};
+    }
+  }
+  if(openCount>0) warnings.push(`有 ${openCount} 筆打卡紀錄目前還沒有對應的下班紀錄（still clocked in），這幾筆這次不計入匯入時數。`);
+  const stores = Array.from(byStore.values()).map(b=>({
+    storeName: b.storeName, employees: Array.from(b.employees.values()),
+    warnings: [], dateIssues: [], sourceLabel: "OT Portal Attendance Logs",
+  }));
+  return {stores, warnings};
+}
+async function importFromOTPortal(){
+  if(!workingSheet){ return; }
+  const source = currentSettings.otImportSource;
+  if(!source){ toast("請先到「系統設置 > 匯入班表來源」選擇要匯入 OT Portal 班表還是 Attendance Logs"); return; }
+  await loadRealStores(); // refresh against 分店管理 current active store list
+  if(!realStores.length){ toast("「分店管理」目前沒有任何啟用中的分店"); return; }
+  try{
+    const res = source==="attendance"
+      ? await fetchStoresFromAttendance(workingSheet.dateFrom, workingSheet.dateTo)
+      : await fetchStoresFromRoster(workingSheet.dateFrom, workingSheet.dateTo);
+    if(!res.stores.length){ toast("OT Portal 在目前選擇的日期區間內沒有可匯入的資料"); return; }
+    await ingestParsedStores(res.stores, res.warnings);
+  }catch(err){ toast("從 OT Portal 匯入失敗: "+err.message); }
+}
+
 function renderApp(){
   $all(".toptab").forEach(t=>{
     t.classList.toggle("active", t.dataset.tab===activeTopTab);
@@ -2037,7 +2243,10 @@ function tab1Html(){
     <div class="row">
       <div>
         <div class="small muted" style="margin-bottom:4px;">上傳 Excel 檔案 (.xlsx，可一次選取多個檔案；每個檔案內每張工作表代表一間分店)</div>
-        <input type="file" id="t1-file" accept=".xlsx" multiple>
+        <div class="row">
+          <input type="file" id="t1-file" accept=".xlsx" multiple>
+          <button id="t1-import-otportal" title="${currentSettings.otImportSource ? '目前來源：'+(currentSettings.otImportSource==='roster'?'OT Portal 班表':'OT Portal Attendance Logs')+'（可於系統設置 > 匯入班表來源更改）' : '請先於系統設置 > 匯入班表來源選擇一個來源'}">從 OT Portal 匯入</button>
+        </div>
       </div>
     </div>
     <div style="margin-top:10px;">
@@ -2329,6 +2538,8 @@ function wireTab1(){
       await ingestParsedStores(res.stores, res.warnings);
     }catch(err){ toast("匯入失敗: "+err.message); }
   };
+  const otImportBtn = $("#t1-import-otportal");
+  if(otImportBtn) otImportBtn.onclick = ()=>importFromOTPortal();
   const pasteBtn = $("#t1-import-paste");
   if(pasteBtn) pasteBtn.onclick = async ()=>{
     const text = $("#t1-paste").value;
@@ -4186,6 +4397,21 @@ function renderSysSettings(container){
   </div>
 
   <div class="panel">
+    <h3>匯入班表來源</h3>
+    <div class="small muted" style="margin-bottom:8px;">「薪水計算表」頁「匯入班表」區塊的「從 OT Portal 匯入」按鍵，會依這裡選擇的來源抓取時數：選「OT Portal 班表」會讀取 Roster Hub 已儲存的排班表（roster_periods / roster_entries）；選「OT Portal Attendance Logs」則改成讀取每位員工實際的 clock in/out 紀錄（attendance_events，已包含 manager/admin 事後更改過的部分，因為更改是直接改在原始紀錄上，不是另外存一份）。兩種來源都只會抓「分店管理」裡目前設定的分店（is_active 的分店），不會抓已停用或未登記在分店管理的分店。</div>
+    <div class="field" style="max-width:320px;">
+      <label>匯入班表來源</label>
+      <select id="otImportSource">
+        <option value="" ${!s.otImportSource?'selected':''}>尚未選擇</option>
+        <option value="roster" ${s.otImportSource==='roster'?'selected':''}>OT Portal 班表</option>
+        <option value="attendance" ${s.otImportSource==='attendance'?'selected':''}>OT Portal Attendance Logs</option>
+      </select>
+    </div>
+    <div class="toolbar"><button class="primary" id="saveOtImportSource">確認</button></div>
+    ${s.otImportSource ? `<div class="small muted" style="margin-top:6px;">目前設定：${s.otImportSource==='roster'?'OT Portal 班表':'OT Portal Attendance Logs'}</div>` : `<div class="small muted" style="margin-top:6px;">尚未設定，「從 OT Portal 匯入」按鍵目前無法使用。</div>`}
+  </div>
+
+  <div class="panel">
     <h3>Staff Information 同步設定</h3>
     <div class="small muted" style="margin-bottom:8px;">「員工資料管理」頁會自動把每個分店對應到的 OT Portal 真實分店（依分店名稱完全相符配對）的 Staff Information 資料（生日/TFN/Email/電話/入職日期，以及 cash-in-hand 狀態）同步進來，見該頁的 🔗 標示員工。新增/更新一律都會同步；下面這個勾選只影響「Payroll 這邊已經有、但目前 Staff Information 那邊抓不到」的員工要怎麼處理。</div>
     <label class="chk"><input type="checkbox" id="syncStaffFully" ${s.syncStaffInfoFully?'checked':''}> 同步 OT Portal Staff 資料</label>
@@ -4220,6 +4446,14 @@ function renderSysSettings(container){
   `;
   $("#awardname").onchange = async ()=>{ s.award=$("#awardname").value; await saveSettings(); };
   $("#wsplit").onchange = async ()=>{ s.weekendSplit=$("#wsplit").checked; await saveSettings(); toast("已更新，將套用於下一次計算"); };
+  $("#saveOtImportSource").onclick = async ()=>{
+    const v = $("#otImportSource").value;
+    if(!v){ toast("請先選擇一個來源"); return; }
+    s.otImportSource = v;
+    await saveSettings();
+    renderSysSettings(container);
+    toast("已設定匯入班表來源："+(v==='roster'?'OT Portal 班表':'OT Portal Attendance Logs'));
+  };
   $("#syncStaffFully").onchange = async ()=>{
     s.syncStaffInfoFully = $("#syncStaffFully").checked;
     await saveSettings();

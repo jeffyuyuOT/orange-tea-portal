@@ -179,7 +179,10 @@ async function buildQuizSet(profile, storeId) {
   ).map((i) => i.id)
   if (!memorizedIds.length) return { questions: [], reason: 'no_questions' }
 
-  const { data: settings } = await supabase.from('quiz_settings').select('*').eq('store_id', storeId).maybeSingle()
+  // Jeff, 2026-09-30 (migration 0079_quiz_settings_global.sql): quiz_settings
+  // and formal_quiz_settings are now global singletons, one row shared by
+  // every store — no more per-store store_id filter here.
+  const { data: settings } = await supabase.from('quiz_settings').select('*').maybeSingle()
   const questionCount = settings?.question_count ?? 10
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
   const formulaRatio = settings?.formula_question_ratio ?? 0
@@ -192,7 +195,7 @@ async function buildQuizSet(profile, storeId) {
   const formulaTarget = Math.round((questionCount * formulaRatio) / 100)
   if (formulaTarget > 0) {
     const [{ data: formalSettings }, { data: top10Rows }] = await Promise.all([
-      supabase.from('formal_quiz_settings').select('top10_fill_blank_weight').eq('store_id', storeId).maybeSingle(),
+      supabase.from('formal_quiz_settings').select('top10_fill_blank_weight').maybeSingle(),
       supabase.from('formula_items').select('id, top_10').in('id', memorizedIds),
     ])
     top10Weight = formalSettings?.top10_fill_blank_weight ?? 3

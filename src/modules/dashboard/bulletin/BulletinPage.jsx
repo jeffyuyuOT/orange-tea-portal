@@ -123,7 +123,10 @@ export default function BulletinPage() {
         .not('submitted_at', 'is', null)
         .gte('submitted_at', oneMonthAgo)
         .order('submitted_at', { ascending: false }),
-      supabase.from('quiz_settings').select('reminder_period_months').eq('store_id', currentStoreId).maybeSingle(),
+      // Jeff, 2026-09-30 (migration 0079_quiz_settings_global.sql):
+      // quiz_settings is a global singleton now, shared by every store —
+      // no store_id filter needed (or possible) any more.
+      supabase.from('quiz_settings').select('reminder_period_months').maybeSingle(),
       // Per-period "Update" badges on individual Roster feed items (see
       // below) — each specific "Roster posted" row shows its own badge for
       // whichever weeks actually changed since THIS PERSON actually opened
