@@ -26,29 +26,27 @@ const BACKUP_TABLES = [
 ]
 
 export async function exportBackup() {
-  const payload = { exported_at: new Date().toISOString(), tables: {} }
-  for (const table of BACKUP_TABLES) {
-    const { data, error } = await supabase.from(table).select('*')
-    if (error) throw new Error(`Failed exporting ${table}: ${error.message}`)
-    payload.tables[table] = data
-  }
-  const json = JSON.stringify(payload, null, 2)
   const filename = `orange-tea-portal-backup-${new Date().toISOString().slice(0, 10)}.json`
 
-  // Chromium browsers (Chrome / Edge) support the File System Access API,
-  // which opens a real "Save As" dialog so the person can pick the folder.
-  // Other browsers (Firefox, Safari) don't implement it, so we fall back to
-  // a normal browser download in that case.
+  // Jeff, 2026-09: "Error: Failed to execute 'showSaveFilePicker' ... Must
+  // be handling a user gesture" — showSaveFilePicker() only works while
+  // still "inside" the click that triggered it (browsers track this as a
+  // short-lived "user activation" window); it used to be called AFTER the
+  // whole BACKUP_TABLES export loop below, and by the time all those
+  // awaited Supabase queries finished, the browser no longer considered
+  // this call part of that original click, so it refused to open the
+  // picker at all. Fix: ask for the file handle FIRST — the very first
+  // await in this function, straight off SystemSettingPage.jsx's onClick
+  // — before doing any of the data-fetching that takes real time; the
+  // picker doesn't need the export's contents yet, only a place to write
+  // them once they're ready.
+  let handle = null
   if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
     try {
-      const handle = await window.showSaveFilePicker({
+      handle = await window.showSaveFilePicker({
         suggestedName: filename,
         types: [{ description: 'JSON backup', accept: { 'application/json': ['.json'] } }],
       })
-      const writable = await handle.createWritable()
-      await writable.write(json)
-      await writable.close()
-      return
     } catch (err) {
       // Person closed the folder picker without choosing a location —
       // treat it as "cancelled", not an error, and don't fall through to a
@@ -56,6 +54,25 @@ export async function exportBackup() {
       if (err?.name === 'AbortError') return
       throw err
     }
+  }
+
+  const payload = { exported_at: new Date().toISOString(), tables: {} }
+  for (const table of BACKUP_TABLES) {
+    const { data, error } = await supabase.from(table).select('*')
+    if (error) throw new Error(`Failed exporting ${table}: ${error.message}`)
+    payload.tables[table] = data
+  }
+  const json = JSON.stringify(payload, null, 2)
+
+  // Chromium browsers (Chrome / Edge) support the File System Access API,
+  // which opens a real "Save As" dialog so the person can pick the folder.
+  // Other browsers (Firefox, Safari) don't implement it, so we fall back to
+  // a normal browser download in that case.
+  if (handle) {
+    const writable = await handle.createWritable()
+    await writable.write(json)
+    await writable.close()
+    return
   }
 
   const blob = new Blob([json], { type: 'application/json' })
