@@ -90,12 +90,21 @@ export default function ShopTrainingDatabasePage() {
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {items.map((item, idx) => (
-            <div key={item.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
-              <button onClick={() => setEditing(item)} className="flex flex-1 items-center gap-2 text-left">
+            // Jeff, 2026-09-29: "手機板的shop training database介面要好操作
+            // 一點，都超出螢幕了" — title + ↑/↓ + (admin's) "Copy to store…"
+            // + "Delete" used to sit forced onto one line (no wrap), so on a
+            // phone the button cluster ran off the right edge of the
+            // screen. flex-wrap on the row + min-w-0 on the title button
+            // (so it can actually shrink/wrap instead of forcing the row
+            // wide) lets the button cluster drop to its own line on a
+            // narrow screen instead; ml-auto keeps it right-aligned either
+            // way (single line on desktop, its own line on mobile).
+            <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+              <button onClick={() => setEditing(item)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <span className="font-medium text-gray-800">{item.title}</span>
                 {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
               </button>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 <button
                   disabled={idx === 0 || moving}
                   onClick={() => move(item, -1)}

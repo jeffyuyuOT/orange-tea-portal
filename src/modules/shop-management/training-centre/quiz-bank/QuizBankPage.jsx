@@ -165,8 +165,15 @@ export default function QuizBankPage() {
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {questions.map((q) => (
-            <div key={q.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
-              <button onClick={() => setEditing(q)} className="flex flex-1 items-center gap-2 text-left">
+            // Jeff, 2026-09-29: same fix as ShopTrainingDatabasePage.jsx's
+            // twin list right next to this one under Training Centre — a
+            // long question + two badges + (admin's) "Copy to store…" used
+            // to be forced onto one line and run off a phone screen.
+            // flex-wrap + min-w-0 on the title button lets the action
+            // cluster drop to its own (right-aligned via ml-auto) line on
+            // narrow screens instead of overflowing.
+            <div key={q.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+              <button onClick={() => setEditing(q)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 {q.image_path && (
                   <img
                     src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
@@ -182,7 +189,7 @@ export default function QuizBankPage() {
                   Importance {q.importance}
                 </Badge>
               </button>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 {isAdmin && (
                   <Button variant="secondary" onClick={() => setCopyingQuestion(q)}>
                     Copy to store…

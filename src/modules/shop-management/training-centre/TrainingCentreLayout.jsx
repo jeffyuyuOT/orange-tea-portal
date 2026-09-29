@@ -24,13 +24,19 @@ export default function TrainingCentreLayout() {
     <div>
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Training Centre</h1>
 
-      <div className="mb-5 flex gap-1 border-b border-brand-100">
+      {/* Jeff, 2026-09-29: "手機板的shop training database介面要好操作一
+          點，都超出螢幕了" — three tab labels this long (esp. "Shop Training
+          Database") don't fit a phone width and used to just overflow the
+          page sideways. overflow-x-auto + shrink-0/whitespace-nowrap on each
+          tab makes this bar itself the thing that scrolls horizontally
+          (a swipeable tab strip) instead of the whole page. */}
+      <div className="mb-5 flex gap-1 overflow-x-auto border-b border-brand-100">
         {TABS.filter((t) => canAccessPage(effectivePages, t.key)).map((t) => (
           <NavLink
             key={t.key}
             to={t.to}
             className={({ isActive }) =>
-              `flex items-center gap-1.5 px-4 py-2 text-sm font-medium ${
+              `flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2 text-sm font-medium ${
                 isActive ? 'border-b-2 border-brand-500 text-brand-700' : 'text-gray-500 hover:text-brand-600'
               }`
             }
