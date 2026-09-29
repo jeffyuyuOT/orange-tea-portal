@@ -248,7 +248,6 @@ export default function MessagePage() {
       {openMessageId && (
         <MessageDetailModal
           messageId={openMessageId}
-          storeId={currentStoreId}
           profile={profile}
           onClose={() => setOpenMessageId(null)}
           onChanged={reload}

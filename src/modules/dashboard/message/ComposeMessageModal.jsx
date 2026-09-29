@@ -27,12 +27,20 @@ function nameOf(p) {
 // (confirmed with Jeff: admin stays pickable — his first draft of the spec
 // also excluded admin, corrected afterwards to "exclude training,
 // accountant and 2d maker only"). migration 0066_bulletin_messages.sql.
-// `storeId` is the sender's CURRENT store — it decides who's eligible to
-// pick as a recipient (same-store membership), and is stamped onto the
-// message row itself (bookkeeping/RLS write-scope only — reading a message
-// back is entirely per-recipient via message_recipients, not store-scoped;
-// see MessagePage.jsx, which lists Inbox/Sent across every store). It's
-// also what picks whose roster_display_name applies — see nameOf() above.
+// `storeId` decides who's eligible to pick as a recipient (same-store
+// membership) and is stamped onto the message row itself (bookkeeping/RLS
+// write-scope only — reading a message back is entirely per-recipient via
+// message_recipients, not store-scoped; see MessagePage.jsx, which lists
+// Inbox/Sent across every store). It's also what picks whose
+// roster_display_name applies — see nameOf() above. It is NOT always the
+// sender's current StoreSwitcher store: MessagePage.jsx's "+ New message"
+// passes currentStoreId (a brand-new conversation, started wherever the
+// sender's currently working), but MessageDetailModal.jsx's Reply/Reply
+// All/Forward pass the ORIGINAL message's own store_id instead — Jeff,
+// 2026-09: a multi-store admin/developer replying to a message from a
+// different store than the one they currently have selected must not have
+// their reply filed under whatever store they happened to be on; see the
+// longer comment on MessageDetailModal.jsx.
 export default function ComposeMessageModal({ storeId, senderProfile, initial, onClose, onSent }) {
   const [subject, setSubject] = useState(initial?.subject ?? '')
   const [content, setContent] = useState(initial?.content ?? '')

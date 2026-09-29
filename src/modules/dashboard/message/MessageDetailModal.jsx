@@ -21,10 +21,28 @@ function nameOf(p, nameByProfile) {
 // — each just opens ComposeMessageModal pre-filled and linked back via
 // in_reply_to. No nested thread view — just a flat "new message that
 // happens to reference an earlier one", same as Jeff's spec (reply/reply
-// all/forward each just send a new message). `storeId` is only used to hand
-// off to ComposeMessageModal (which recipient are eligible), never to
-// restrict which messages can be opened here — see MessagePage.jsx.
-export default function MessageDetailModal({ messageId, storeId, profile, onClose, onChanged }) {
+// all/forward each just send a new message).
+//
+// Jeff, 2026-09 (later): a multi-store admin/developer replying while
+// switched to a DIFFERENT store than the one the original message came from
+// ("接收sunnybank寄來的訊息再回復時其頁面是在toowong的頁面") used to get their
+// reply stamped with whatever store they currently had selected (this used
+// to take a `storeId` prop from MessagePage.jsx's currentStoreId for
+// exactly that), so the recipient would see it filed under the wrong
+// store. Jeff's own call on the right fix ("看怎麼處理比較好" — his two
+// options were: base it on the original sender's store, or auto-switch the
+// viewer's whole store context just from opening a message; picked the
+// first, since silently switching someone's current store out from under
+// them just because they opened one message would affect everything else
+// they see elsewhere too, not just this reply): Reply/Reply All/Forward now
+// always use the STORE THE MESSAGE ITSELF BELONGS TO (message.store_id)
+// below, never whichever store the viewer happens to have selected right
+// now — a reply belongs to the conversation it's replying to, not to
+// whatever the StoreSwitcher says at that moment. Only a brand-new message
+// (MessagePage.jsx's "+ New message", not opened through here) still uses
+// the viewer's current store, which is correct there — that IS a new
+// conversation being started at wherever they're currently working.
+export default function MessageDetailModal({ messageId, profile, onClose, onChanged }) {
   const [message, setMessage] = useState(null)
   const [recipients, setRecipients] = useState([])
   const [nameByProfile, setNameByProfile] = useState(new Map())
@@ -212,7 +230,7 @@ export default function MessageDetailModal({ messageId, storeId, profile, onClos
       </Modal>
       {composeInitial && (
         <ComposeMessageModal
-          storeId={storeId}
+          storeId={message.store_id}
           senderProfile={profile}
           initial={composeInitial}
           onClose={() => setComposeInitial(null)}
