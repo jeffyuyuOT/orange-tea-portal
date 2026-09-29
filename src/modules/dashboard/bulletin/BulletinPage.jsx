@@ -45,7 +45,10 @@ const TRAINING_REMINDER_START_HOURS = 50
 // newest-first list. Announcements and rosters drop out of the feed once
 // they're more than a month old; quiz reminders instead stay until the
 // person actually takes the quiz, since they describe current status, not a
-// one-off posting.
+// one-off posting. Important announcements are the other exception — they
+// never drop out here either, matching the standalone "⭐ Important
+// Announcements" picker (ImportantAnnouncementsModal.jsx), which never had a
+// date filter at all. Jeff, 2026-09.
 export default function BulletinPage() {
   const { currentStoreId, profile, refreshBulletinUpdates } = useAuth()
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
@@ -85,13 +88,23 @@ export default function BulletinPage() {
 
     const oneMonthAgo = addMonths(new Date(), -1).toISOString()
 
-    const [{ data: announcementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }, { data: announcementReadRows }] = await Promise.all([
+    const [{ data: announcementRows }, { data: importantAnnouncementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }, { data: announcementReadRows }] = await Promise.all([
       supabase
         .from('announcements')
         .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
         .eq('store_id', currentStoreId)
         .eq('category', 'normal')
         .gte('updated_at', oneMonthAgo)
+        .order('updated_at', { ascending: false }),
+      // Important announcements are exempt from the month cutoff above —
+      // fetched separately (no date filter) and merged in below, deduped by
+      // id, rather than folding the exemption into one `.or()` filter.
+      supabase
+        .from('announcements')
+        .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
+        .eq('store_id', currentStoreId)
+        .eq('category', 'normal')
+        .eq('is_important', true)
         .order('updated_at', { ascending: false }),
       // Customer complaints don't drop out of the feed after a month like
       // everything else here — they stay visible (via their own tab) until
@@ -262,7 +275,14 @@ export default function BulletinPage() {
       return { isNewItem: !readAt, hasUpdate: !!readAt && readAt < a.updated_at }
     }
 
-    const announcementItems = (announcementRows ?? []).map((a) => {
+    // Merge the month-filtered rows with the unfiltered important ones,
+    // deduped by id (an important announcement updated within the last
+    // month would otherwise appear in both queries).
+    const mergedAnnouncementRows = Array.from(
+      new Map([...(announcementRows ?? []), ...(importantAnnouncementRows ?? [])].map((a) => [a.id, a])).values()
+    )
+
+    const announcementItems = mergedAnnouncementRows.map((a) => {
       // Prefer the permanent name snapshot over the live creator/editor
       // join, which goes blank once that person's account is removed.
       const actor = a.editor ?? a.creator

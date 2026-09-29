@@ -174,9 +174,18 @@ export function detectImportType(sheetName, headerRow) {
 }
 
 // --- Ingredient Master import (also sets a Format Rule row if any of the
-// optional style columns are filled in). ---
+// optional style columns are filled in). Re-uploading a sheet for an
+// ingredient that already exists (matched by exact name — same match the
+// database's own unique constraint uses) updates its Unit instead of
+// erroring out with a duplicate-key message, so fixing/refreshing existing
+// ingredients works via re-import instead of just listing every one of them
+// as an error. Jeff, 2026-09. ---
 async function importIngredients(rows) {
+  const { data: existingRows } = await supabase.from('ingredient_master').select('id, name')
+  const idByName = new Map((existingRows ?? []).map((i) => [i.name, i.id]))
+
   let created = 0
+  let updated = 0
   const errors = []
   for (const row of rows) {
     const name = String(row['Ingredient Name'] ?? '').trim()
@@ -190,14 +199,27 @@ async function importIngredients(rows) {
     const isBold = ['yes', 'y', 'true', '1'].includes(boldRaw)
     const isItalic = ['yes', 'y', 'true', '1'].includes(italicRaw)
 
-    const { data, error } = await supabase.from('ingredient_master').insert({ name, unit }).select().single()
-    if (error) {
-      errors.push(`"${name}": ${error.message}`)
-      continue
+    let ingredientId = idByName.get(name)
+    if (ingredientId) {
+      const { error } = await supabase.from('ingredient_master').update({ unit }).eq('id', ingredientId)
+      if (error) {
+        errors.push(`"${name}": ${error.message}`)
+        continue
+      }
+      updated += 1
+    } else {
+      const { data, error } = await supabase.from('ingredient_master').insert({ name, unit }).select().single()
+      if (error) {
+        errors.push(`"${name}": ${error.message}`)
+        continue
+      }
+      ingredientId = data.id
+      idByName.set(name, ingredientId)
+      created += 1
     }
-    created += 1
+
     if (abbreviation || fontColor || bgColor || boldRaw || italicRaw) {
-      const rule = { ingredient_id: data.id }
+      const rule = { ingredient_id: ingredientId }
       if (abbreviation) rule.abbreviation = abbreviation
       if (fontColor) rule.font_color = fontColor
       if (bgColor) rule.background_color = bgColor
@@ -207,7 +229,7 @@ async function importIngredients(rows) {
       if (ruleError) errors.push(`"${name}" format rule: ${ruleError.message}`)
     }
   }
-  return { summary: `${created} ingredient(s) created`, errors }
+  return { summary: `${created} ingredient(s) created, ${updated} updated`, errors }
 }
 
 // Splits one "Ingredients" cell — "Black Tea Base:100ml, Passionfruit
