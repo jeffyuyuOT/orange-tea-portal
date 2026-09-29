@@ -91,13 +91,23 @@ export default function StaffStudyDetail({ staff, onBack }) {
     return visibleItems.filter((i) => !memorizedIds.has(i.id))
   }
 
-  // Jeff, 2026-09: becoming Qualified — via a Formal Quiz Pass or the
-  // direct "Mark as Qualified" button — snapshots every currently active +
-  // visible formula item as memorized right now (real study_progress rows,
-  // like the old "Mark all memorized" action used to write). It's a
-  // one-time snapshot, not a permanent lock: the staff member can still
-  // un-tick individual items afterward in Study Log, and any formula added
-  // later still needs its own manual tick, same as anyone else.
+  // Jeff, 2026-09: becoming Qualified via the direct "Mark as Qualified"
+  // button snapshots every currently active + visible formula item as
+  // memorized right now (real study_progress rows, like the old "Mark all
+  // memorized" action used to write) — that button's own confirm() dialog
+  // tells the manager this up front. It's a one-time snapshot, not a
+  // permanent lock: the staff member can still un-tick individual items
+  // afterward in Study Log, and any formula added later still needs its
+  // own manual tick, same as anyone else.
+  //
+  // Jeff, 2026-09 (later): a Formal Quiz Pass used to trigger this too, but
+  // that silently overwrote study_progress to make it LOOK consistent with
+  // the Pass — if a manager overrode the "hasn't ticked Memorized for every
+  // item" warning below, everything that staff member hadn't actually
+  // memorized got force-marked memorized anyway. Passing the quiz should
+  // grant Qualified without rewriting what Study Log says they've actually
+  // learned, so togglePass below no longer calls this — only the explicit
+  // "Mark as Qualified" shortcut does.
   async function markAllCurrentItemsMemorized() {
     const visibleItems = await visibleFormulaItems()
     if (!visibleItems.length) return
@@ -154,7 +164,10 @@ export default function StaffStudyDetail({ staff, onBack }) {
         .from('profiles')
         .update({ qualified: true, qualified_at: new Date().toISOString(), qualified_by: profile.id })
         .eq('id', staff.id)
-      await markAllCurrentItemsMemorized()
+      // No markAllCurrentItemsMemorized() here — see the comment on that
+      // function above. Passing grants Qualified only; overriding the
+      // unmemorized-items warning no longer rewrites study_progress, so
+      // Study Log keeps showing what this staff member has actually ticked.
     }
   }
 

@@ -7,9 +7,11 @@ import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 
 export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const { profile: me, currentStoreId, accessibleStores } = useAuth()
-  // Jeff, 2026-09: developer is meant to be admin's superset everywhere —
-  // this hire-date-editing gate only ever checked the literal 'admin' role.
-  const isAdmin = me?.role === 'admin' || me?.role === 'developer'
+  // Jeff, 2026-09 (later): Hire date used to be admin/developer-only here —
+  // now shop_manager can edit it too, same as every other field on this
+  // modal (the only role gate left is isReadOnly/accountant below, which
+  // already hides the Save button entirely, so accountant can't write
+  // anything regardless of individual fields' disabled state).
   // Accountant is view-only everywhere on this page (per Jeff: "只能看到"
   // — can only SEE) — the cash-in-hand filtering that keeps someone off
   // this list entirely happens earlier, in StaffListPage.jsx/RLS (see
@@ -50,9 +52,6 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
     // changes what this store sees, not every store this person works at.
     const { roster_display_name, ...profileFields } = form
     const payload = { ...profileFields, date_of_birth: form.date_of_birth || null, hire_date: form.hire_date || null }
-    // Per spec: hire date is manager/admin editable, but only admin can
-    // change it here from Shop Management (managers can still view it).
-    if (!isAdmin) delete payload.hire_date
     const [{ error }, { error: nameError }] = await Promise.all([
       supabase.from('profiles').update(payload).eq('id', staff.id),
       supabase
@@ -151,10 +150,10 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
             onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })}
           />
         </Field>
-        <Field label="Hire date (admin only, staff information only)">
+        <Field label="Hire date (staff information only)">
           <input
             type="date"
-            disabled={!isAdmin || isReadOnly}
+            disabled={isReadOnly}
             className="input disabled:bg-gray-50 disabled:text-gray-400"
             value={form.hire_date ?? ''}
             onChange={(e) => setForm({ ...form, hire_date: e.target.value })}
