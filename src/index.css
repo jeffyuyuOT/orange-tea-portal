@@ -33,6 +33,21 @@ html {
   color-scheme: light only;
 }
 
+html, body {
+  /* Jeff, 2026-09-29: "往上滑倒頂的時候不要做重新載入的動作" — scrolling to
+     the very top of a page and continuing to pull down was triggering the
+     phone browser's own native pull-to-refresh, which reloads the whole
+     page (losing whatever the user was doing) — nothing in this app's own
+     code ever calls location.reload()/triggers this; it's the mobile
+     browser/PWA's default gesture handling taking over once scroll
+     reaches its top edge and "runs out" of content to scroll, letting the
+     pull gesture chain up to the browser shell. `contain` stops scroll
+     from chaining past this element (so the browser never sees "nothing
+     left to scroll, must be a pull-to-refresh") while still leaving normal
+     scrolling and iOS's own rubber-band bounce untouched.  */
+  overscroll-behavior-y: contain;
+}
+
 body {
   margin: 0;
   background: #ffffff;
