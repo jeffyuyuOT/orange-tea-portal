@@ -13,7 +13,8 @@ import Badge from '../ui/Badge'
 // in Admin Center > System Setting, rather than SECTIONS' own literal order
 // in permissions.js.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, sidebarOrder } = useAuth()
+  const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, sidebarOrder } =
+    useAuth()
   const { pathname } = useLocation()
 
   return (
@@ -95,6 +96,17 @@ export function SidebarNavLinks({ onNavigate }) {
                         scope, so this is never store-filtered the way the
                         Bulletin dot above is. */}
                     {fullKey === 'dashboard.message' && unreadMessageCount > 0 && <Badge color="red">{unreadMessageCount}</Badge>}
+                    {/* Jeff, 2026-09: "staff time logs那裏也會有紅點提示" —
+                        at least one staff member at this store has a
+                        clocked-time-vs-roster mismatch this viewer hasn't
+                        opened yet — see AuthContext.jsx's
+                        hasTimeDiscrepancies / src/lib/timeDiscrepancy.js.
+                        Same plain dot treatment as Bulletin's above, for the
+                        same reason (no single word covers "some staff
+                        member's hours don't add up"). */}
+                    {fullKey === 'shop_management.staff_time_logs' && hasTimeDiscrepancies && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" aria-label="Update" />
+                    )}
                   </NavLink>
                 )
               })}

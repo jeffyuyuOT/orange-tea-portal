@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { addMonths } from 'date-fns'
 import { supabase } from './supabaseClient'
-import { getEffectivePages } from './permissions'
+import { getEffectivePages, canAccessPage } from './permissions'
 import { getUnseenFormulaItems } from './formulaUpdates'
+import { getStaffTimeDiscrepancies, isUnreadDiscrepancy } from './timeDiscrepancy'
 import { DEFAULT_SIDEBAR_ORDER, fetchSidebarOrder } from './sidebarOrder'
 
 const AuthContext = createContext(null)
@@ -70,6 +71,17 @@ export function AuthProvider({ children }) {
   // (rather than just flags) every message_recipients row for this person
   // with read_at still null, across every store at once.
   const [unreadMessageCount, setUnreadMessageCount] = useState(0)
+  // Small red dot next to Staff Time Logs in the Sidebar (Jeff, 2026-09:
+  // "staff time logs那裏也會有紅點提示") — true when at least one staff
+  // member at this store has an unread clock-time-vs-roster discrepancy for
+  // THIS viewer (see src/lib/timeDiscrepancy.js) — same per-viewer "red dot,
+  // not a count" treatment as hasBulletinUpdates above, and same reasoning
+  // for living here rather than in the page itself (Sidebar is a separate,
+  // always-mounted component). Only ever computed for a role that can
+  // actually reach that page — a plain staff account has no business
+  // querying other people's punches/roster just to light up a badge it'll
+  // never see anyway.
+  const [hasTimeDiscrepancies, setHasTimeDiscrepancies] = useState(false)
   // Shared Sidebar section/page order (migration 0055) — global, not tied
   // to who's logged in, so it's fetched once independently of profile/store
   // rather than inside loadProfileData. Starts as SECTIONS' own literal
@@ -319,6 +331,35 @@ export function AuthProvider({ children }) {
     refreshUnreadMessages()
   }, [refreshUnreadMessages])
 
+  // Recomputes the Staff Time Logs red dot for the current person + store.
+  // Called on login/store-switch, and again by StaffTimeLogsPage right
+  // after it marks a staff member's discrepancy seen (time_discrepancy_views
+  // upsert), so the dot updates without a full page reload — same trigger
+  // shape as refreshBulletinUpdates/refreshFormulaUpdates above.
+  const refreshTimeDiscrepancies = useCallback(async () => {
+    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'shop_management.staff_time_logs')) {
+      setHasTimeDiscrepancies(false)
+      return
+    }
+    const { data: staffRows } = await supabase.from('user_stores').select('profile_id').eq('store_id', currentStoreId)
+    const profileIds = Array.from(new Set((staffRows ?? []).map((r) => r.profile_id).filter(Boolean)))
+    if (!profileIds.length) {
+      setHasTimeDiscrepancies(false)
+      return
+    }
+    const [discrepancies, { data: viewRows }] = await Promise.all([
+      getStaffTimeDiscrepancies(currentStoreId, profileIds),
+      supabase.from('time_discrepancy_views').select('subject_profile_id, viewed_at').eq('viewer_id', profile.id).in('subject_profile_id', profileIds),
+    ])
+    const viewedAtBySubject = new Map((viewRows ?? []).map((r) => [r.subject_profile_id, r.viewed_at]))
+    const hasUnread = Object.entries(discrepancies).some(([subjectId, d]) => isUnreadDiscrepancy(d, viewedAtBySubject.get(subjectId)))
+    setHasTimeDiscrepancies(hasUnread)
+  }, [profile, overrides, currentStoreId])
+
+  useEffect(() => {
+    refreshTimeDiscrepancies()
+  }, [refreshTimeDiscrepancies])
+
   const signIn = useCallback(async (email, password) => {
     sessionStorage.removeItem('ot_training_verified')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -372,6 +413,8 @@ export function AuthProvider({ children }) {
     refreshBulletinUpdates,
     unreadMessageCount,
     refreshUnreadMessages,
+    hasTimeDiscrepancies,
+    refreshTimeDiscrepancies,
     sidebarOrder,
     refreshSidebarOrder,
   }
