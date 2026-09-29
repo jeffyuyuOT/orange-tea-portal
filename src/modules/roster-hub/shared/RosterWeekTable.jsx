@@ -44,13 +44,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     }
     let active = true
     setLoading(true)
-    let q = supabase
-      .from('roster_entries')
-      // qualified (profiles.qualified, migration 0049_staff_qualified.sql)
-      // is what shows a not-yet-Qualified person's name/shift time in red
-      // below — same flag Manage Roster's grid uses.
-      .select('*, profiles(first_name, last_name, qualified)')
-      .eq('roster_period_id', period.id)
+    let q = supabase.from('roster_entries').select('*').eq('roster_period_id', period.id)
     if (onlyProfileId) q = q.eq('profile_id', onlyProfileId)
     // roster_display_name is per-store — fetch it for THIS period's store
     // separately and fold it onto each entry's profile below, since a
@@ -61,31 +55,45 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
     // numbering space (Roster Hub > Setting > Roster Staff Order reorders
     // them together), matched onto ad-hoc `staff_name_raw` entries by name
     // below since roster_entries itself has no pending-staff id to join on.
-    // Also select the extra fields needed to rebuild "who's on this store's
-    // active roster at all" (same shape ManageRosterPage's own staff/
-    // pendingStaff queries use) — see activeRoster above.
+    //
+    // Jeff, 2026-09-29: name/is_active/role/qualified/join_store_activity
+    // used to come from a `profiles(...)` embed on the two queries below,
+    // but that embed is gated by `profiles`' own RLS (own row, or
+    // admin/shop_manager) — a plain staff viewer got `profiles: null` for
+    // every colleague, which made every colleague show up "not yet
+    // Qualified" (red) and silently dropped any zero-shift colleague from
+    // the grid entirely (see migration 0077_roster_colleague_visibility.sql
+    // for the root cause). `store_roster_profiles` is a narrow RPC scoped
+    // to exactly the fields this table needs — same result for every role,
+    // admin/shop_manager/staff alike, since it's not gated by `profiles`
+    // RLS at all (it's SECURITY DEFINER, authorized instead by "does the
+    // caller currently have access to this store", same as
+    // roster_entries/announcements already are).
     Promise.all([
       q.order('work_date'),
       supabase
         .from('user_stores')
-        .select(
-          'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(first_name, last_name, is_active, role, qualified, primary_store_id, join_store_activity)'
-        )
+        .select('profile_id, roster_display_name, roster_order, hidden_from_roster')
         .eq('store_id', period.store_id),
       supabase
         .from('roster_pending_staff')
         .select('id, display_name, roster_display_name, roster_order, hidden_from_roster')
         .eq('store_id', period.store_id),
-    ]).then(([{ data }, { data: nameRows }, { data: pendingRows }]) => {
+      supabase.rpc('store_roster_profiles', { p_store_id: period.store_id }),
+    ]).then(([{ data }, { data: nameRows }, { data: pendingRows }, { data: profileRows }]) => {
       if (!active) return
+      const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]))
       const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
       const orderByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_order]))
       const orderByPendingName = new Map((pendingRows ?? []).map((p) => [pendingRosterName(p).toLowerCase(), p.roster_order]))
       setEntries(
-        (data ?? []).map((e) => ({
-          ...e,
-          profiles: e.profiles ? { ...e.profiles, roster_display_name: nameByProfile.get(e.profile_id) } : e.profiles,
-        }))
+        (data ?? []).map((e) => {
+          const p = e.profile_id ? profileById.get(e.profile_id) : null
+          return {
+            ...e,
+            profiles: p ? { ...p, roster_display_name: nameByProfile.get(e.profile_id) } : null,
+          }
+        })
       )
       setOrderByProfile(orderByProfile)
       setOrderByPendingName(orderByPendingName)
@@ -97,6 +105,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         // counted as an active participant here (isActiveStoreMember,
         // migration 0064/0067).
         const activeStaff = (nameRows ?? [])
+          .map((r) => ({ ...r, profiles: profileById.get(r.profile_id) }))
           .filter(
             (r) =>
               r.profiles?.is_active &&
