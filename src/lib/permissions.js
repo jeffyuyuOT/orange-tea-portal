@@ -46,27 +46,34 @@ export const SECTIONS = {
       learning_tracker: 'Learning Tracker',
       staff_information: 'Staff Information',
       // Jeff, 2026-09: "將quiz bank裡的quiz bank跟shop training database合併
-      // 變成training centre" — Quiz Bank (moved out of Admin Center; its old
-      // "Quiz Bank Setting" tab is pulled out separately below, into
-      // admin_center.quiz_settings) and Shop Training Database (moved out
-      // of its own top-level Shop Management page) become part of a shared
-      // "Training Centre" grouping, since both are the same shape of thing:
-      // a per-store content bank admin/developer can also copy between
-      // stores. Training Code joins them here too (Jeff, 2026-09, same day:
-      // "training centre是放在shop management下的...training code也放在
-      // training centre下") — Training Centre was briefly its own top-level
-      // section ("training_centre", sibling of shop_management) before Jeff
-      // asked for it to live inside Shop Management instead. These three
-      // keep their OWN page keys/permissions here (same as every other page
-      // in this section, and same as My Dashboard's bulletin/message/
-      // study_log/etc. all being independent keys under one section) —
-      // TrainingCentreLayout.jsx just renders a shared tab bar across these
-      // three specific pages for quick cross-navigation, the same way
-      // DashboardLayout.jsx does for My Dashboard's pages. Nothing in
-      // ROLE_DEFAULTS below referenced any of these three keys literally,
-      // so no role's access set changes as a result of either move — see
-      // the fuller note by shop_manager's exclusion list below.
-      quiz_bank: 'Quiz Bank',
+      // 變成training centre" — Quiz Bank (moved out of Admin Center) and
+      // Shop Training Database (moved out of its own top-level Shop
+      // Management page) become part of a shared "Training Centre" grouping,
+      // since both are the same shape of thing: a per-store content bank
+      // admin/developer can also copy between stores. Training Code joins
+      // them here too (Jeff, 2026-09, same day: "training centre是放在shop
+      // management下的...training code也放在training centre下") — Training
+      // Centre was briefly its own top-level section ("training_centre",
+      // sibling of shop_management) before Jeff asked for it to live inside
+      // Shop Management instead. These three keep their OWN page keys/
+      // permissions here (same as every other page in this section, and
+      // same as My Dashboard's bulletin/message/study_log/etc. all being
+      // independent keys under one section) — TrainingCentreLayout.jsx just
+      // renders a shared tab bar across these three specific pages for quick
+      // cross-navigation, the same way DashboardLayout.jsx does for My
+      // Dashboard's pages. Nothing in ROLE_DEFAULTS below referenced any of
+      // these three keys literally, so no role's access set changes as a
+      // result of either move — see the fuller note by shop_manager's
+      // exclusion list below.
+      //
+      // Jeff, 2026-09 (later): labelled "Branch Quiz Bank" (was plain "Quiz
+      // Bank") once admin_center.quiz_bank was reinstated as a genuinely
+      // shared, centrally-managed bank (see that key's own comment) — each
+      // store adds its own questions here, on top of what it sees read-only
+      // from the shared Admin Quiz Bank; Quick Quiz/Formal Quiz draw from
+      // both together. The label change is cosmetic only; this key/route is
+      // otherwise unchanged.
+      quiz_bank: 'Branch Quiz Bank',
       shop_training_database: 'Shop Training Database',
       training_code: 'Training Code',
       staff_time_logs: 'Staff Time Logs',
@@ -91,11 +98,19 @@ export const SECTIONS = {
     label: 'Admin Center',
     pages: {
       formula_database: 'Formula Database',
-      // Jeff, 2026-09: "原本的quiz bank setting從quiz banks拿出來留在admin
-      // centre" — pulled out of what's now shop_management.quiz_bank into
-      // its own standalone page here, a sibling of Formula Database etc.,
-      // rather than a tab inside Quiz Bank.
-      quiz_settings: 'Quiz Bank Setting',
+      // Jeff, 2026-09: reinstated — "admin centre下還是要有admin quiz bank".
+      // This had briefly been split into two: a bank of shared questions
+      // living under shop_management.quiz_bank (now the per-store "Branch
+      // Quiz Bank" instead), and its "Setting" tab pulled out into its own
+      // standalone admin_center.quiz_settings page. Both are folded back
+      // into this one key: AdminQuizBankPage.jsx renders "Questions" (the
+      // centrally-managed bank every store's Training Centre > Quiz Bank
+      // shows read-only, store_id IS NULL — see migration
+      // 0073_admin_quiz_bank.sql) and "Setting" (renamed back from "Quiz
+      // Bank Setting" to just "Setting", per Jeff — the same tab it always
+      // was before the standalone-page detour) as two tabs of one page,
+      // same shape as Training Centre's own tab bar.
+      quiz_bank: 'Admin Quiz Bank',
       file_repository: 'File Repository',
       user_management: 'User Management',
       store_management: 'Store Management',
@@ -148,21 +163,22 @@ const ROLE_DEFAULTS = {
   // deny/empty everything — Jeff's "有勾取，只是進不去". Now excluded here
   // the same way admin already is above, so the checkbox/Sidebar
   // link/route all agree: only `developer` gets Payroll by default.
-  // Jeff, 2026-09: the Training Centre merge / Quiz Bank Setting split above
-  // moved admin_center.quiz_bank → shop_management.quiz_bank and kept
-  // shop_management.shop_training_database/training_code as they were
-  // (just regrouped under the same Training Centre tab bar), plus split out
-  // admin_center.quiz_settings as a new key — shop_manager keeps the first
-  // three (via ALL.filter() picking up new/moved keys automatically, same as
-  // before), but Jeff, 2026-09 (later): shop_manager's default should NOT
-  // have admin_center.quiz_settings ticked — added below, alongside the
-  // rest of Admin Center's own settings pages this role already doesn't get
-  // by default.
+  // Jeff, 2026-09: the Training Centre merge originally moved
+  // admin_center.quiz_bank → shop_management.quiz_bank (shop_manager kept
+  // the moved key automatically via ALL.filter()) and split its "Setting"
+  // tab out into admin_center.quiz_settings, excluded below like every
+  // other Admin Center settings page. Both are now undone: quiz_bank is
+  // back under admin_center (see the SECTIONS comment above) and
+  // quiz_settings no longer exists as its own key — so the exclusion below
+  // just follows the key's rename, same reasoning as before: shop_manager
+  // shouldn't see the centrally-managed Admin Quiz Bank/Setting, only its
+  // own store's Branch Quiz Bank (shop_management.quiz_bank, unaffected by
+  // any of this).
   shop_manager: ALL.filter(
     (key) =>
       ![
         'admin_center.formula_database',
-        'admin_center.quiz_settings',
+        'admin_center.quiz_bank',
         'admin_center.file_repository',
         'admin_center.user_management',
         'admin_center.store_management',

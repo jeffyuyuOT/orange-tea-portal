@@ -31,7 +31,7 @@ import LeaveManagementPage from '../modules/roster-hub/leave-management/LeaveMan
 import RosterSettingsPage from '../modules/roster-hub/settings/RosterSettingsPage'
 
 import FormulaDatabasePage from '../modules/admin-center/formula-database/FormulaDatabasePage'
-import QuizSettingsPage from '../modules/admin-center/quiz-settings/QuizSettingsPage'
+import AdminQuizBankPage from '../modules/admin-center/quiz-bank/AdminQuizBankPage'
 import FileRepositoryPage from '../modules/admin-center/file-repository/FileRepositoryPage'
 import UserManagementPage from '../modules/admin-center/user-management/UserManagementPage'
 import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
@@ -43,9 +43,11 @@ import PayrollPage from '../modules/developer/payroll/PayrollPage'
 // Centre" tab bar (TrainingCentreLayout.jsx), which itself lives inside
 // Shop Management (moved there the same day, along with Training Code
 // joining as this bar's third tab — see permissions.js's shop_management
-// SECTIONS entry). Quiz Bank's old "Setting" tab was pulled out separately
-// into its own standalone admin_center.quiz_settings page/route (import
-// above).
+// SECTIONS entry). This Training Centre "Quiz Bank" is the per-store
+// "Branch Quiz Bank" — the reinstated, centrally-shared Admin Quiz Bank
+// (import above, routed under /admin-center/quiz-bank below) is a
+// different page entirely, see permissions.js's admin_center.quiz_bank
+// comment for the fuller history.
 import TrainingCentreLayout from '../modules/shop-management/training-centre/TrainingCentreLayout'
 import TrainingCentreQuizBankPage from '../modules/shop-management/training-centre/quiz-bank/QuizBankPage'
 import TrainingCentreShopTrainingDatabasePage from '../modules/shop-management/training-centre/shop-training-database/ShopTrainingDatabasePage'
@@ -137,7 +139,7 @@ export default function AppRoutes() {
         <Route path="/roster-hub/settings" element={guarded('roster_hub.settings', <RosterSettingsPage />)} />
 
         <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
-        <Route path="/admin-center/quiz-settings" element={guarded('admin_center.quiz_settings', <QuizSettingsPage />)} />
+        <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <AdminQuizBankPage />)} />
         <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
         <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
         <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />

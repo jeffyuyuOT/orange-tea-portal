@@ -12,7 +12,7 @@ import { canAccessPage } from '../../../lib/permissions'
 // header/tab-bar for quick cross-navigation between the three, routed under
 // /shop-management/... like every other Shop Management page.
 const TABS = [
-  { key: 'shop_management.quiz_bank', to: '/shop-management/quiz-bank', label: 'Quiz Bank' },
+  { key: 'shop_management.quiz_bank', to: '/shop-management/quiz-bank', label: 'Branch Quiz Bank' },
   { key: 'shop_management.shop_training_database', to: '/shop-management/shop-training-database', label: 'Shop Training Database' },
   { key: 'shop_management.training_code', to: '/shop-management/training-code', label: 'Training Code' },
 ]

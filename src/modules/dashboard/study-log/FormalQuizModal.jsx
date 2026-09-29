@@ -123,13 +123,18 @@ async function buildFormalQuizSet(profileId, storeId) {
   // type; 'multi' and 'fill_blank' are new.
   //
   // Jeff, 2026-09: "現在出題的時候也會依照各分店的題庫去抓題" — quiz_questions
-  // is now store-owned outright (migration 0071), so this filters straight
-  // on store_id instead of separately fetching quiz_question_stores and
-  // computing which rows are visible at storeId. ---
+  // is store-owned outright (migration 0071), so this filters straight on
+  // store_id instead of separately fetching quiz_question_stores and
+  // computing which rows are visible at storeId.
+  //
+  // Jeff, 2026-09 (later): also pool in the reinstated admin-authored,
+  // shared tier (store_id IS NULL — migration 0073) alongside this store's
+  // own branch questions — same change as QuickQuizModal.jsx's
+  // buildBankQuestions. ---
   const { data: candidateQuestions } = await supabase
     .from('quiz_questions')
     .select('*')
-    .eq('store_id', storeId)
+    .or(`store_id.is.null,store_id.eq.${storeId}`)
     .in('formula_item_id', memorizedIds)
   let mcVisible = []
   let bankFillBlankVisible = []

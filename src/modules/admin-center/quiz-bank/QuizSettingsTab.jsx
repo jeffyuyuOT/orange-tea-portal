@@ -1,47 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
+import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 
-// Jeff, 2026-09: "原本的quiz bank setting從quiz banks拿出來留在admin
-// centre" — moved here from being a tab inside Quiz Bank (which itself moved
-// into the new Training Centre section) to its own standalone page, a
-// sibling of Formula Database/File Repository/etc. under Admin Center.
-// Nothing about how it works changed — it's the same per-store settings
-// screen (quiz_settings/formal_quiz_settings/quiz_excluded_ingredients, all
-// keyed by currentStoreId from useAuth()) it always was; only the page
-// chrome around it (this h1, and its own top-level route) is new. Like
-// every other Admin Center page, AppShell hides the header StoreSwitcher
-// here and shows "All Stores" instead — currentStoreId still holds whatever
-// store was last switched to elsewhere in the app (see AuthContext.jsx;
-// admin/developer default to their first accessible store), so switch
-// stores from any non-Admin-Center page first if you need to edit a
-// different store's quiz settings — exactly how this screen already worked
-// before the move, just under a different tab.
+// Jeff, 2026-09: "quiz bank setting就改回原本名字setting，也一樣放在這個分頁
+// 下" — folded back in as the "Setting" tab of the reinstated Admin Quiz
+// Bank page (AdminQuizBankPage.jsx), replacing the brief standalone-page
+// detour (this file used to be QuizSettingsPage.jsx, its own top-level
+// route/permission key). Renamed from QuizSettingsPage → QuizSettingsTab to
+// match: no more own <h1>/route, it just renders as tab content now.
 //
-// One merged Setting screen for both Quick Quiz and Formal Quiz, replacing
-// the old "Quick Quiz / Formal Quiz" sub-tab toggle (FormalQuizSettingsTab.jsx
-// is no longer used by anything, left in place as dead code rather than
-// deleted). Jeff asked for this because two settings — the Top 10
-// fill-in-the-blank weight and the excluded-ingredients list — actually
-// apply to BOTH quiz types' auto-generated formula questions, but used to
-// live only inside one quiz type's own tab, making them easy to miss and
-// (until this change) not even actually wired up to affect the other quiz
-// type at all (see QuickQuizModal.jsx / FormalQuizModal.jsx).
+// Same per-store settings (quiz_settings/formal_quiz_settings/
+// quiz_excluded_ingredients, all keyed by currentStoreId from useAuth())
+// this always was — switch stores from any non-Admin-Center page first if
+// you need to edit a different store's quiz settings.
 //
-// Layout, per Jeff's spec: each quiz type's OWN setting stays in its own
-// colored block near the top; settings genuinely shared between the two
-// quiz types get their own blocks below that; "Formula fill-in-the-blank
-// questions" — the block needing the most vertical room (the excluded-
-// ingredients checklist) — goes last, so it doesn't push everything else
-// down the page.
-export default function QuizSettingsPage() {
+// Jeff, 2026-09 (later, same request as the Admin Quiz Bank reinstatement):
+// "quiz bank Importance mix將quick quiz跟formal quiz合併成一個就好...兩種
+// quiz共用一個邏輯即可" — the two previously-separate Importance Mix ratios
+// (one for Quick Quiz, one for Formal Quiz) are now ONE shared setting,
+// relabelled "Importance mix — (% of questions)". No schema change: still
+// written to both quiz_settings.importance_ratio and
+// formal_quiz_settings.importance_ratio (same value, kept in sync here) so
+// QuickQuizModal.jsx/FormalQuizModal.jsx — which each already read their
+// own table's importance_ratio column — don't need to change how they read
+// it, only this page needed to change how it's edited/saved.
+export default function QuizSettingsTab() {
   const { currentStoreId } = useAuth()
 
   // Quick Quiz's own settings (quiz_settings table).
   const [quickQuestionCount, setQuickQuestionCount] = useState(10)
-  const [quickRatio, setQuickRatio] = useState({ 1: 50, 2: 30, 3: 20 })
   const [formulaRatio, setFormulaRatio] = useState(0) // Quick Quiz's own formula-question %
 
   // Formal Quiz's own settings (formal_quiz_settings table), plus the quiz
@@ -50,17 +40,15 @@ export default function QuizSettingsPage() {
   const [formalQuestionCount, setFormalQuestionCount] = useState(30)
   const [reminderMonths, setReminderMonths] = useState(3)
 
-  // Quiz Bank block — importance mix feeding each quiz type's pull from the
-  // curated question bank. Kept as two independent ratios (Quick Quiz and
-  // Formal Quiz differ enough in size/purpose that forcing one shared mix
-  // isn't right), but grouped together here since both belong to "picking
-  // from the Quiz Bank" — future Quiz-Bank-related settings join them here.
-  const [formalRatio, setFormalRatio] = useState({ 1: 50, 2: 30, 3: 20 })
+  // Quiz Bank block — one shared Importance Mix feeding BOTH quiz types'
+  // pull from the curated question bank (Admin + Branch together).
+  const [importanceRatio, setImportanceRatio] = useState({ 1: 50, 2: 30, 3: 20 })
 
   // Formula fill-in-the-blank block — genuinely shared mechanics (Top 10
   // weight, excluded ingredients) plus each quiz type's own mix %.
   const [fillBlankRatio, setFillBlankRatio] = useState(20) // Formal Quiz's own formula-question %
   const [top10Weight, setTop10Weight] = useState(3) // shared — see quizSelection.js
+  const [showLogicDetails, setShowLogicDetails] = useState(false)
 
   const [saving, setSaving] = useState(false)
 
@@ -72,16 +60,21 @@ export default function QuizSettingsPage() {
     ]).then(([{ data: quick }, { data: formal }]) => {
       if (quick) {
         setQuickQuestionCount(quick.question_count)
-        setQuickRatio(quick.importance_ratio)
         setFormulaRatio(quick.formula_question_ratio ?? 0)
         setReminderMonths(quick.reminder_period_months ?? 3)
       }
       if (formal) {
         setFormalQuestionCount(formal.question_count)
-        setFormalRatio(formal.importance_ratio)
         setFillBlankRatio(formal.fill_in_blank_ratio)
         setTop10Weight(formal.top10_fill_blank_weight ?? 3)
       }
+      // Either table's importance_ratio is the same shared value once this
+      // has been saved at least once from this merged UI — prefer
+      // quiz_settings' copy, fall back to formal_quiz_settings', then the
+      // default, so a store that only ever had one side saved still shows
+      // its real mix instead of silently resetting to 50/30/20.
+      const ratio = quick?.importance_ratio ?? formal?.importance_ratio
+      if (ratio) setImportanceRatio(ratio)
     })
   }, [currentStoreId])
 
@@ -92,7 +85,7 @@ export default function QuizSettingsPage() {
         {
           store_id: currentStoreId,
           question_count: quickQuestionCount,
-          importance_ratio: quickRatio,
+          importance_ratio: importanceRatio,
           formula_question_ratio: formulaRatio,
           reminder_period_months: reminderMonths,
         },
@@ -102,7 +95,7 @@ export default function QuizSettingsPage() {
         {
           store_id: currentStoreId,
           question_count: formalQuestionCount,
-          importance_ratio: formalRatio,
+          importance_ratio: importanceRatio,
           fill_in_blank_ratio: fillBlankRatio,
           top10_fill_blank_weight: top10Weight,
         },
@@ -114,13 +107,13 @@ export default function QuizSettingsPage() {
     else if (formalError) alert(formalError.message)
   }
 
-  const quickTotal = Number(quickRatio[1]) + Number(quickRatio[2]) + Number(quickRatio[3])
-  const formalTotal = Number(formalRatio[1]) + Number(formalRatio[2]) + Number(formalRatio[3])
+  const importanceTotal = Number(importanceRatio[1]) + Number(importanceRatio[2]) + Number(importanceRatio[3])
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">Quiz Bank Setting</h1>
-      <p className="mb-4 text-sm text-gray-500">Settings for this store's Quick Quiz and Formal Quiz, in My Dashboard &gt; Study Log.</p>
+      <p className="mb-4 text-sm text-gray-500">
+        Settings for this store's Quick Quiz and Formal Quiz, in My Dashboard &gt; Study Log.
+      </p>
 
       <div className="max-w-2xl space-y-4">
         {/* Quick Quiz — its own setting only. */}
@@ -174,44 +167,27 @@ export default function QuizSettingsPage() {
           </p>
         </section>
 
-        {/* Quiz Bank — settings that feed picking curated questions FROM the
-            Quiz Bank (Training Centre), used by both quiz types. Any future
-            Quiz Bank-related setting belongs in this block too. */}
+        {/* Quiz Bank — one shared Importance Mix feeding picking curated
+            questions FROM the Quiz Bank (Admin + Branch together), used by
+            both quiz types identically. Any future Quiz Bank-related
+            setting belongs in this block too. */}
         <section className="rounded-xl border border-purple-200 bg-purple-50 p-4">
           <h3 className="mb-3 text-sm font-semibold text-purple-700">📚 Quiz Bank</h3>
-          <div className="flex flex-wrap gap-6">
-            <div>
-              <span className="mb-1 block text-xs font-medium text-gray-500">Importance mix — Quick Quiz (% of questions)</span>
-              {[1, 2, 3].map((level) => (
-                <div key={level} className="mb-1 flex items-center gap-2">
-                  <span className="w-28 text-sm text-gray-600">Importance {level}</span>
-                  <input
-                    type="number"
-                    className="input w-24"
-                    value={quickRatio[level]}
-                    onChange={(e) => setQuickRatio((prev) => ({ ...prev, [level]: Number(e.target.value) }))}
-                  />
-                  <span className="text-sm text-gray-400">%</span>
-                </div>
-              ))}
-              {quickTotal !== 100 && <p className="text-xs text-amber-600">Currently totals {quickTotal}%, not 100%.</p>}
-            </div>
-            <div>
-              <span className="mb-1 block text-xs font-medium text-gray-500">Importance mix — Formal Quiz (% of questions)</span>
-              {[1, 2, 3].map((level) => (
-                <div key={level} className="mb-1 flex items-center gap-2">
-                  <span className="w-28 text-sm text-gray-600">Importance {level}</span>
-                  <input
-                    type="number"
-                    className="input w-24"
-                    value={formalRatio[level]}
-                    onChange={(e) => setFormalRatio((prev) => ({ ...prev, [level]: Number(e.target.value) }))}
-                  />
-                  <span className="text-sm text-gray-400">%</span>
-                </div>
-              ))}
-              {formalTotal !== 100 && <p className="text-xs text-amber-600">Currently totals {formalTotal}%, not 100%.</p>}
-            </div>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-gray-500">Importance mix — (% of questions)</span>
+            {[1, 2, 3].map((level) => (
+              <div key={level} className="mb-1 flex items-center gap-2">
+                <span className="w-28 text-sm text-gray-600">Importance {level}</span>
+                <input
+                  type="number"
+                  className="input w-24"
+                  value={importanceRatio[level]}
+                  onChange={(e) => setImportanceRatio((prev) => ({ ...prev, [level]: Number(e.target.value) }))}
+                />
+                <span className="text-sm text-gray-400">%</span>
+              </div>
+            ))}
+            {importanceTotal !== 100 && <p className="text-xs text-amber-600">Currently totals {importanceTotal}%, not 100%.</p>}
           </div>
         </section>
 
@@ -224,7 +200,7 @@ export default function QuizSettingsPage() {
             other setting down the page. */}
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <h3 className="mb-3 text-sm font-semibold text-amber-700">🧪 Formula fill-in-the-blank questions</h3>
-          <div className="mb-4 flex flex-wrap gap-4">
+          <div className="mb-4 flex flex-wrap items-end gap-4">
             <label className="block max-w-xs">
               <span className="mb-1 block text-xs font-medium text-gray-500">% of Quick Quiz</span>
               <div className="flex items-center gap-2">
@@ -264,20 +240,13 @@ export default function QuizSettingsPage() {
                 onChange={(e) => setTop10Weight(Number(e.target.value))}
               />
             </label>
+            {/* Jeff, 2026-09: "下面那一大段說明改成一個按鍵...按了在跳出說明就
+                好，要不然一大段很占版面" — the explanatory paragraph that used
+                to sit here permanently now only shows in a popup, on demand. */}
+            <Button variant="secondary" onClick={() => setShowLogicDetails(true)} className="!text-xs">
+              Quiz Logic & Weighting Details
+            </Button>
           </div>
-          <p className="mb-4 text-xs text-gray-400">
-            Both top "% of quiz" settings control how much of that quiz type is auto-generated "fill in the
-            ingredient quantity" questions from Formula Database recipes, rather than ordinary questions pulled from
-            the Quiz Bank above. The Top 10 weight — how many times more likely a fill-in-the-blank question about a
-            ⭐ Top 10 drink is to be picked, versus any other memorized item (1 = no boost, 3 = default) — and the
-            excluded-ingredients list below both apply the same way to Quick Quiz and Formal Quiz. Quick Quiz's
-            version of these questions is always multiple choice. Formal Quiz's is a mix: a ⭐ Top 10 drink's question
-            stays typed (most rigorous, for the drinks staff most need to know cold); every other drink's question is
-            shown as multiple choice instead, but with deliberately hard-to-guess wrong answers (the closest real
-            quantities on record, not random ones). This isn't a setting to tune — it's fixed behavior — and only
-            applies to these auto-generated questions, not to a fill-in-the-blank question an admin wrote by hand in
-            the Quiz Bank, which always stays typed.
-          </p>
 
           <ExcludedIngredientsSection />
         </section>
@@ -286,6 +255,24 @@ export default function QuizSettingsPage() {
           {saving ? 'Saving…' : 'Save'}
         </Button>
       </div>
+
+      {showLogicDetails && (
+        <Modal open onClose={() => setShowLogicDetails(false)} title="Quiz Logic & Weighting Details">
+          <p className="text-sm text-gray-600">
+            Both "% of quiz" settings above control how much of that quiz type is auto-generated "fill in the
+            ingredient quantity" questions from Formula Database recipes, rather than ordinary questions pulled from
+            the Quiz Bank (Admin + Branch, weighted by the Importance mix above). The Top 10 weight — how many times
+            more likely a fill-in-the-blank question about a ⭐ Top 10 drink is to be picked, versus any other
+            memorized item (1 = no boost, 3 = default) — and the excluded-ingredients list below both apply the same
+            way to Quick Quiz and Formal Quiz. Quick Quiz's version of these questions is always multiple choice.
+            Formal Quiz's is a mix: a ⭐ Top 10 drink's question stays typed (most rigorous, for the drinks staff most
+            need to know cold); every other drink's question is shown as multiple choice instead, but with
+            deliberately hard-to-guess wrong answers (the closest real quantities on record, not random ones). This
+            isn't a setting to tune — it's fixed behavior — and only applies to these auto-generated questions, not
+            to a fill-in-the-blank question an admin wrote by hand in the Quiz Bank, which always stays typed.
+          </p>
+        </Modal>
+      )}
     </div>
   )
 }

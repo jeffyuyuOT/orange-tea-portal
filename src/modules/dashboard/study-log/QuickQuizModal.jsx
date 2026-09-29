@@ -110,16 +110,21 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
 }
 
 // Jeff, 2026-09: "現在出題的時候也會依照各分店的題庫去抓題" — quiz_questions
-// is now store-owned outright (migration 0071, same shape as
-// shop_training_items since 0052) instead of one shared bank with an
-// optional "visible at these stores" restriction list, so this now just
-// filters straight on store_id instead of separately fetching
-// quiz_question_stores and computing which rows are visible at storeId.
+// is store-owned outright (migration 0071, same shape as shop_training_items
+// since 0052) instead of one shared bank with an optional "visible at these
+// stores" restriction list, so this filters straight on store_id instead of
+// separately fetching quiz_question_stores and computing which rows are
+// visible at storeId.
+//
+// Jeff, 2026-09 (later): "各分店實行quick跟formal quiz出題時就會從admin bank
+// 跟分店自己的bank裡一起抓題" — a reinstated admin-authored, shared tier
+// (store_id IS NULL — migration 0073) is pooled together with this store's
+// own branch questions here, not just the branch ones.
 async function buildBankQuestions(memorizedIds, storeId, targetCount, ratio) {
   const { data: candidateQuestions } = await supabase
     .from('quiz_questions')
     .select('*')
-    .eq('store_id', storeId)
+    .or(`store_id.is.null,store_id.eq.${storeId}`)
     .in('formula_item_id', memorizedIds)
   if (!candidateQuestions?.length) return []
 

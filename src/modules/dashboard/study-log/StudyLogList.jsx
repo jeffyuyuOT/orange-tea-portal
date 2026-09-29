@@ -3,15 +3,24 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import Modal from '../../../components/ui/Modal'
+import RichTextViewer from '../../../components/ui/RichTextViewer'
 import FormulaItemDetail from '../../operations-training/formula/FormulaItemDetail'
 
 // Same top-level formula classification used in Operations & Training >
-// Formula (FormulaPage.jsx) — kept in sync with GROUPS there.
+// Formula (FormulaPage.jsx) — kept in sync with GROUPS there. Jeff, 2026-09:
+// "study log裡的tab要新增shop training。因為shop training裡也有內容要
+// memorized" — Shop Training joins these as a 5th tab, but it's not a
+// formula group at all (shop_training_items, not formula_items — store-
+// owned since migration 0052, no drink categories/Top 10) so it's handled
+// as its own special case throughout this file rather than folded into the
+// group-filtering logic the other four share.
 const GROUPS = [
   { key: 'drink', label: 'Drink' },
   { key: 'tea', label: 'Tea' },
   { key: 'toppings', label: 'Toppings' },
   { key: 'others', label: 'Others' },
+  { key: 'shop_training', label: 'Shop Training' },
 ]
 
 // Same synthetic "Top 10" category as the staff Formula page (FormulaPage.jsx)
@@ -49,24 +58,40 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([]) // drink-group sub-categories, for the filter dropdown
   const [progress, setProgress] = useState({}) // formula_item_id -> row
+  // Shop Training's own item list + progress map — separate state since it's
+  // a different table/shape (shop_training_items, not formula_items), fetched
+  // alongside the formula data below rather than lazily on tab switch, same
+  // "load everything once, filter client-side" pattern the four formula
+  // groups already use.
+  const [shopTrainingItems, setShopTrainingItems] = useState([])
+  const [shopTrainingProgress, setShopTrainingProgress] = useState({}) // shop_training_item_id -> row
   const [loading, setLoading] = useState(true)
   const [openItem, setOpenItem] = useState(null)
+  const [openTrainingItem, setOpenTrainingItem] = useState(null)
+  const [openTrainingItemFiles, setOpenTrainingItemFiles] = useState([])
   const [group, setGroup] = useState('drink')
   const [categoryId, setCategoryId] = useState(null) // null = "All categories" within the drink group
 
   async function load() {
     setLoading(true)
-    const [{ data: itemRows }, { data: progressRows }, { data: categoryRows }, { data: storeRows }] = await Promise.all([
-      supabase
-        .from('formula_items')
-        .select('*, formula_categories(name)')
-        .eq('is_active', true)
-        .order('group_key')
-        .order('sort_order'),
-      supabase.from('study_progress').select('*').eq('profile_id', profileId),
-      supabase.from('formula_categories').select('*').eq('group_key', 'drink').order('sort_order').order('id'),
-      supabase.from('formula_item_stores').select('*'),
-    ])
+    const [{ data: itemRows }, { data: progressRows }, { data: categoryRows }, { data: storeRows }, { data: trainingRows }, { data: trainingProgressRows }] =
+      await Promise.all([
+        supabase
+          .from('formula_items')
+          .select('*, formula_categories(name)')
+          .eq('is_active', true)
+          .order('group_key')
+          .order('sort_order'),
+        supabase.from('study_progress').select('*').eq('profile_id', profileId),
+        supabase.from('formula_categories').select('*').eq('group_key', 'drink').order('sort_order').order('id'),
+        supabase.from('formula_item_stores').select('*'),
+        // Same per-store ownership as ShopTrainingPage.jsx (migration 0052) —
+        // just this store's own items, sorted the same way.
+        currentStoreId
+          ? supabase.from('shop_training_items').select('*').eq('store_id', currentStoreId).order('sort_order')
+          : Promise.resolve({ data: [] }),
+        supabase.from('shop_training_progress').select('*').eq('profile_id', profileId),
+      ])
     // An item this store doesn't carry (per Formula Database's own per-item
     // store list) shouldn't show up in this store's Study Log at all — same
     // rule Quick Quiz/Formal Quiz already use when picking which memorized
@@ -77,12 +102,37 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
     const map = {}
     ;(progressRows ?? []).forEach((p) => (map[p.formula_item_id] = p))
     setProgress(map)
+    setShopTrainingItems(trainingRows ?? [])
+    const trainingMap = {}
+    ;(trainingProgressRows ?? []).forEach((p) => (trainingMap[p.shop_training_item_id] = p))
+    setShopTrainingProgress(trainingMap)
     setLoading(false)
   }
 
   useEffect(() => {
     if (profileId) load()
   }, [profileId, currentStoreId])
+
+  // Fetched per item as it's opened, same lazy pattern ShopTrainingPage.jsx
+  // itself uses — most items are never opened in a given visit.
+  useEffect(() => {
+    if (!openTrainingItem) {
+      setOpenTrainingItemFiles([])
+      return
+    }
+    let active = true
+    supabase
+      .from('shop_training_item_files')
+      .select('*')
+      .eq('shop_training_item_id', openTrainingItem.id)
+      .order('sort_order')
+      .then(({ data }) => {
+        if (active) setOpenTrainingItemFiles(data ?? [])
+      })
+    return () => {
+      active = false
+    }
+  }, [openTrainingItem])
 
   function selectGroup(key) {
     setGroup(key)
@@ -119,10 +169,30 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
     onProgressChange?.()
   }
 
-  if (loading) return <LoadingSpinner />
-  if (!items.length) return <EmptyState label="No formula items to study yet." />
+  // Same shape as toggle() above, against shop_training_progress instead of
+  // study_progress (migration 0073) — kept as its own function rather than
+  // a shared helper since the two tables' conflict keys/column names differ.
+  async function toggleShopTraining(itemId, value) {
+    setShopTrainingProgress((prev) => ({ ...prev, [itemId]: { ...prev[itemId], memorized: value } }))
+    await supabase.from('shop_training_progress').upsert(
+      {
+        profile_id: profileId,
+        shop_training_item_id: itemId,
+        memorized: value,
+        memorized_at: value ? new Date().toISOString() : null,
+      },
+      { onConflict: 'profile_id,shop_training_item_id' }
+    )
+    onProgressChange?.()
+  }
 
-  const memorizedCount = filteredItems.filter((i) => progress[i.id]?.memorized).length
+  if (loading) return <LoadingSpinner />
+  if (!items.length && !shopTrainingItems.length) return <EmptyState label="No formula items to study yet." />
+
+  const memorizedCount =
+    group === 'shop_training'
+      ? shopTrainingItems.filter((i) => shopTrainingProgress[i.id]?.memorized).length
+      : filteredItems.filter((i) => progress[i.id]?.memorized).length
 
   return (
     <div>
@@ -170,13 +240,35 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
             </select>
           )}
           <p className="text-sm text-gray-500">
-            {memorizedCount} of {filteredItems.length} memorized
+            {memorizedCount} of {group === 'shop_training' ? shopTrainingItems.length : filteredItems.length} memorized
           </p>
-          {qualified && <span className="text-xs font-medium text-brand-500">Qualified</span>}
+          {qualified && group !== 'shop_training' && <span className="text-xs font-medium text-brand-500">Qualified</span>}
         </div>
       </div>
 
-      {!filteredItems.length ? (
+      {group === 'shop_training' ? (
+        !shopTrainingItems.length ? (
+          <EmptyState label="No shop training content yet." />
+        ) : (
+          <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+            {shopTrainingItems.map((item) => (
+              <div key={item.id} className="flex items-center justify-between px-4 py-2.5">
+                <button onClick={() => setOpenTrainingItem(item)} className="flex-1 text-left">
+                  <div className="font-medium text-gray-800">{item.title}</div>
+                </button>
+                <label className="flex items-center gap-2 text-sm text-gray-500">
+                  Memorized
+                  <input
+                    type="checkbox"
+                    checked={!!shopTrainingProgress[item.id]?.memorized}
+                    onChange={(e) => toggleShopTraining(item.id, e.target.checked)}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        )
+      ) : !filteredItems.length ? (
         <EmptyState label="No items in this category yet." />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
@@ -204,6 +296,32 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
       )}
 
       <FormulaItemDetail item={openItem} onClose={() => setOpenItem(null)} />
+
+      {/* Same detail modal shape as ShopTrainingPage.jsx (content + any
+          attached files) — reused here rather than imported, since that
+          page's version is tied to its own list-loading effect rather than
+          taking an item as a prop. */}
+      <Modal open={!!openTrainingItem} onClose={() => setOpenTrainingItem(null)} title={openTrainingItem?.title} wide>
+        <RichTextViewer html={openTrainingItem?.content_html} />
+        {openTrainingItemFiles.length > 0 && (
+          <div className="mt-4 border-t border-brand-100 pt-3">
+            <div className="mb-1.5 text-xs font-semibold text-gray-500">Attached files</div>
+            <div className="space-y-1">
+              {openTrainingItemFiles.map((f) => (
+                <a
+                  key={f.id}
+                  href={supabase.storage.from('documents').getPublicUrl(f.file_path).data.publicUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-sm text-brand-600 hover:underline"
+                >
+                  📎 {f.display_name}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

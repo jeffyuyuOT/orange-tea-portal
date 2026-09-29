@@ -22,13 +22,27 @@ const GROUPS = [
 // model that page already has (migration 0052, replicated here by 0071) —
 // "quiz bank一樣會有分店的切換區別...quiz bank的內容一樣可以copy to other
 // store (developer跟admin可以做)". Quiz generation itself (Quick Quiz/
-// Formal Quiz) now also draws only from the current store's own questions —
-// see QuickQuizModal.jsx/FormalQuizModal.jsx.
+// Formal Quiz) draws from this store's own questions — see
+// QuickQuizModal.jsx/FormalQuizModal.jsx.
+//
+// Jeff, 2026-09 (later): "各家分店在training centre下的quiz bank裡可以看到
+// admin quiz centre裡的內容，但是鎖定的，也有專屬於自己分店的branch quiz
+// bank" — reinstated a shared, centrally-managed "Admin Quiz Bank" (admin/
+// developer-authored, store_id IS NULL — see migration
+// 0073_admin_quiz_bank_and_shop_training_progress.sql). This page now shows
+// TWO sections for the selected group/category: the Admin Quiz Bank's
+// matching questions, read-only, then this store's own "Branch Quiz Bank"
+// below it with the full CRUD it always had. Quick Quiz/Formal Quiz already
+// pull from both pools together (same migration's comment), so what's
+// admin-authored here shows up in quizzes without this store doing anything
+// — this section is purely so staff/managers can see what's already
+// covered before adding their own branch-only questions.
 export default function QuizBankPage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [group, setGroup] = useState('drink')
   const [categories, setCategories] = useState([])
   const [categoryId, setCategoryId] = useState('')
+  const [adminQuestions, setAdminQuestions] = useState([])
   const [questions, setQuestions] = useState([])
   const [editing, setEditing] = useState(null)
   const [copyingQuestion, setCopyingQuestion] = useState(null)
@@ -56,13 +70,23 @@ export default function QuizBankPage() {
 
   async function load() {
     if (!currentStoreId) return
-    let q = supabase.from('quiz_questions').select('*').eq('group_key', group).eq('store_id', currentStoreId)
+    let adminQ = supabase.from('quiz_questions').select('*').eq('group_key', group).is('store_id', null)
+    let branchQ = supabase.from('quiz_questions').select('*').eq('group_key', group).eq('store_id', currentStoreId)
     if (group === 'drink') {
-      if (!categoryId) return setQuestions([])
-      q = q.eq('category_id', categoryId)
+      if (!categoryId) {
+        setAdminQuestions([])
+        setQuestions([])
+        return
+      }
+      adminQ = adminQ.eq('category_id', categoryId)
+      branchQ = branchQ.eq('category_id', categoryId)
     }
-    const { data } = await q.order('created_at', { ascending: false })
-    setQuestions(data ?? [])
+    const [{ data: adminData }, { data: branchData }] = await Promise.all([
+      adminQ.order('created_at', { ascending: false }),
+      branchQ.order('created_at', { ascending: false }),
+    ])
+    setAdminQuestions(adminData ?? [])
+    setQuestions(branchData ?? [])
   }
   useEffect(() => {
     load()
@@ -79,9 +103,10 @@ export default function QuizBankPage() {
   return (
     <div>
       <p className="mb-4 text-sm text-gray-500">
-        Questions feed both Quick Quiz and Formal Quiz in My Dashboard &gt; Study Log — for the store selected
-        above only. Switch stores to edit another store's question bank.
-        {isAdmin && ' As an admin, you can also copy a question from here straight into other stores.'}
+        Questions feed both Quick Quiz and Formal Quiz in My Dashboard &gt; Study Log — the Admin Quiz Bank below is
+        shared by every store; this store's own Branch Quiz Bank is below that. Switch stores to edit another
+        store's branch bank.
+        {isAdmin && ' As an admin, you can also copy a branch question from here straight into other stores.'}
       </p>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -101,11 +126,40 @@ export default function QuizBankPage() {
             ))}
           </select>
         )}
-        <Button className="ml-auto" onClick={() => setEditing({})}>
-          + New Question
-        </Button>
       </div>
 
+      <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700">
+        🔒 Admin Quiz Bank <span className="text-xs font-normal text-gray-400">(shared, read-only)</span>
+      </h3>
+      {!adminQuestions.length ? (
+        <EmptyState label="No admin-authored questions in this category yet." />
+      ) : (
+        <div className="mb-5 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-gray-50">
+          {adminQuestions.map((q) => (
+            <div key={q.id} className="flex items-center gap-2 px-4 py-2.5 opacity-80">
+              {q.image_path && (
+                <img
+                  src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
+                  alt=""
+                  className="h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
+                />
+              )}
+              <span className="text-sm text-gray-700">{q.question}</span>
+              <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'} className="ml-2">
+                {TYPE_LABEL[q.question_type] ?? 'Single choice'}
+              </Badge>
+              <Badge color="gray" className="ml-1">
+                Importance {q.importance}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">Branch Quiz Bank</h3>
+        <Button onClick={() => setEditing({})}>+ New Question</Button>
+      </div>
       {!questions.length ? (
         <EmptyState label="No questions in this category yet." />
       ) : (
