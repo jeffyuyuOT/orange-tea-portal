@@ -54,6 +54,11 @@ export default function MessagePage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [storeFilter, setStoreFilter] = useState('')
   const [search, setSearch] = useState('')
+  // Jeff, 2026-09: "同一訊息reply，在inbox跟sent裡面是不是要以第一封為主，
+  // 下拉展開" — which thread-root rows are currently expanded to show their
+  // replies. Keyed by root message id, shared across both tabs (each tab
+  // just looks up its own entries).
+  const [expandedRootIds, setExpandedRootIds] = useState(new Set())
 
   const storeNameById = useMemo(() => new Map(accessibleStores.map((s) => [s.id, s.name])), [accessibleStores])
 
@@ -149,6 +154,130 @@ export default function MessagePage() {
     })
   }, [rawItems, storeFilter, search, tab, nameByStoreProfile])
 
+  // Jeff, 2026-09: "同一訊息reply，在inbox跟sent裡面是不是要以第一封為主，下
+  // 拉展開，這樣才會知道是同一個主題" — group each tab's own rows by thread
+  // root instead of leaving every reply as its own separate flat row sorted
+  // purely by recency (which scatters a conversation and reorders it,
+  // newest first). `allKnownById` is EVERY message this person can see across
+  // BOTH tabs (not just the active one) — needed because a reply's direct
+  // parent (in_reply_to) is very often a message that landed in the OTHER
+  // tab (e.g. jeff-test's own follow-up in Sent replies to Jeff's reply,
+  // which is an Inbox item for jeff-test) — walking through the combined
+  // pool still resolves it back to the true thread root even though that
+  // in-between message is never itself shown in either tab's group.
+  const allKnownById = useMemo(() => {
+    const m = new Map()
+    for (const item of inboxItems) m.set(item.id, item)
+    for (const item of sentItems) m.set(item.id, item)
+    return m
+  }, [inboxItems, sentItems])
+
+  function rootIdOf(message) {
+    let current = message
+    const seen = new Set()
+    while (current?.in_reply_to && !seen.has(current.id) && allKnownById.has(current.in_reply_to)) {
+      seen.add(current.id)
+      current = allKnownById.get(current.in_reply_to)
+    }
+    return current?.id ?? message.id
+  }
+
+  // A Support case's Incomplete/Complete badge only ever lives on the
+  // ORIGINAL submission message — a reply never carries its own
+  // support_request_id (see ComposeMessageModal.jsx) — so a lone reply row
+  // (e.g. jeff-test's Inbox only ever has Jeff's reply, never the original
+  // case they themselves submitted) used to show no status at all. Jeff:
+  // "imcomplete跟complete的badge就算沒有對應到reply的訊息至少也知道是屬於
+  // 第一個訊息下(會有badge狀態)的" — look the badge up by thread root
+  // instead of by the individual row, so every row in a case's thread shows
+  // its status even if that particular message isn't the one carrying it.
+  const supportByRoot = useMemo(() => {
+    const m = new Map()
+    for (const item of allKnownById.values()) {
+      if (item.support_request) m.set(rootIdOf(item), item.support_request)
+    }
+    return m
+  }, [allKnownById]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Folds `items` (already search/store-filtered) into one row per thread —
+  // the earliest message THIS TAB has for that root as the primary row, any
+  // others as `replies` (oldest first) revealed by expanding it. A thread
+  // with only one message in this tab renders with no expand affordance at
+  // all, same as a plain flat row before this change.
+  const groupedItems = useMemo(() => {
+    const byRoot = new Map()
+    for (const item of items) {
+      const rootId = rootIdOf(item)
+      if (!byRoot.has(rootId)) byRoot.set(rootId, [])
+      byRoot.get(rootId).push(item)
+    }
+    return Array.from(byRoot.entries())
+      .map(([rootId, groupItems]) => {
+        const sorted = [...groupItems].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        const latestAt = Math.max(...groupItems.map((g) => new Date(g.created_at).getTime()))
+        return { rootId, primary: sorted[0], replies: sorted.slice(1), latestAt }
+      })
+      .sort((a, b) => b.latestAt - a.latestAt)
+  }, [items]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleExpanded(rootId, e) {
+    e.stopPropagation()
+    setExpandedRootIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(rootId)) next.delete(rootId)
+      else next.add(rootId)
+      return next
+    })
+  }
+
+  // One row, shared by a group's primary message and its (optionally)
+  // expanded replies — `supportBadge` is looked up by thread root (see
+  // above), never the row's own item, and `threadCount`/`expanded`/`onToggle`
+  // are only passed for a group's primary row when it actually has replies
+  // to reveal.
+  function renderRow(item, { nested = false, supportBadge = null, threadCount = 0, expanded = false, onToggle = null } = {}) {
+    const unread = tab === 'inbox' && !item.readAt
+    const isReply = !!item.in_reply_to
+    const toNames = tab === 'sent' ? (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)) : []
+    return (
+      <button
+        key={item.id}
+        onClick={() => setOpenMessageId(item.id)}
+        className={`flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-brand-50 sm:flex-row sm:items-center sm:justify-between ${
+          nested ? 'bg-brand-50/40 pl-9' : ''
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {threadCount > 0 && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => onToggle(e)}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onToggle(e)}
+              className="shrink-0 text-gray-400 hover:text-brand-600"
+              title={expanded ? 'Hide replies' : `Show ${threadCount} more in this thread`}
+            >
+              {expanded ? '▾' : '▸'}
+            </span>
+          )}
+          {unread && <Badge color="red">{isReply ? 'Update' : 'New'}</Badge>}
+          {supportBadge && (
+            <Badge color={supportBadge.completed ? 'green' : 'red'}>{supportBadge.completed ? 'Complete' : 'Incomplete'}</Badge>
+          )}
+          <span className={`font-medium ${unread ? 'text-gray-900' : 'text-gray-700'}`}>{item.subject}</span>
+          {/* Which store this message belongs to — helps someone
+              managing several stores tell them apart at a glance. */}
+          <Badge color="gray">{storeNameById.get(item.store_id) ?? 'Unknown store'}</Badge>
+          {threadCount > 0 && !expanded && <span className="text-xs text-gray-400">+{threadCount} in thread</span>}
+        </div>
+        <span className="shrink-0 text-xs text-gray-400">
+          {tab === 'sent' ? `To: ${toNames.join(', ') || '—'}` : `From: ${item.sender_name}`} ·{' '}
+          {new Date(item.created_at).toLocaleString()}
+        </span>
+      </button>
+    )
+  }
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -197,36 +326,19 @@ export default function MessagePage() {
         <EmptyState label={rawItems.length ? 'No messages match.' : tab === 'inbox' ? 'No messages received yet.' : 'No messages sent yet.'} />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {items.map((item) => {
-            // Unread received message: "New" the first time, or "Update"
-            // when it's a reply/reply-all/forward of something earlier —
-            // Jeff's spec ("沒閱讀會有new或update(如果是回復)的提示").
-            const unread = tab === 'inbox' && !item.readAt
-            const isReply = !!item.in_reply_to
-            const toNames = tab === 'sent' ? (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)) : []
+          {groupedItems.map(({ rootId, primary, replies }) => {
+            const expanded = expandedRootIds.has(rootId)
+            const supportBadge = supportByRoot.get(rootId)
             return (
-              <button
-                key={item.id}
-                onClick={() => setOpenMessageId(item.id)}
-                className="flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-brand-50 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  {unread && <Badge color="red">{isReply ? 'Update' : 'New'}</Badge>}
-                  {item.support_request && (
-                    <Badge color={item.support_request.completed ? 'green' : 'red'}>
-                      {item.support_request.completed ? 'Complete' : 'Incomplete'}
-                    </Badge>
-                  )}
-                  <span className={`font-medium ${unread ? 'text-gray-900' : 'text-gray-700'}`}>{item.subject}</span>
-                  {/* Which store this message belongs to — helps someone
-                      managing several stores tell them apart at a glance. */}
-                  <Badge color="gray">{storeNameById.get(item.store_id) ?? 'Unknown store'}</Badge>
-                </div>
-                <span className="shrink-0 text-xs text-gray-400">
-                  {tab === 'sent' ? `To: ${toNames.join(', ') || '—'}` : `From: ${item.sender_name}`} ·{' '}
-                  {new Date(item.created_at).toLocaleString()}
-                </span>
-              </button>
+              <div key={rootId}>
+                {renderRow(primary, {
+                  supportBadge,
+                  threadCount: replies.length,
+                  expanded,
+                  onToggle: (e) => toggleExpanded(rootId, e),
+                })}
+                {expanded && replies.map((item) => renderRow(item, { nested: true, supportBadge }))}
+              </div>
             )
           })}
         </div>
