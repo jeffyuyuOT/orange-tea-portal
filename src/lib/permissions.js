@@ -45,8 +45,30 @@ export const SECTIONS = {
     pages: {
       learning_tracker: 'Learning Tracker',
       staff_information: 'Staff Information',
-      training_code: 'Training Code',
+      // Jeff, 2026-09: "將quiz bank裡的quiz bank跟shop training database合併
+      // 變成training centre" — Quiz Bank (moved out of Admin Center; its old
+      // "Quiz Bank Setting" tab is pulled out separately below, into
+      // admin_center.quiz_settings) and Shop Training Database (moved out
+      // of its own top-level Shop Management page) become part of a shared
+      // "Training Centre" grouping, since both are the same shape of thing:
+      // a per-store content bank admin/developer can also copy between
+      // stores. Training Code joins them here too (Jeff, 2026-09, same day:
+      // "training centre是放在shop management下的...training code也放在
+      // training centre下") — Training Centre was briefly its own top-level
+      // section ("training_centre", sibling of shop_management) before Jeff
+      // asked for it to live inside Shop Management instead. These three
+      // keep their OWN page keys/permissions here (same as every other page
+      // in this section, and same as My Dashboard's bulletin/message/
+      // study_log/etc. all being independent keys under one section) —
+      // TrainingCentreLayout.jsx just renders a shared tab bar across these
+      // three specific pages for quick cross-navigation, the same way
+      // DashboardLayout.jsx does for My Dashboard's pages. Nothing in
+      // ROLE_DEFAULTS below referenced any of these three keys literally,
+      // so no role's access set changes as a result of either move — see
+      // the fuller note by shop_manager's exclusion list below.
+      quiz_bank: 'Quiz Bank',
       shop_training_database: 'Shop Training Database',
+      training_code: 'Training Code',
       staff_time_logs: 'Staff Time Logs',
       // Not a real "manage this" page — just the rotating QR display meant
       // to sit on a phone in the store. Excluded from shop_manager's default
@@ -69,7 +91,11 @@ export const SECTIONS = {
     label: 'Admin Center',
     pages: {
       formula_database: 'Formula Database',
-      quiz_bank: 'Quiz Bank',
+      // Jeff, 2026-09: "原本的quiz bank setting從quiz banks拿出來留在admin
+      // centre" — pulled out of what's now shop_management.quiz_bank into
+      // its own standalone page here, a sibling of Formula Database etc.,
+      // rather than a tab inside Quiz Bank.
+      quiz_settings: 'Quiz Bank Setting',
       file_repository: 'File Repository',
       user_management: 'User Management',
       store_management: 'Store Management',
@@ -122,6 +148,13 @@ const ROLE_DEFAULTS = {
   // deny/empty everything — Jeff's "有勾取，只是進不去". Now excluded here
   // the same way admin already is above, so the checkbox/Sidebar
   // link/route all agree: only `developer` gets Payroll by default.
+  // Jeff, 2026-09: the Training Centre merge / Quiz Bank Setting split above
+  // moved admin_center.quiz_bank → shop_management.quiz_bank and kept
+  // shop_management.shop_training_database/training_code as they were
+  // (just regrouped under the same Training Centre tab bar), plus split out
+  // admin_center.quiz_settings as a new key — none of those keys (old or
+  // new) are listed here, so shop_manager had, and keeps (via ALL.filter()
+  // picking up new/moved keys automatically), access to all of them.
   shop_manager: ALL.filter(
     (key) =>
       ![

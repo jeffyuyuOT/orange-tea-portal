@@ -87,7 +87,10 @@ export default function RosterHistoryPage() {
           <h1 className="text-xl font-semibold text-gray-900">History</h1>
           <p className="text-sm text-gray-500">Every saved and submitted roster for this store.</p>
         </div>
-        {profile?.role === 'admin' && accessibleStores.length > 1 && (
+        {/* Jeff, 2026-09: developer is meant to be admin's superset — this
+            multi-store export button only ever checked the literal 'admin'
+            role. */}
+        {(profile?.role === 'admin' || profile?.role === 'developer') && accessibleStores.length > 1 && (
           <Button variant="secondary" onClick={() => setShowMultiExport(true)}>
             Export multiple stores
           </Button>

@@ -7,7 +7,9 @@ import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 
 export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const { profile: me, currentStoreId, accessibleStores } = useAuth()
-  const isAdmin = me?.role === 'admin'
+  // Jeff, 2026-09: developer is meant to be admin's superset everywhere —
+  // this hire-date-editing gate only ever checked the literal 'admin' role.
+  const isAdmin = me?.role === 'admin' || me?.role === 'developer'
   // Accountant is view-only everywhere on this page (per Jeff: "只能看到"
   // — can only SEE) — the cash-in-hand filtering that keeps someone off
   // this list entirely happens earlier, in StaffListPage.jsx/RLS (see

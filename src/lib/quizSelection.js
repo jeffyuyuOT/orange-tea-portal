@@ -7,8 +7,9 @@
 //
 // Shared by Quick Quiz and Formal Quiz (both read the same
 // `formal_quiz_settings.top10_fill_blank_weight` value — see the "Formula
-// fill-in-the-blank questions" settings section in QuizBankPage.jsx) so a
-// Top 10 drink gets boosted consistently in both quiz types, not just one.
+// fill-in-the-blank questions" settings section in Admin Center's Quiz Bank
+// Setting page, QuizSettingsPage.jsx) so a Top 10 drink gets boosted
+// consistently in both quiz types, not just one.
 export function weightedSample(items, weightOf, count) {
   return items
     .map((item) => ({ item, key: Math.pow(Math.random(), 1 / Math.max(weightOf(item), 0.0001)) }))

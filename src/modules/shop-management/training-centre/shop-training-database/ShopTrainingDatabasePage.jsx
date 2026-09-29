@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
-import { useAuth } from '../../../lib/AuthContext'
-import Button from '../../../components/ui/Button'
-import Badge from '../../../components/ui/Badge'
-import Modal from '../../../components/ui/Modal'
-import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
-import { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { supabase } from '../../../../lib/supabaseClient'
+import { useAuth } from '../../../../lib/AuthContext'
+import Button from '../../../../components/ui/Button'
+import Badge from '../../../../components/ui/Badge'
+import Modal from '../../../../components/ui/Modal'
+import SimpleRichTextEditor from '../../../../components/ui/SimpleRichTextEditor'
+import { EmptyState } from '../../../../components/ui/LoadingSpinner'
 
 // Moved here from Admin Center (migration 0052): each store now owns its own
 // training content outright — no more one shared global list with an
@@ -14,6 +14,14 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 // longer under /admin-center) edits that store's own items. Admins keep a
 // "Copy to store…" action per item for seeding another store from an
 // existing one — see CopyToStoreModal below.
+//
+// Jeff, 2026-09: moved a second time, from its own top-level Shop Management
+// page into a Training Centre sub-tab alongside Quiz Bank ("將quiz bank裡的
+// quiz bank跟shop training database合併變成training centre") — same
+// per-store shape of content, same "copy to other store" admin/developer
+// action, so it now lives next to its Quiz Bank counterpart. No code changes
+// needed for the move itself — this file's relative import depth is
+// unchanged.
 export default function ShopTrainingDatabasePage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [items, setItems] = useState([])
@@ -26,7 +34,12 @@ export default function ShopTrainingDatabasePage() {
   // and leave sort_order inconsistent, not just double-fire.
   const [moving, setMoving] = useState(false)
 
-  const isAdmin = profile?.role === 'admin'
+  // Jeff, 2026-09: "developer也要像admin一樣可以copy到其他分店" — developer
+  // is meant to be admin's superset everywhere (RLS already treats it that
+  // way since migration 0058), but this was a front-end-only miss: the
+  // "Copy to store…" button/copy checked the literal 'admin' role and never
+  // included 'developer'.
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'developer'
 
   async function load() {
     if (!currentStoreId) return
@@ -59,7 +72,9 @@ export default function ShopTrainingDatabasePage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">Shop Training Database</h1>
+      {/* No own <h1> here — this now renders under TrainingCentreLayout's
+          shared "Training Centre" heading + tab bar, same as QuizBankPage.jsx
+          alongside it. */}
       <p className="mb-4 text-sm text-gray-500">
         Content shown in Operations &amp; Training &gt; Shop Training — for the store selected above only. Switch
         stores to edit another store's content.

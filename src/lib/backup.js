@@ -17,7 +17,10 @@ const BACKUP_TABLES = [
   'ingredient_format_rules',
   'shop_training_items',
   'quiz_questions',
-  'quiz_question_stores',
+  // quiz_question_stores dropped by migration 0071 — quiz_questions is now
+  // store-owned outright (store_id column) instead of one shared bank with
+  // an optional visibility-restriction join table, same as shop_training_items
+  // since migration 0052.
   'quiz_settings',
   'roster_staffing_rules',
 ]

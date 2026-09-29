@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
-import { useAuth } from '../../../lib/AuthContext'
-import { currentWeekStart } from '../../../lib/AuthContext'
-import Button from '../../../components/ui/Button'
+import { supabase } from '../../../../lib/supabaseClient'
+import { useAuth } from '../../../../lib/AuthContext'
+import { currentWeekStart } from '../../../../lib/AuthContext'
+import Button from '../../../../components/ui/Button'
 
 function randomCode() {
   return String(Math.floor(Math.random() * 10000)).padStart(4, '0')
@@ -41,7 +41,9 @@ export default function TrainingCodePage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">Training Code</h1>
+      {/* No own <h1> here — this now renders under TrainingCentreLayout's
+          shared "Training Centre" heading + tab bar, same as QuizBankPage.jsx
+          alongside it. */}
       <p className="mb-4 text-sm text-gray-500">
         This week's login code for Training accounts at this store (resets weekly).
       </p>

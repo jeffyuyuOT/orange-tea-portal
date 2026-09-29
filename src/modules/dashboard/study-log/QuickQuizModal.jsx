@@ -109,23 +109,22 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
     .filter(Boolean)
 }
 
+// Jeff, 2026-09: "現在出題的時候也會依照各分店的題庫去抓題" — quiz_questions
+// is now store-owned outright (migration 0071, same shape as
+// shop_training_items since 0052) instead of one shared bank with an
+// optional "visible at these stores" restriction list, so this now just
+// filters straight on store_id instead of separately fetching
+// quiz_question_stores and computing which rows are visible at storeId.
 async function buildBankQuestions(memorizedIds, storeId, targetCount, ratio) {
   const { data: candidateQuestions } = await supabase
     .from('quiz_questions')
     .select('*')
+    .eq('store_id', storeId)
     .in('formula_item_id', memorizedIds)
   if (!candidateQuestions?.length) return []
 
-  const ids = candidateQuestions.map((q) => q.id)
-  const { data: restrictionRows } = await supabase.from('quiz_question_stores').select('*').in('question_id', ids)
-  const restrictedIds = new Set((restrictionRows ?? []).map((r) => r.question_id))
-  const allowedPairs = new Set((restrictionRows ?? []).map((r) => `${r.question_id}:${r.store_id}`))
-  const visible = candidateQuestions.filter(
-    (q) => !restrictedIds.has(q.id) || allowedPairs.has(`${q.id}:${storeId}`)
-  )
-
   const byImportance = { 1: [], 2: [], 3: [] }
-  visible.forEach((q) => byImportance[q.importance]?.push(q))
+  candidateQuestions.forEach((q) => byImportance[q.importance]?.push(q))
 
   let selected = []
   for (const level of [1, 2, 3]) {
@@ -133,7 +132,7 @@ async function buildBankQuestions(memorizedIds, storeId, targetCount, ratio) {
     selected.push(...shuffle(byImportance[level]).slice(0, target))
   }
   if (selected.length < targetCount) {
-    const remaining = shuffle(visible.filter((q) => !selected.includes(q))).slice(0, targetCount - selected.length)
+    const remaining = shuffle(candidateQuestions.filter((q) => !selected.includes(q))).slice(0, targetCount - selected.length)
     selected.push(...remaining)
   }
   return shuffle(selected).slice(0, targetCount)
@@ -160,9 +159,9 @@ async function buildQuizSet(profile, storeId) {
 
   // A drink this store doesn't carry (per Formula Database's own per-item
   // store list, formula_item_stores) is dropped before anything else below
-  // — this takes priority over a quiz question's own separate store
-  // restriction (quiz_question_stores, checked further down): the Formula
-  // Database's per-drink store assignment is authoritative.
+  // — this takes priority over which store owns a given quiz_questions row
+  // (checked further down, in buildBankQuestions): the Formula Database's
+  // per-drink store assignment is authoritative.
   const { data: drinkStoreRows } = await supabase
     .from('formula_item_stores')
     .select('*')

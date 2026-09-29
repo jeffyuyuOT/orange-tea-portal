@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
-import { useAuth } from '../../../lib/AuthContext'
-import Modal from '../../../components/ui/Modal'
-import Button from '../../../components/ui/Button'
+import { supabase } from '../../../../lib/supabaseClient'
+import { useAuth } from '../../../../lib/AuthContext'
+import Modal from '../../../../components/ui/Modal'
+import Button from '../../../../components/ui/Button'
 import QuizImagePicker from './QuizImagePicker'
 
 const CHOICE_KEYS = ['A', 'B', 'C', 'D']
@@ -14,8 +14,16 @@ const CHOICE_KEYS = ['A', 'B', 'C', 'D']
 // Repository" instead of being uploaded again.
 const QUIZ_IMAGE_CATEGORY_ID = '00000000-0000-0000-0000-000000000007'
 
-export default function QuestionEditModal({ question, groupKey, categoryId, onClose, onSaved }) {
-  const { profile, accessibleStores } = useAuth()
+// Jeff, 2026-09: migration 0071 made quiz_questions store-owned outright
+// (one store per question, set by page context — the store selected above
+// in Training Centre — like shop_training_items since migration 0052)
+// instead of one shared bank with an optional "visible at these stores"
+// restriction list. That means this modal no longer has a "Stores (default:
+// all)" picker — a question can no longer belong to several stores at once,
+// only to the one it's being created/edited at; use "Copy to store…" on the
+// list page for putting an equivalent copy at another store.
+export default function QuestionEditModal({ question, groupKey, categoryId, currentStoreId, onClose, onSaved }) {
+  const { profile } = useAuth()
   const isNew = !question.id
   const [items, setItems] = useState([]) // formula_items or shop_training_items to link to
   const [linkedId, setLinkedId] = useState(question.formula_item_id ?? question.shop_training_item_id ?? '')
@@ -36,7 +44,6 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
   // add/remove, same idea as Leave Limits' custom-period rows.
   const [acceptedAnswers, setAcceptedAnswers] = useState(question.accepted_answers?.length ? question.accepted_answers : [])
   const [importance, setImportance] = useState(question.importance ?? 2)
-  const [storeIds, setStoreIds] = useState(null)
   const [imagePath, setImagePath] = useState(question.image_path ?? '')
   const [uploadingImage, setUploadingImage] = useState(false)
   const [pickingImage, setPickingImage] = useState(false)
@@ -67,31 +74,22 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
 
   useEffect(() => {
     if (groupKey === 'shop_training') {
-      // Since migration 0052 each store has its own copy of a title (e.g.
-      // 5 separate "POS Note" rows), so the store name is appended to tell
-      // otherwise-identical options apart.
+      // Each store now owns its own shop_training_items (migration 0052),
+      // and this question itself belongs to exactly one store (currentStoreId)
+      // — so only that store's own items are valid link targets, unlike the
+      // old cross-store dropdown this replaced.
       supabase
         .from('shop_training_items')
-        .select('id, title, stores ( name )')
+        .select('id, title')
+        .eq('store_id', currentStoreId)
         .order('title')
-        .then(({ data }) =>
-          setItems((data ?? []).map((d) => ({ id: d.id, label: d.stores?.name ? `${d.title} — ${d.stores.name}` : d.title })))
-        )
+        .then(({ data }) => setItems((data ?? []).map((d) => ({ id: d.id, label: d.title }))))
     } else {
       let q = supabase.from('formula_items').select('id, name_en').eq('group_key', groupKey)
       q = categoryId ? q.eq('category_id', categoryId) : q.is('category_id', null)
       q.order('name_en').then(({ data }) => setItems((data ?? []).map((d) => ({ id: d.id, label: d.name_en }))))
     }
-  }, [groupKey, categoryId])
-
-  useEffect(() => {
-    if (!question.id) return
-    supabase
-      .from('quiz_question_stores')
-      .select('store_id')
-      .eq('question_id', question.id)
-      .then(({ data }) => setStoreIds(data?.length ? data.map((r) => r.store_id) : null))
-  }, [question.id])
+  }, [groupKey, categoryId, currentStoreId])
 
   function toggleCorrectChoice(key) {
     setCorrectChoices((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -118,26 +116,20 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
         importance,
         image_path: imagePath || null,
       }
-      let id = question.id
       if (isNew) {
-        const { data, error } = await supabase
-          .from('quiz_questions')
-          .insert({
-            ...payload,
-            created_by: profile.id,
-            created_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
-          })
-          .select()
-          .single()
+        const { error } = await supabase.from('quiz_questions').insert({
+          ...payload,
+          store_id: currentStoreId,
+          created_by: profile.id,
+          created_by_name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email,
+        })
         if (error) throw error
-        id = data.id
       } else {
-        const { error } = await supabase.from('quiz_questions').update(payload).eq('id', id)
+        // store_id is set once at creation and never changes here — same as
+        // shop_training_items' EditModal — use "Copy to store…" on the list
+        // page to put an equivalent copy at another store instead.
+        const { error } = await supabase.from('quiz_questions').update(payload).eq('id', question.id)
         if (error) throw error
-        await supabase.from('quiz_question_stores').delete().eq('question_id', id)
-      }
-      if (storeIds && storeIds.length) {
-        await supabase.from('quiz_question_stores').insert(storeIds.map((s) => ({ question_id: id, store_id: s })))
       }
       onSaved()
     } catch (err) {
@@ -292,36 +284,14 @@ export default function QuestionEditModal({ question, groupKey, categoryId, onCl
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Importance (1 = most important)</span>
-            <select className="input" value={importance} onChange={(e) => setImportance(Number(e.target.value))}>
-              <option value={1}>1 — Most important</option>
-              <option value={2}>2 — Important</option>
-              <option value={3}>3 — Nice to know</option>
-            </select>
-          </label>
-          <div>
-            <span className="mb-1 block text-xs font-medium text-gray-500">Stores (default: all)</span>
-            <div className="flex flex-wrap gap-2">
-              {accessibleStores.map((s) => (
-                <label key={s.id} className="flex items-center gap-1 text-xs text-gray-600">
-                  <input
-                    type="checkbox"
-                    checked={storeIds === null || storeIds.includes(s.id)}
-                    onChange={(e) => {
-                      setStoreIds((prev) => {
-                        const current = prev === null ? accessibleStores.map((x) => x.id) : prev
-                        return e.target.checked ? [...current, s.id] : current.filter((id) => id !== s.id)
-                      })
-                    }}
-                  />
-                  {s.name}
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
+        <label className="block max-w-xs">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Importance (1 = most important)</span>
+          <select className="input" value={importance} onChange={(e) => setImportance(Number(e.target.value))}>
+            <option value={1}>1 — Most important</option>
+            <option value={2}>2 — Important</option>
+            <option value={3}>3 — Nice to know</option>
+          </select>
+        </label>
       </div>
     </Modal>
     {pickingImage && (

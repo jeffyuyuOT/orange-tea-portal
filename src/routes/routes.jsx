@@ -20,8 +20,6 @@ import MyInformationPage from '../modules/dashboard/my-information/MyInformation
 
 import LearningTrackerPage from '../modules/shop-management/learning-tracker/LearningTrackerPage'
 import StaffListPage from '../modules/shop-management/staff-information/StaffListPage'
-import TrainingCodePage from '../modules/shop-management/training-code/TrainingCodePage'
-import ShopTrainingDatabasePage from '../modules/shop-management/shop-training-database/ShopTrainingDatabasePage'
 import StaffTimeLogsPage from '../modules/shop-management/staff-time-logs/StaffTimeLogsPage'
 import QrCodeDisplayPage from '../modules/shop-management/qr-code-display/QrCodeDisplayPage'
 
@@ -33,13 +31,25 @@ import LeaveManagementPage from '../modules/roster-hub/leave-management/LeaveMan
 import RosterSettingsPage from '../modules/roster-hub/settings/RosterSettingsPage'
 
 import FormulaDatabasePage from '../modules/admin-center/formula-database/FormulaDatabasePage'
-import QuizBankPage from '../modules/admin-center/quiz-bank/QuizBankPage'
+import QuizSettingsPage from '../modules/admin-center/quiz-settings/QuizSettingsPage'
 import FileRepositoryPage from '../modules/admin-center/file-repository/FileRepositoryPage'
 import UserManagementPage from '../modules/admin-center/user-management/UserManagementPage'
 import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
 import SystemSettingPage from '../modules/admin-center/system-setting/SystemSettingPage'
 
 import PayrollPage from '../modules/developer/payroll/PayrollPage'
+
+// Jeff, 2026-09: Quiz Bank + Shop Training Database merged into a "Training
+// Centre" tab bar (TrainingCentreLayout.jsx), which itself lives inside
+// Shop Management (moved there the same day, along with Training Code
+// joining as this bar's third tab — see permissions.js's shop_management
+// SECTIONS entry). Quiz Bank's old "Setting" tab was pulled out separately
+// into its own standalone admin_center.quiz_settings page/route (import
+// above).
+import TrainingCentreLayout from '../modules/shop-management/training-centre/TrainingCentreLayout'
+import TrainingCentreQuizBankPage from '../modules/shop-management/training-centre/quiz-bank/QuizBankPage'
+import TrainingCentreShopTrainingDatabasePage from '../modules/shop-management/training-centre/shop-training-database/ShopTrainingDatabasePage'
+import TrainingCentreTrainingCodePage from '../modules/shop-management/training-centre/training-code/TrainingCodePage'
 
 function guarded(pageKey, element) {
   return <RequirePage pageKey={pageKey}>{element}</RequirePage>
@@ -97,11 +107,25 @@ export default function AppRoutes() {
 
         <Route path="/shop-management/learning-tracker" element={guarded('shop_management.learning_tracker', <LearningTrackerPage />)} />
         <Route path="/shop-management/staff-information" element={guarded('shop_management.staff_information', <StaffListPage />)} />
-        <Route path="/shop-management/training-code" element={guarded('shop_management.training_code', <TrainingCodePage />)} />
-        <Route
-          path="/shop-management/shop-training-database"
-          element={guarded('shop_management.shop_training_database', <ShopTrainingDatabasePage />)}
-        />
+
+        {/* Jeff, 2026-09: "training centre是放在shop management下的" — these
+            three share TrainingCentreLayout's tab bar but keep their own
+            page keys/URLs under /shop-management/..., same as every other
+            page in this section (and matching how Sidebar.jsx generically
+            builds each link as /{section}/{page} from permissions.js — no
+            change needed there). This wrapper Route has no path of its own
+            (same pathless-layout pattern AppShell's own wrapping Route
+            above uses), so its children's absolute paths resolve from root
+            exactly as if it weren't there. */}
+        <Route element={<TrainingCentreLayout />}>
+          <Route path="/shop-management/quiz-bank" element={guarded('shop_management.quiz_bank', <TrainingCentreQuizBankPage />)} />
+          <Route
+            path="/shop-management/shop-training-database"
+            element={guarded('shop_management.shop_training_database', <TrainingCentreShopTrainingDatabasePage />)}
+          />
+          <Route path="/shop-management/training-code" element={guarded('shop_management.training_code', <TrainingCentreTrainingCodePage />)} />
+        </Route>
+
         <Route path="/shop-management/staff-time-logs" element={guarded('shop_management.staff_time_logs', <StaffTimeLogsPage />)} />
         <Route path="/shop-management/qr-code" element={guarded('shop_management.qr_code', <QrCodeDisplayPage />)} />
 
@@ -113,7 +137,7 @@ export default function AppRoutes() {
         <Route path="/roster-hub/settings" element={guarded('roster_hub.settings', <RosterSettingsPage />)} />
 
         <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
-        <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <QuizBankPage />)} />
+        <Route path="/admin-center/quiz-settings" element={guarded('admin_center.quiz_settings', <QuizSettingsPage />)} />
         <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
         <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
         <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />

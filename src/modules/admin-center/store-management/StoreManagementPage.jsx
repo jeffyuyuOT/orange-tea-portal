@@ -14,10 +14,10 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 //
 // Deliberately no hard-delete button: nearly every table that references
 // store_id does so with `on delete cascade` (roster_periods, leave_requests,
-// announcements, quiz_question_stores, formula_item_stores, ...), so
-// deleting a store here could silently wipe that store's entire roster/
-// leave/announcement history. Deactivating (is_active = false) is the safe
-// equivalent — it hides the store from pickers/assignment (see
+// announcements, quiz_questions, formula_item_stores, ...), so deleting a
+// store here could silently wipe that store's entire roster/leave/
+// announcement/quiz-bank history. Deactivating (is_active = false) is the
+// safe equivalent — it hides the store from pickers/assignment (see
 // AuthContext.jsx / StoreSwitcher.jsx) without touching its history.
 export default function StoreManagementPage() {
   const [stores, setStores] = useState([])

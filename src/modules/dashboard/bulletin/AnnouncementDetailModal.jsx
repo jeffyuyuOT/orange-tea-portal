@@ -28,18 +28,31 @@ function nameOf(profile) {
 }
 
 export default function AnnouncementDetailModal({ announcementId, storeId, onClose, onSaved }) {
-  const { profile } = useAuth()
+  const { profile, accessibleStores } = useAuth()
   const isNew = !announcementId
   // developer counts as manager/admin here too — see BulletinPage.jsx's
   // matching comment (Jeff, 2026-09: developer couldn't edit/delete their
   // own post's manager-only bits, or see "View history", for the same
   // reason posting was broken for them).
   const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager' || profile?.role === 'developer'
+  // Jeff, 2026-09: admin/developer can broadcast a brand-new announcement to
+  // several stores at once ("有的訊息是要給所有分店或特定那些分店的") — admin/
+  // developer are the only roles whose accessibleStores ever spans more than
+  // one store in the first place (see AuthContext.jsx), and RLS already lets
+  // both write announcements at any store_id via is_admin() (migration 0058
+  // makes developer that function's superset too), so this needs no DB
+  // change — just picking which store(s) each checked box turns into its own
+  // independent row for below.
+  const canBroadcast = isNew && (profile?.role === 'admin' || profile?.role === 'developer') && accessibleStores.length > 1
   const [editing, setEditing] = useState(isNew)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [isImportant, setIsImportant] = useState(false)
   const [category, setCategory] = useState('normal')
+  // Defaults to just the store this modal was opened from — ticking more
+  // boxes is opt-in, so behaviour for anyone who never touches this section
+  // (shop_manager, or a single-store admin/developer) is unchanged.
+  const [selectedStoreIds, setSelectedStoreIds] = useState(() => [storeId])
   const [createdBy, setCreatedBy] = useState(null)
   const [solved, setSolved] = useState(false)
   // The checkbox itself only edits this draft — nothing is written until
@@ -128,6 +141,10 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     }
   }, [announcementId, isNew]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  function toggleStore(id) {
+    setSelectedStoreIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
+  }
+
   function onCategorySelect(value) {
     if (value === 'customer_complaint') {
       setCategory('customer_complaint')
@@ -145,32 +162,40 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       // after that person's account is later removed.
       const actorName = nameOf(profile)
       if (isNew) {
-        const { data, error } = await supabase
-          .from('announcements')
-          .insert({
-            store_id: storeId,
-            title,
-            content_html: content,
-            is_important: isImportant,
-            category,
-            created_by: profile.id,
-            created_by_name: actorName,
-            updated_by: profile.id,
-            updated_by_name: actorName,
-          })
-          .select()
-          .single()
-        if (error) throw error
-        await supabase
-          .from('announcement_history')
-          .insert({ announcement_id: data.id, action: 'created', actor_id: profile.id, actor_name: actorName })
-        // The poster has obviously already "seen" their own post — mark it
-        // read for them so it doesn't show up flagged NEW on their own
-        // Bulletin Board.
-        await supabase.from('announcement_reads').upsert(
-          { profile_id: profile.id, announcement_id: data.id },
-          { onConflict: 'profile_id,announcement_id', ignoreDuplicates: true }
-        )
+        // A broadcast to N stores becomes N independent rows — same reasoning
+        // as the comment on canBroadcast above: each store's copy gets its
+        // own id, history, comments and read receipts, exactly like every
+        // other per-store admin/developer content in this app, rather than
+        // one row several stores would have to jointly own.
+        const targetStoreIds = canBroadcast && selectedStoreIds.length ? selectedStoreIds : [storeId]
+        for (const targetStoreId of targetStoreIds) {
+          const { data, error } = await supabase
+            .from('announcements')
+            .insert({
+              store_id: targetStoreId,
+              title,
+              content_html: content,
+              is_important: isImportant,
+              category,
+              created_by: profile.id,
+              created_by_name: actorName,
+              updated_by: profile.id,
+              updated_by_name: actorName,
+            })
+            .select()
+            .single()
+          if (error) throw error
+          await supabase
+            .from('announcement_history')
+            .insert({ announcement_id: data.id, action: 'created', actor_id: profile.id, actor_name: actorName })
+          // The poster has obviously already "seen" their own post — mark it
+          // read for them so it doesn't show up flagged NEW on their own
+          // Bulletin Board.
+          await supabase.from('announcement_reads').upsert(
+            { profile_id: profile.id, announcement_id: data.id },
+            { onConflict: 'profile_id,announcement_id', ignoreDuplicates: true }
+          )
+        }
       } else {
         const { error } = await supabase
           .from('announcements')
@@ -274,7 +299,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             <Button variant="secondary" onClick={() => (isNew ? onClose() : setEditing(false))}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving || !title}>
+            <Button onClick={save} disabled={saving || !title || (canBroadcast && !selectedStoreIds.length)}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </>
@@ -329,6 +354,21 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} />
             Mark as important
           </label>
+          {canBroadcast && (
+            <div>
+              <span className="mb-1 block text-xs font-medium text-gray-500">
+                Publish to stores (checked stores each get this announcement)
+              </span>
+              <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 p-2">
+                {accessibleStores.map((s) => (
+                  <label key={s.id} className="flex items-center gap-1.5 text-sm text-gray-700">
+                    <input type="checkbox" checked={selectedStoreIds.includes(s.id)} onChange={() => toggleStore(s.id)} />
+                    {s.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

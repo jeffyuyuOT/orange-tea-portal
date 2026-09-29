@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
-import Modal from '../../../components/ui/Modal'
-import { EmptyState } from '../../../components/ui/LoadingSpinner'
+import { supabase } from '../../../../lib/supabaseClient'
+import Modal from '../../../../components/ui/Modal'
+import { EmptyState } from '../../../../components/ui/LoadingSpinner'
 
 // file_repository has no mime-type column, so "is this an image" is judged
 // by file extension — good enough since every file offered here was itself

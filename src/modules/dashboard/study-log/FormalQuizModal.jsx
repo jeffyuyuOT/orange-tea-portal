@@ -36,12 +36,11 @@ async function buildFormalQuizSet(profileId, storeId) {
 
   // A drink this store doesn't carry (per Formula Database's own per-item
   // store list, formula_item_stores) is dropped before anything else below
-  // — this takes priority over a quiz question's own separate store
-  // restriction (quiz_question_stores, checked further down) and applies to
-  // BOTH the auto-generated ingredient-based fill-blank questions and the
-  // Quiz Bank questions pulled below, since both are drawn from
-  // memorizedIds: the Formula Database's per-drink store assignment is
-  // authoritative.
+  // — this takes priority over which store owns a given quiz_questions row
+  // (filtered further down) and applies to BOTH the auto-generated
+  // ingredient-based fill-blank questions and the Quiz Bank questions
+  // pulled below, since both are drawn from memorizedIds: the Formula
+  // Database's per-drink store assignment is authoritative.
   const { data: drinkStoreRows } = await supabase
     .from('formula_item_stores')
     .select('*')
@@ -84,8 +83,9 @@ async function buildFormalQuizSet(profileId, storeId) {
     // Same admin-curated exclusion list Quick Quiz's buildFormulaQuestions
     // already used (e.g. water, ice — quantity isn't meaningful to quiz on)
     // — shared across both quiz types, see the "Formula fill-in-the-blank
-    // questions" settings section in QuizBankPage.jsx. Formal Quiz didn't
-    // apply this before, so an excluded ingredient could still turn up here.
+    // questions" settings section in Admin Center's Quiz Bank Setting page
+    // (QuizSettingsPage.jsx). Formal Quiz didn't apply this before, so an
+    // excluded ingredient could still turn up here.
     supabase.from('quiz_excluded_ingredients').select('ingredient_id'),
     // Every distinct quantity_text recorded anywhere (any item, any store)
     // for each ingredient — supplies the "real" wrong-answer pool for
@@ -120,20 +120,24 @@ async function buildFormalQuizSet(profileId, storeId) {
   // --- Choice-type candidates (single or multi) + bank-authored fill-blank
   // candidates: same source/filtering as Quick Quiz, split by question_type.
   // A question authored as 'single' renders/grades as the original 'choice'
-  // type; 'multi' and 'fill_blank' are new. ---
-  const { data: candidateQuestions } = await supabase.from('quiz_questions').select('*').in('formula_item_id', memorizedIds)
+  // type; 'multi' and 'fill_blank' are new.
+  //
+  // Jeff, 2026-09: "現在出題的時候也會依照各分店的題庫去抓題" — quiz_questions
+  // is now store-owned outright (migration 0071), so this filters straight
+  // on store_id instead of separately fetching quiz_question_stores and
+  // computing which rows are visible at storeId. ---
+  const { data: candidateQuestions } = await supabase
+    .from('quiz_questions')
+    .select('*')
+    .eq('store_id', storeId)
+    .in('formula_item_id', memorizedIds)
   let mcVisible = []
   let bankFillBlankVisible = []
   if (candidateQuestions?.length) {
-    const ids = candidateQuestions.map((q) => q.id)
-    const { data: restrictionRows } = await supabase.from('quiz_question_stores').select('*').in('question_id', ids)
-    const restrictedIds = new Set((restrictionRows ?? []).map((r) => r.question_id))
-    const allowedPairs = new Set((restrictionRows ?? []).map((r) => `${r.question_id}:${r.store_id}`))
-    const visible = candidateQuestions.filter((q) => !restrictedIds.has(q.id) || allowedPairs.has(`${q.id}:${storeId}`))
-    mcVisible = visible
+    mcVisible = candidateQuestions
       .filter((q) => (q.question_type ?? 'single') !== 'fill_blank')
       .map((q) => ({ type: q.question_type === 'multi' ? 'multi' : 'choice', localId: q.id, ...q }))
-    bankFillBlankVisible = visible
+    bankFillBlankVisible = candidateQuestions
       .filter((q) => q.question_type === 'fill_blank')
       .map((q) => ({
         type: 'fill_blank',
