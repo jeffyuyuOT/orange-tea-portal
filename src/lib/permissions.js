@@ -152,13 +152,17 @@ const ROLE_DEFAULTS = {
   // moved admin_center.quiz_bank → shop_management.quiz_bank and kept
   // shop_management.shop_training_database/training_code as they were
   // (just regrouped under the same Training Centre tab bar), plus split out
-  // admin_center.quiz_settings as a new key — none of those keys (old or
-  // new) are listed here, so shop_manager had, and keeps (via ALL.filter()
-  // picking up new/moved keys automatically), access to all of them.
+  // admin_center.quiz_settings as a new key — shop_manager keeps the first
+  // three (via ALL.filter() picking up new/moved keys automatically, same as
+  // before), but Jeff, 2026-09 (later): shop_manager's default should NOT
+  // have admin_center.quiz_settings ticked — added below, alongside the
+  // rest of Admin Center's own settings pages this role already doesn't get
+  // by default.
   shop_manager: ALL.filter(
     (key) =>
       ![
         'admin_center.formula_database',
+        'admin_center.quiz_settings',
         'admin_center.file_repository',
         'admin_center.user_management',
         'admin_center.store_management',
