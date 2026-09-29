@@ -173,6 +173,19 @@ export default function QuestionEditModal({ question, groupKey, categoryId, curr
               </option>
             ))}
           </select>
+          {/* Jeff, 2026-09: "有的題目是會涵蓋好幾種飲料的概念" — this has
+              always been optional; leaving it as "—" is fine for a question
+              that isn't really about one specific item. Quick Quiz only
+              draws questions linked to something the person has actually
+              memorized, so an unlinked question never shows up there — but
+              Formal Quiz has no such restriction (see FormalQuizModal.jsx)
+              and pulls it in regardless. */}
+          {groupKey !== 'shop_training' && !linkedId && (
+            <p className="mt-1 text-xs text-gray-400">
+              Leave unselected for a question that spans several drinks rather than one — it'll still appear in
+              Formal Quiz, just not Quick Quiz.
+            </p>
+          )}
         </label>
 
         <label className="block">

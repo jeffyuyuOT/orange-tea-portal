@@ -130,12 +130,25 @@ async function buildFormalQuizSet(profileId, storeId) {
   // Jeff, 2026-09 (later): also pool in the reinstated admin-authored,
   // shared tier (store_id IS NULL — migration 0073) alongside this store's
   // own branch questions — same change as QuickQuizModal.jsx's
-  // buildBankQuestions. ---
+  // buildBankQuestions.
+  //
+  // Jeff, 2026-09 (later still): "Quick Quiz出題目前只會抓連結Formula項目的
+  // 題目這個沒問題，但Formal Quiz則沒有這個限制...有的題目是會涵蓋好幾種飲料
+  // 的概念...因為預設會考formal quiz都是全部或大部分memorised的user" — a
+  // question with NO linked formula item (already optional — QuestionEditModal
+  // never required one) covers a concept spanning several drinks rather than
+  // one specific item, so it can't be matched against `memorizedIds` the way
+  // Quick Quiz's pool is. Quick Quiz stays restricted to memorized-item-linked
+  // questions only (Jeff: that restriction is fine there, since a Quick Quiz
+  // is scoped to what's actually memorized so far). Formal Quiz has no such
+  // restriction — by the time someone takes it they've memorized all or most
+  // items — so it also pulls in every formula_item_id IS NULL bank question,
+  // unconditionally, alongside the memorized-item-linked ones. ---
   const { data: candidateQuestions } = await supabase
     .from('quiz_questions')
     .select('*')
     .or(`store_id.is.null,store_id.eq.${storeId}`)
-    .in('formula_item_id', memorizedIds)
+    .or(`formula_item_id.is.null,formula_item_id.in.(${memorizedIds.join(',')})`)
   let mcVisible = []
   let bankFillBlankVisible = []
   if (candidateQuestions?.length) {

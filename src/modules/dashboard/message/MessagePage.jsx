@@ -53,6 +53,13 @@ export default function MessagePage() {
   const [composing, setComposing] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [storeFilter, setStoreFilter] = useState('')
+  // Jeff, 2026-09: "message裡新增日期篩選在store篩選前面" — a from/to date
+  // range filter, placed before the store filter in the row below. Compares
+  // against each message's created_at (its own calendar day, in the
+  // viewer's local time — same as how the row itself displays the date via
+  // toLocaleString()), inclusive on both ends.
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [search, setSearch] = useState('')
   // Jeff, 2026-09: "同一訊息reply，在inbox跟sent裡面是不是要以第一封為主，
   // 下拉展開" — which thread-root rows are currently expanded to show their
@@ -146,13 +153,15 @@ export default function MessagePage() {
   const items = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rawItems.filter((item) => {
+      if (dateFrom && new Date(item.created_at) < new Date(`${dateFrom}T00:00:00`)) return false
+      if (dateTo && new Date(item.created_at) > new Date(`${dateTo}T23:59:59.999`)) return false
       if (storeFilter && item.store_id !== storeFilter) return false
       if (!q) return true
       const counterpartNames =
         tab === 'inbox' ? item.sender_name ?? '' : (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)).join(' ')
       return item.subject.toLowerCase().includes(q) || counterpartNames.toLowerCase().includes(q)
     })
-  }, [rawItems, storeFilter, search, tab, nameByStoreProfile])
+  }, [rawItems, dateFrom, dateTo, storeFilter, search, tab, nameByStoreProfile])
 
   // Jeff, 2026-09: "同一訊息reply，在inbox跟sent裡面是不是要以第一封為主，下
   // 拉展開，這樣才會知道是同一個主題" — group each tab's own rows by thread
@@ -297,11 +306,27 @@ export default function MessagePage() {
         <Button onClick={() => setComposing(true)}>+ New message</Button>
       </div>
 
-      {/* Store filter — hidden entirely for someone with access to only
-          one store, since there'd be nothing to filter — and a search box
-          over subject + the other party's name, per Jeff's spec for
-          managing messages across several stores at once. */}
+      {/* Date filter (from/to), then the store filter — hidden entirely for
+          someone with access to only one store, since there'd be nothing to
+          filter — then a search box over subject + the other party's name,
+          per Jeff's spec for managing messages across several stores at once. */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <input type="date" className="input w-auto" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <span className="text-sm text-gray-400">–</span>
+          <input type="date" className="input w-auto" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => {
+                setDateFrom('')
+                setDateTo('')
+              }}
+              className="text-xs text-gray-400 hover:text-red-500"
+            >
+              Clear
+            </button>
+          )}
+        </div>
         {accessibleStores.length > 1 && (
           <select className="input max-w-[12rem]" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
             <option value="">All stores</option>
