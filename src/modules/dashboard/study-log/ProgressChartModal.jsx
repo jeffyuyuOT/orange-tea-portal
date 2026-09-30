@@ -355,89 +355,21 @@ export default function ProgressChartModal({ profileId, onClose }) {
       ) : (
         <div>
           <p className="mb-2 text-sm text-gray-500">
-            Formula items memorized against hours worked (from attendance logs) since hire date (
+            ⭐ Must Know Item memorized against hours worked (from attendance logs) since hire date (
             {new Date(hireDate).toLocaleDateString()}
             {usedFallbackDate ? ' — no hire date on file, using account creation date instead' : ''}).
           </p>
-          {!isQualified && chart.hoursSoFar === 0 && events.length > 0 && (
-            <p className="mb-2 text-xs text-amber-600">
-              No attendance logs on file yet for this person — hours worked can't be calculated, so every memorized
-              item shows at 0h below until a clock-in/out is on record.
-            </p>
-          )}
-          <div className="mb-2 flex items-center gap-4 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-0.5 w-4 rounded bg-[#ea580c]" /> Memorized items
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span
-                className="inline-block h-0.5 w-4 rounded"
-                style={{ background: `repeating-linear-gradient(90deg, ${AVG_LINE_COLOR} 0 4px, transparent 4px 7px)` }}
-              />
-              Average learning curve (100 hours)
-            </span>
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-brand-100 bg-white">
-            <svg width={chart.width} height={CHART_HEIGHT} className="block">
-              {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-                <g key={f}>
-                  <line
-                    x1={PAD_LEFT}
-                    x2={chart.width - PAD_RIGHT}
-                    y1={PAD_TOP + chart.plotHeight * (1 - f)}
-                    y2={PAD_TOP + chart.plotHeight * (1 - f)}
-                    stroke="#ffedd5"
-                  />
-                  <text x={PAD_LEFT - 8} y={PAD_TOP + chart.plotHeight * (1 - f) + 4} textAnchor="end" fontSize="10" fill="#9ca3af">
-                    {Math.round(chart.maxCount * f)}
-                  </text>
-                </g>
-              ))}
-              {chart.ticks.map((t) => (
-                <g key={t.hour}>
-                  <line x1={chart.xScale(t.hour)} x2={chart.xScale(t.hour)} y1={PAD_TOP} y2={CHART_HEIGHT - PAD_BOTTOM} stroke="#fff7ed" />
-                  <text x={chart.xScale(t.hour)} y={CHART_HEIGHT - PAD_BOTTOM + 16} textAnchor="middle" fontSize="10" fill="#9ca3af">
-                    {t.label}
-                  </text>
-                </g>
-              ))}
-              {/* "hours worked so far" marker */}
-              <line
-                x1={chart.xScale(chart.hoursSoFar)}
-                x2={chart.xScale(chart.hoursSoFar)}
-                y1={PAD_TOP}
-                y2={CHART_HEIGHT - PAD_BOTTOM}
-                stroke="#fb923c"
-                strokeDasharray="3,3"
-              />
-              {/* Average learning curve — Jeff's 100-hour target pace, drawn
-                  in a different color from the actual (orange) progress line
-                  so the two are never mistaken for each other, plus a text
-                  label right where it reaches the target. */}
-              <path d={chart.avgPath} fill="none" stroke={AVG_LINE_COLOR} strokeWidth="1.5" strokeDasharray="5,4" />
-              <text
-                x={chart.xScale(TARGET_HOURS) + 4}
-                y={chart.yScale(totalItems) - 6}
-                fontSize="10"
-                fill={AVG_LINE_COLOR}
-              >
-                Average learning curve
-              </text>
-              <path d={chart.path} fill="none" stroke="#ea580c" strokeWidth="2" />
-              {chart.points.map(([h, c], i) => (
-                <circle key={i} cx={chart.xScale(h)} cy={chart.yScale(c)} r="3" fill="#ea580c" />
-              ))}
-            </svg>
-          </div>
-          <p className="mt-2 text-xs text-gray-400">
-            {isQualified
-              ? 'Qualified staff — every item counts as memorized from day one.'
-              : `${chart.memorizedNow} item${chart.memorizedNow === 1 ? '' : 's'} memorized so far · ${chart.hoursSoFar.toFixed(1)}h worked (dashed line = hours worked so far).`}
-          </p>
 
-          {mustKnowChart && (
-            <div className="mt-6 border-t border-brand-100 pt-4">
-              <p className="mb-2 text-sm font-medium text-gray-700">⭐ Must Know Item only</p>
+          {!mustKnowChart ? (
+            <EmptyState label="No items marked Must Know Item yet — check it when editing a drink or a Shop Training item." />
+          ) : (
+            <div>
+              {mustKnowChart.hoursSoFar === 0 && mustKnowEvents.length > 0 && (
+                <p className="mb-2 text-xs text-amber-600">
+                  No attendance logs on file yet for this person — hours worked can't be calculated, so every
+                  memorized item shows at 0h below until a clock-in/out is on record.
+                </p>
+              )}
               <div className="mb-2 flex items-center gap-4 text-xs text-gray-500">
                 <span className="flex items-center gap-1.5">
                   <span className="inline-block h-0.5 w-4 rounded" style={{ background: MUST_KNOW_LINE_COLOR }} /> Memorized
