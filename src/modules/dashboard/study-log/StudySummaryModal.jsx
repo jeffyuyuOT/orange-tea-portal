@@ -59,7 +59,7 @@ export default function StudySummaryModal({ profileId, onClose }) {
         summary.push({ label: '⭐ Top 10', memorized: top10Items.filter(isMemorized).length, total: top10Items.length })
       }
       if (mustKnowTotal) {
-        summary.push({ label: '⭐ Must-Know Items', memorized: mustKnowMemorized, total: mustKnowTotal })
+        summary.push({ label: '⭐ Must Know Item', memorized: mustKnowMemorized, total: mustKnowTotal })
       }
       ;(categories ?? []).forEach((c) => {
         const catItems = drinkItems.filter((i) => i.category_id === c.id)
@@ -84,7 +84,7 @@ export default function StudySummaryModal({ profileId, onClose }) {
   // never had its own breakdown in this summary), so adding either back in
   // would double-count them.
   const overall = useMemo(() => {
-    const real = rows.filter((r) => r.label !== '⭐ Top 10' && r.label !== '⭐ Must-Know Items')
+    const real = rows.filter((r) => r.label !== '⭐ Top 10' && r.label !== '⭐ Must Know Item')
     return { memorized: real.reduce((s, r) => s + r.memorized, 0), total: real.reduce((s, r) => s + r.total, 0) }
   }, [rows])
 

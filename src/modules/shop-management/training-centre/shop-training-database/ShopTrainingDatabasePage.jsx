@@ -103,7 +103,7 @@ export default function ShopTrainingDatabasePage() {
               <button onClick={() => setEditing(item)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <span className="font-medium text-gray-800">{item.title}</span>
                 {item.is_must_know && (
-                  <span className="text-amber-500" title="Must-Know Items">
+                  <span className="text-amber-500" title="Must Know Item">
                     ⭐
                   </span>
                 )}
@@ -305,7 +305,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
         </label>
         <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
           <input type="checkbox" checked={mustKnow} onChange={(e) => setMustKnow(e.target.checked)} />
-          ⭐ Must-Know Items
+          ⭐ Must Know Item
           <span className="text-xs font-normal text-gray-400">
             — required for the Formal Quiz memorization check (a non-must-know item stays optional to memorize)
           </span>

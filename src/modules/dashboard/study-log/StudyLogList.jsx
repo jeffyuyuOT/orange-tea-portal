@@ -24,7 +24,7 @@ import FormulaItemDetail from '../../operations-training/formula/FormulaItemDeta
 // as its own special case in mustKnowFormulaItems/mustKnowTrainingItems
 // below, the same way 'shop_training' already gets its own rendering branch.
 const GROUPS = [
-  { key: 'must_know', label: '⭐ Must-Know Items' },
+  { key: 'must_know', label: '⭐ Must Know Item' },
   { key: 'drink', label: 'Drink' },
   { key: 'tea', label: 'Tea' },
   { key: 'toppings', label: 'Toppings' },
@@ -259,7 +259,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
             >
               <option value="">All categories</option>
               <option value={TOP10_CATEGORY_ID}>⭐ Top 10</option>
-              <option value={MUST_KNOW_CATEGORY_ID}>⭐ Must-Know Items</option>
+              <option value={MUST_KNOW_CATEGORY_ID}>⭐ Must Know Item</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -284,7 +284,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
 
       {group === 'must_know' ? (
         !mustKnowFormulaItems.length && !mustKnowTrainingItems.length ? (
-          <EmptyState label="No items marked Must-Know Items yet — check it when editing a drink or a Shop Training item." />
+          <EmptyState label="No items marked Must Know Item yet — check it when editing a drink or a Shop Training item." />
         ) : (
           <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
             {mustKnowFormulaItems.map((item) => (

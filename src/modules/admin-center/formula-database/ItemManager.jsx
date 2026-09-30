@@ -186,7 +186,7 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
                 <button onClick={() => setEditing(item)} className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600">
                   {item.name_en} {item.name_zh && <span className="font-zh text-brand-500">· {item.name_zh}</span>}
                   {item.is_must_know && (
-                    <span className="ml-1.5 text-amber-500" title="Must-Know Items">
+                    <span className="ml-1.5 text-amber-500" title="Must Know Item">
                       ⭐
                     </span>
                   )}

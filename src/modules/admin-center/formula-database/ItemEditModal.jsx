@@ -495,7 +495,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
           {isDrink && (
             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
               <input type="checkbox" checked={mustKnow} onChange={(e) => setMustKnow(e.target.checked)} />
-              ⭐ Must-Know Items
+              ⭐ Must Know Item
               <span className="text-xs font-normal text-gray-400">
                 — sorts above non-must-know items and gets a ⭐ tag; required for Quiz fill-in-the-blank and the
                 Formal Quiz memorization check (a non-must-know item stays optional to memorize)

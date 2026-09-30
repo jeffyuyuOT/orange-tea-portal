@@ -437,11 +437,11 @@ export default function ProgressChartModal({ profileId, onClose }) {
 
           {mustKnowChart && (
             <div className="mt-6 border-t border-brand-100 pt-4">
-              <p className="mb-2 text-sm font-medium text-gray-700">⭐ Must-Know Items only</p>
+              <p className="mb-2 text-sm font-medium text-gray-700">⭐ Must Know Item only</p>
               <div className="mb-2 flex items-center gap-4 text-xs text-gray-500">
                 <span className="flex items-center gap-1.5">
                   <span className="inline-block h-0.5 w-4 rounded" style={{ background: MUST_KNOW_LINE_COLOR }} /> Memorized
-                  Must-Know items
+                  Must Know items
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span
@@ -503,7 +503,7 @@ export default function ProgressChartModal({ profileId, onClose }) {
                 </svg>
               </div>
               <p className="mt-2 text-xs text-gray-400">
-                {mustKnowChart.memorizedNow} of {totalMustKnow} Must-Know item{totalMustKnow === 1 ? '' : 's'} memorized ·{' '}
+                {mustKnowChart.memorizedNow} of {totalMustKnow} Must Know item{totalMustKnow === 1 ? '' : 's'} memorized ·{' '}
                 {mustKnowChart.hoursSoFar.toFixed(1)}h worked.
               </p>
             </div>

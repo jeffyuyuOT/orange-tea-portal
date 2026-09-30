@@ -27,6 +27,14 @@ const GROUP_LABELS = Object.fromEntries(GROUPS.map((g) => [g.key, g.label]))
 // create/maintain it themselves.
 const TOP10_CATEGORY = { id: '__top10__', name: '⭐ Top 10' }
 
+// Jeff, 2026-09-30 (same-day revision): "Formula裡新增must know item分類，
+// 把所有must-know item放在其分類下" — same synthetic-category shape as
+// TOP10_CATEGORY above (not a real `formula_categories` row, doesn't move a
+// drink out of its own category), gathering every drink flagged Must Know
+// Item (is_must_know) regardless of which real category it's in. Shown
+// right after Top 10.
+const MUSTKNOW_CATEGORY = { id: '__mustknow__', name: '⭐ Must Know Item' }
+
 export default function FormulaPage() {
   const { profile, currentStoreId } = useAuth()
   const [group, setGroup] = useState('drink')
@@ -101,8 +109,9 @@ export default function FormulaPage() {
       {group === 'drink' && category && (
         <ItemList
           groupKey="drink"
-          categoryId={category.id === TOP10_CATEGORY.id ? null : category.id}
+          categoryId={category.id === TOP10_CATEGORY.id || category.id === MUSTKNOW_CATEGORY.id ? null : category.id}
           topTen={category.id === TOP10_CATEGORY.id}
+          mustKnow={category.id === MUSTKNOW_CATEGORY.id}
           storeId={currentStoreId}
           onBack={() => setCategory(null)}
           backLabel={`← ${category.name}`}
@@ -203,6 +212,12 @@ function DrinkCategories({ onSelect, onTips }) {
       >
         <div className="font-medium text-gray-800">{TOP10_CATEGORY.name}</div>
       </button>
+      <button
+        onClick={() => onSelect(MUSTKNOW_CATEGORY)}
+        className="flex items-center justify-between rounded-xl border border-brand-100 bg-white p-4 text-left shadow-sm hover:border-brand-300"
+      >
+        <div className="font-medium text-gray-800">{MUSTKNOW_CATEGORY.name}</div>
+      </button>
       {!categories.length && (
         <div className="sm:col-span-2 lg:col-span-3">
           <EmptyState label="No drink categories yet — add some in Admin Center > Formula Database." />
@@ -225,7 +240,7 @@ function DrinkCategories({ onSelect, onTips }) {
   )
 }
 
-function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, onOpenItem }) {
+function ItemList({ groupKey, categoryId, topTen, mustKnow, storeId, onBack, backLabel, onOpenItem }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -234,11 +249,19 @@ function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, on
     setLoading(true)
     async function load() {
       let query = supabase.from('formula_items').select('*').eq('group_key', groupKey).eq('is_active', true)
-      query = topTen ? query.eq('top_10', true) : categoryId ? query.eq('category_id', categoryId) : query.is('category_id', null)
+      query = topTen
+        ? query.eq('top_10', true)
+        : mustKnow
+          ? query.eq('is_must_know', true)
+          : categoryId
+            ? query.eq('category_id', categoryId)
+            : query.is('category_id', null)
       // Jeff, 2026-09-30: "被勾取menu item的飲料在formula裡會排在非menu item
-      // 上面" (renamed the same day to "Must-Know Items") -- same as
-      // ItemManager.jsx's admin list, only for the normal (non-topTen) view.
-      if (!topTen) query = query.order('is_must_know', { ascending: false })
+      // 上面" (renamed the same day to "Must Know Item") -- same as
+      // ItemManager.jsx's admin list, only for the normal (non-topTen,
+      // non-mustKnow) view; the Must Know Item category is meaningless to
+      // sort by this (every row in it already has is_must_know = true).
+      if (!topTen && !mustKnow) query = query.order('is_must_know', { ascending: false })
       const { data: itemRows } = await query.order(topTen ? 'top_10_sort_order' : 'sort_order').order('id')
       const ids = (itemRows ?? []).map((i) => i.id)
       let restrictionRows = []
@@ -255,7 +278,7 @@ function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, on
     return () => {
       active = false
     }
-  }, [groupKey, categoryId, topTen, storeId])
+  }, [groupKey, categoryId, topTen, mustKnow, storeId])
 
   return (
     <div>
@@ -285,7 +308,7 @@ function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, on
                   </span>
                 )}
                 {item.is_must_know && (
-                  <span className="text-amber-500" title="Must-Know Items">
+                  <span className="text-amber-500" title="Must Know Item">
                     ⭐
                   </span>
                 )}
