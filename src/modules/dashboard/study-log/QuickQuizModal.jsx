@@ -224,12 +224,13 @@ async function buildQuizSet(profile, storeId) {
 }
 
 // `forced`: opened automatically because the staff member crossed another
-// 10% of their study progress without quizzing since — hides the modal's
-// own close affordances (see Modal's `dismissable`) so they have to submit
-// (or hit the explicit Close button in the empty-state case) rather than
-// dismiss it. `progressPercent`: the memorized % that triggered this quiz
-// (or just the current % for a voluntary one), stamped onto the attempt so
-// the next forced-quiz check knows which 10% band was last cleared.
+// 20% of their Must Know Item study progress without quizzing since — hides
+// the modal's own close affordances (see Modal's `dismissable`) so they
+// have to submit (or hit the explicit Close button in the empty-state case)
+// rather than dismiss it. `progressPercent`: the must-know memorized % that
+// triggered this quiz (or just the current % for a voluntary one), stamped
+// onto the attempt so the next forced-quiz check knows which 20% band was
+// last cleared.
 // `onCompleted`: called instead of `onClose` once the attempt is submitted
 // and the person dismisses the result, so the parent can clear its forced
 // state and refresh Quiz History.
@@ -364,7 +365,7 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
     <Modal open onClose={onClose} dismissable={!forced} wide title={forced ? 'Quick Quiz Required' : 'Quick Quiz'}>
       {forced && !loading && !result && (
         <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          You've crossed another 10% of your study progress — finish this quiz to continue.
+          You've crossed another 20% of your Must Know Item progress — finish this quiz to continue.
         </p>
       )}
       {loading ? (

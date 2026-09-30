@@ -64,7 +64,7 @@ const MUST_KNOW_CATEGORY_ID = '__must_know__'
 // only affects the badge text below — every checkbox always reflects and
 // edits its own real study_progress row, qualified or not.
 // `onProgressChange`: fired after a toggle persists, so a parent tracking
-// overall memorized % (e.g. the forced-quiz-every-10% check in
+// Must Know Item memorized % (e.g. the forced-quiz-every-20% check in
 // StudyLogPage) can re-evaluate immediately.
 // `headerActions`: optional content (e.g. StudyLogPage's Quick Quiz/Formal
 // Quiz buttons) rendered at the right end of the group-tabs row, so a

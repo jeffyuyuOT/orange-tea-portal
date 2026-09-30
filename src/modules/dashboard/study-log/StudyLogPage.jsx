@@ -34,26 +34,48 @@ export default function StudyLogPage() {
   // The memorized % as of the last check (below), stamped onto whichever
   // Quick Quiz gets opened next — voluntary or forced — as
   // quiz_attempts.progress_snapshot, so the forced-quiz check always knows
-  // which 10% band was last cleared, whether the person quizzed on their
+  // which 20% band was last cleared, whether the person quizzed on their
   // own or was made to.
   const [progressPercent, setProgressPercent] = useState(null)
   const [forcedQuiz, setForcedQuiz] = useState(false)
 
-  // Jeff's spec: every 10% of study progress a (non-Qualified) staff member
-  // crosses, without having quizzed — voluntarily or otherwise — since the
-  // last one, forces a Quick Quiz before they can keep going. Re-run on
-  // mount and every time Study Log's own checkboxes report a change
-  // (StudyLogList's onProgressChange). Qualified staff (profiles.qualified)
-  // are exempt entirely, same as the auto-memorize-everything rule.
+  // Jeff, 2026-10-01: "之前檢查每10%強迫考一次試，改成只判定must-know item的
+  // 進度，每20%才強迫考一次試" — two changes from the original spec below:
+  // (1) the % this gates on is now scoped to just the ⭐ Must Know Item set
+  // (formula_items.is_must_know + shop_training_items.is_must_know, same
+  // definition ProgressChartModal/StudySummaryModal/Formula's Must Know
+  // Item category all use) instead of every active item; (2) the forced
+  // quiz now fires every 20% instead of every 10%. A staff member with no
+  // must-know items at all (total === 0) never gets a forced quiz — same
+  // "total ? ... : 0" guard as before, just against the narrower total.
+  //
+  // Original spec: every 20% (now) of MUST KNOW study progress a
+  // (non-Qualified) staff member crosses, without having quizzed —
+  // voluntarily or otherwise — since the last one, forces a Quick Quiz
+  // before they can keep going. Re-run on mount and every time Study Log's
+  // own checkboxes report a change (StudyLogList's onProgressChange).
+  // Qualified staff (profiles.qualified) are exempt entirely, same as the
+  // auto-memorize-everything rule.
   const checkForcedQuiz = useCallback(async () => {
     if (qualified || !profile?.id) {
       setProgressPercent(null)
       return
     }
-    const [{ data: itemRows }, { data: storeRows }, { data: progressRows }, { data: attemptRows }] = await Promise.all([
-      supabase.from('formula_items').select('id').eq('is_active', true),
+    const [
+      { data: itemRows },
+      { data: storeRows },
+      { data: progressRows },
+      { data: trainingItemRows },
+      { data: trainingProgressRows },
+      { data: attemptRows },
+    ] = await Promise.all([
+      supabase.from('formula_items').select('id, is_must_know').eq('is_active', true),
       supabase.from('formula_item_stores').select('*'),
       supabase.from('study_progress').select('formula_item_id').eq('profile_id', profile.id).eq('memorized', true),
+      currentStoreId
+        ? supabase.from('shop_training_items').select('id, is_must_know').eq('store_id', currentStoreId)
+        : Promise.resolve({ data: [] }),
+      supabase.from('shop_training_progress').select('shop_training_item_id').eq('profile_id', profile.id).eq('memorized', true),
       supabase
         .from('quiz_attempts')
         .select('progress_snapshot')
@@ -63,16 +85,22 @@ export default function StudyLogPage() {
         .order('progress_snapshot', { ascending: false })
         .limit(1),
     ])
-    const visibleItems = filterVisibleForStore(itemRows ?? [], storeRows ?? [], 'formula_item_id', currentStoreId)
-    const total = visibleItems.length
-    const memorizedIds = new Set((progressRows ?? []).map((p) => p.formula_item_id))
-    const memorizedCount = visibleItems.filter((i) => memorizedIds.has(i.id)).length
+    const mustKnowFormulaItems = (itemRows ?? []).filter((i) => i.is_must_know)
+    const visibleMustKnowFormula = filterVisibleForStore(mustKnowFormulaItems, storeRows ?? [], 'formula_item_id', currentStoreId)
+    const mustKnowTrainingItems = (trainingItemRows ?? []).filter((i) => i.is_must_know)
+    const total = visibleMustKnowFormula.length + mustKnowTrainingItems.length
+
+    const memorizedFormulaIds = new Set((progressRows ?? []).map((p) => p.formula_item_id))
+    const memorizedTrainingIds = new Set((trainingProgressRows ?? []).map((p) => p.shop_training_item_id))
+    const memorizedCount =
+      visibleMustKnowFormula.filter((i) => memorizedFormulaIds.has(i.id)).length +
+      mustKnowTrainingItems.filter((i) => memorizedTrainingIds.has(i.id)).length
     const percent = total ? Math.floor((memorizedCount / total) * 100) : 0
     setProgressPercent(percent)
 
     const lastCleared = attemptRows?.[0]?.progress_snapshot ?? 0
-    const band = Math.floor(percent / 10)
-    const lastBand = Math.floor(lastCleared / 10)
+    const band = Math.floor(percent / 20)
+    const lastBand = Math.floor(lastCleared / 20)
     if (band > lastBand && band >= 1) setForcedQuiz(true)
   }, [qualified, profile?.id, currentStoreId])
 
