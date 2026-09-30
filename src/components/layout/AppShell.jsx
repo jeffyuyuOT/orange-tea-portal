@@ -3,12 +3,28 @@ import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar, { SidebarBrand, SidebarNavLinks } from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
 import { useAuth } from '../../lib/AuthContext'
-import { ROLE_LABELS } from '../../lib/permissions'
+import { ROLE_LABELS, canAccessPage } from '../../lib/permissions'
+import { useClockInOut } from '../../lib/useClockInOut'
+import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
 
 export default function AppShell() {
-  const { profile, signOut } = useAuth()
+  const { profile, effectivePages, accessibleStores, signOut } = useAuth()
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
+  // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
+  // ANY page, not just after navigating into My Dashboard > Time & Attendance
+  // first. Shares its state machine with that page's own Clock In/Out tab via
+  // useClockInOut (src/lib/useClockInOut.js) so the two can't drift apart.
+  // Hidden for a role that can't reach Time & Attendance at all (e.g.
+  // qr_code_maker, accountant) — same permission key the page itself is
+  // guarded by (routes.jsx).
+  const canClockInOut = canAccessPage(effectivePages, 'dashboard.time_attendance')
+  const clockInOut = useClockInOut(profile?.id, accessibleStores)
+  // Same "nothing to navigate between" check as Sidebar.jsx (see its
+  // 2026-10-01 comment) — hides the hamburger button and drawer too, not
+  // just the desktop <aside>, for a role resolved down to one page.
+  const hasSidebar = effectivePages.size > 1
   // Admin Center pages (Formula Database, Store Management, User Management,
   // ...) manage every store's data at once — there's nothing to "switch"
   // into, so the per-store picker is hidden there instead of implying a
@@ -27,11 +43,23 @@ export default function AppShell() {
     setMobileNavOpen(false)
   }, [location.pathname])
 
+  // The header shortcut's toast (below) has no fixed spot on the page to
+  // stay pinned to like TimeAttendancePage's own inline feedback line does,
+  // so it clears itself instead — long enough to read a short line, same
+  // idea as the "red dot" Sidebar badges that don't require a click to
+  // dismiss either.
+  useEffect(() => {
+    if (!clockInOut.feedback) return
+    const timer = setTimeout(() => clockInOut.setFeedback(null), 4000)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clockInOut.feedback])
+
   return (
     <div className="flex h-screen w-full bg-white">
       <Sidebar />
 
-      {mobileNavOpen && (
+      {hasSidebar && mobileNavOpen && (
         <div className="fixed inset-0 z-40 flex md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
           <div className="relative flex w-64 max-w-[80vw] flex-col bg-white shadow-xl">
@@ -53,15 +81,27 @@ export default function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-2 border-b border-brand-100 px-3 py-3 md:px-6">
           <div className="flex min-w-0 items-center gap-2">
-            <button
-              onClick={() => setMobileNavOpen(true)}
-              className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
-              aria-label="Open menu"
-            >
-              ☰
-            </button>
+            {hasSidebar && (
+              <button
+                onClick={() => setMobileNavOpen(true)}
+                className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
+                aria-label="Open menu"
+              >
+                ☰
+              </button>
+            )}
             {isAdminCenter ? <span className="text-sm font-medium text-brand-700">All Stores</span> : <StoreSwitcher />}
           </div>
+          {canClockInOut && (
+            <button
+              onClick={clockInOut.openScanner}
+              className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 p-1.5 text-lg leading-none text-brand-600 hover:bg-brand-100 md:hidden"
+              aria-label={`Scan to ${clockInOut.isClockedIn ? 'Clock Out' : 'Clock In'}`}
+              title={`Scan to ${clockInOut.isClockedIn ? 'Clock Out' : 'Clock In'}`}
+            >
+              📷
+            </button>
+          )}
           <div className="flex items-center gap-3">
             <div className="text-right leading-tight">
               <div className="text-sm font-medium text-gray-800">
@@ -92,6 +132,27 @@ export default function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      {canClockInOut && clockInOut.showScanner && (
+        <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
+      )}
+      {/* The header button can be tapped from any page, so its result can't
+          rely on a fixed spot in that page's own layout the way
+          TimeAttendancePage's inline feedback line does — this floats above
+          everything instead and clears itself after a few seconds. */}
+      {canClockInOut && clockInOut.feedback && (
+        <div className="fixed left-1/2 top-16 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 md:hidden">
+          <div
+            className={`rounded-lg border px-3 py-2 text-center text-sm shadow-lg ${
+              clockInOut.feedback.type === 'success'
+                ? 'border-green-200 bg-green-50 text-green-700'
+                : 'border-red-200 bg-red-50 text-red-700'
+            }`}
+          >
+            {clockInOut.feedback.text}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

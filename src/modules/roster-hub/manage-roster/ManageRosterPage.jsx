@@ -11,7 +11,6 @@ import StaffAvailabilityModal from './StaffAvailabilityModal'
 import {
   downloadRosterTemplate,
   parseRosterGrid,
-  exportRosterGrid,
   decimalToTime,
   timeToDecimal,
   rosterDisplayName,
@@ -22,6 +21,7 @@ import {
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { loadWeekAvailabilityForProfiles } from '../../../lib/availability'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
+import { thisWeekStart } from '../shared/rosterWeeks'
 
 export default function ManageRosterPage() {
   const { currentStoreId, accessibleStores, profile, refreshRosterUpdates, refreshBulletinUpdates } = useAuth()
@@ -85,20 +85,18 @@ export default function ManageRosterPage() {
 
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
 
-  // Default: the week after the most recently saved period for this store.
+  // Jeff, 2026-10-01: "點擊到manage roster頁面預設載入這禮拜頁面(之前好像是
+  // 上次排完的班表的下個禮拜，所以之前的邏輯要改掉)" -- always land on the
+  // CURRENT calendar week (today's Monday-start week) instead of whichever
+  // week happened to follow this store's most recently saved period (that
+  // used to mean the page defaulted further and further into the future the
+  // more weeks got scheduled ahead). Reaching a week further out — either
+  // direction — is purely the "Week starting" date picker's job now, with
+  // the Action dropdown's Last/Current/Next week items below covering the
+  // common one-week-away cases.
   useEffect(() => {
     if (!currentStoreId) return
-    supabase
-      .from('roster_periods')
-      .select('week_start_date')
-      .eq('store_id', currentStoreId)
-      .order('week_start_date', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .then(({ data }) => {
-        const base = data ? addDays(parseISO(data.week_start_date), 7) : new Date()
-        setWeekStart(format(base, 'yyyy-MM-dd'))
-      })
+    setWeekStart(thisWeekStart())
     // Who's "on" this store's roster — read from user_stores rather than
     // profiles.primary_store_id directly, so an admin (or manager) only
     // shows up in the store(s) they're actually assigned to in User
@@ -476,58 +474,93 @@ export default function ManageRosterPage() {
           <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
         </label>
 
-        <Button variant="secondary" onClick={() => setAvailabilityModalOpen(true)} disabled={!weekStart}>
-          View Staff's Availability
-        </Button>
-
-        {/* Download template / Upload Excel / Export current grid, merged
-            into one dropdown so the toolbar isn't three separate buttons —
-            pick one and it runs immediately, same as before. */}
-        <div className="relative" ref={actionMenuRef}>
-          <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)}>
-            Action ▾
+        {/* View Staff's Availability + Action, grouped together on the
+            right — Jeff, 2026-10-01: "電腦版的view staff's available time按
+            鍵放在action旁邊(左邊)" — they used to just be two items in this
+            row's own justify-between, which left them spread apart rather
+            than sitting next to each other. */}
+        <div className="flex items-end gap-2">
+          <Button variant="secondary" onClick={() => setAvailabilityModalOpen(true)} disabled={!weekStart}>
+            View Staff's Availability
           </Button>
-          {actionMenuOpen && (
-            <div className="absolute right-0 z-10 mt-1 w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              <button
-                type="button"
-                className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
-                onClick={() => {
-                  setActionMenuOpen(false)
-                  downloadRosterTemplate(storeName, templateStaff, weekDates, `roster-template-${weekStart}.xlsx`)
-                }}
-              >
-                Download template
-              </button>
-              <button
-                type="button"
-                className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
-                onClick={() => {
-                  setActionMenuOpen(false)
-                  fileInputRef.current?.click()
-                }}
-              >
-                Upload Excel
-              </button>
-              <button
-                type="button"
-                className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
-                onClick={() => {
-                  setActionMenuOpen(false)
-                  exportRosterGrid(storeName, templateStaff, weekDates, entries, `roster-${weekStart}.xlsx`)
-                }}
-              >
-                Export current grid
-              </button>
-            </div>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
-          />
+
+          {/* Jeff, 2026-10-01: "manage roster頁面裡的action按鈕下拉內容將
+              export current grid移除(因為hisotry裡可以做到相同的功能)，然後
+              新增-> last week, -> current week. -> next week放在最前面，下面
+              再放upload excel跟download template" — Export current grid
+              dropped (History already covers it — RosterHistoryPage.jsx's
+              own Export button); Last/Current/Next week added at the top as
+              quick jumps to those three calendar weeks (relative to TODAY,
+              not whatever week is currently loaded — for anything further
+              out, the Week starting date picker above is the general
+              answer, same as before). */}
+          <div className="relative" ref={actionMenuRef}>
+            <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)}>
+              Action ▾
+            </Button>
+            {actionMenuOpen && (
+              <div className="absolute right-0 z-10 mt-1 w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    setWeekStart(format(addDays(parseISO(thisWeekStart()), -7), 'yyyy-MM-dd'))
+                  }}
+                >
+                  Last week
+                </button>
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    setWeekStart(thisWeekStart())
+                  }}
+                >
+                  Current week
+                </button>
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    setWeekStart(format(addDays(parseISO(thisWeekStart()), 7), 'yyyy-MM-dd'))
+                  }}
+                >
+                  Next week
+                </button>
+                <div className="my-1 border-t border-gray-100" />
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    fileInputRef.current?.click()
+                  }}
+                >
+                  Upload Excel
+                </button>
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    downloadRosterTemplate(storeName, templateStaff, weekDates, `roster-template-${weekStart}.xlsx`)
+                  }}
+                >
+                  Download template
+                </button>
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
+            />
+          </div>
         </div>
       </div>
 

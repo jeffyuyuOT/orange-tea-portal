@@ -94,6 +94,17 @@ export function describeDay(dayRow, windows = []) {
   const avail = computeAvailableWindows(dayRow, windows)
   if (!avail.length) return 'Unavailable'
   if (avail.length === 1 && avail[0].start === 0 && avail[0].end === 1440) return 'All day available'
+  // Jeff, 2026-10-01: "顯示時間時，如果是before或after也寫before幾點或after
+  // 幾點。因為譬如現在如果是after2pm會顯示2pm-12am，數字很多感覺很亂" -- a
+  // 'before'/'after' day only ever produces the one window
+  // computeAvailableWindows builds above (0..boundary, or boundary..1440) --
+  // spelling that out as a from–to range just repeats what the mode already
+  // says and, for 'after', always tacks on a not-actually-meaningful
+  // "12:00 AM" at the end (1440 clamped back to midnight). Naming the mode
+  // directly says the same thing with half the numbers. Multi-window
+  // 'custom' days (and the default all-day case above) are unaffected.
+  if (dayRow?.mode === 'before' && dayRow.boundary_time) return `Before ${minutesToLabel(timeToMinutes(dayRow.boundary_time))}`
+  if (dayRow?.mode === 'after' && dayRow.boundary_time) return `After ${minutesToLabel(timeToMinutes(dayRow.boundary_time))}`
   return avail.map((w) => `${minutesToLabel(w.start)} – ${minutesToLabel(w.end)}`).join(', ')
 }
 

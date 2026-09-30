@@ -89,8 +89,31 @@ export function AuthProvider({ children }) {
   // render on the very first paint, before this fetch resolves.
   const [sidebarOrder, setSidebarOrder] = useState(DEFAULT_SIDEBAR_ORDER)
 
+  // Jeff, 2026-10-01: "手機版的左側分頁排序沒有照系統設定" -- this had no
+  // error handling at all: if fetchSidebarOrder() ever failed (a mobile
+  // PWA's very first request racing the device/service worker still
+  // warming up right after launch, a dropped connection, etc.), the
+  // unhandled rejection meant setSidebarOrder never ran, silently leaving
+  // sidebarOrder stuck at DEFAULT_SIDEBAR_ORDER (SECTIONS' own literal
+  // order, NOT whatever was last saved in Admin Center > System Setting)
+  // for the rest of that session -- nothing in the UI said so, and nothing
+  // ever retried. A phone showing the exact code-default section order
+  // instead of the customized one is the signature of this happening. One
+  // short-delay retry covers the transient case without looping forever on
+  // a genuinely persistent failure.
   const refreshSidebarOrder = useCallback(async () => {
-    setSidebarOrder(await fetchSidebarOrder())
+    try {
+      setSidebarOrder(await fetchSidebarOrder())
+    } catch (err) {
+      console.error('Failed to load sidebar order, retrying once:', err)
+      setTimeout(async () => {
+        try {
+          setSidebarOrder(await fetchSidebarOrder())
+        } catch (retryErr) {
+          console.error('Sidebar order retry also failed — staying on the default order:', retryErr)
+        }
+      }, 2000)
+    }
   }, [])
 
   useEffect(() => {

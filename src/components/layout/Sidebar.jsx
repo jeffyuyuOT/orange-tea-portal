@@ -133,7 +133,19 @@ export function SidebarBrand() {
 // Permanent sidebar for wide screens. Below the `md` breakpoint this is
 // hidden entirely — AppShell's hamburger + MobileNavDrawer cover phones,
 // reusing the same SidebarNavLinks so both surfaces show the same menu.
+//
+// Jeff, 2026-10-01: "像2d maker或accountant只能看到一個分頁的user，不用顯示
+// 左邊的分頁欄(除非之後有開放更多權限)" — a role that resolves down to
+// exactly one accessible page (qr_code_maker, accountant — see
+// permissions.js's ROLE_DEFAULTS, each deliberately just one entry) has
+// nothing to navigate between, so there's no point showing a nav list of
+// one. Keyed off effectivePages.size, not the role name, so it stays
+// correct on its own if a permission_override ever grants that person (or
+// role) a second page later — no code change needed for it to reappear.
+// AppShell.jsx applies the same check to hide the mobile hamburger/drawer.
 export default function Sidebar() {
+  const { effectivePages } = useAuth()
+  if (effectivePages.size <= 1) return null
   return (
     <aside className="hidden w-64 shrink-0 border-r border-brand-100 bg-brand-50/40 md:flex md:flex-col">
       <SidebarBrand />

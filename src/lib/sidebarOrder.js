@@ -42,7 +42,17 @@ export function reconcileSidebarOrder(raw) {
 export const DEFAULT_SIDEBAR_ORDER = { sectionOrder: DEFAULT_SECTION_ORDER, pageOrder: DEFAULT_PAGE_ORDER }
 
 export async function fetchSidebarOrder() {
-  const { data } = await supabase.from('app_sidebar_order').select('*').eq('id', true).maybeSingle()
+  // Jeff, 2026-10-01: "手機版的左側分頁排序沒有照系統設定" -- this used to
+  // ignore `error` entirely, so a Supabase-level failure here (as opposed
+  // to a thrown network exception) silently fell through to
+  // reconcileSidebarOrder(null), which is indistinguishable from "no
+  // custom order has ever been saved" -- producing exactly SECTIONS' own
+  // default order with no error, nothing to retry, and nothing to tell
+  // AuthContext.jsx's refreshSidebarOrder() anything went wrong. Throwing
+  // here instead routes both failure modes (this one, and a genuine thrown
+  // network exception) through the same try/catch + retry there.
+  const { data, error } = await supabase.from('app_sidebar_order').select('*').eq('id', true).maybeSingle()
+  if (error) throw error
   return reconcileSidebarOrder(data)
 }
 

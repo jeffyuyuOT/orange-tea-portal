@@ -57,6 +57,26 @@ export default defineConfig({
           { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
           { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
+        // Jeff, 2026-10-01: "還是有辦法做widget在手機桌面?" — a real OS-level
+        // home-screen widget (Android App Widgets / iOS WidgetKit) isn't
+        // something a web app/PWA can provide at all; that needs a native
+        // app. This `shortcuts` entry is the closest a PWA CAN do: on
+        // Android (and Windows), long-pressing the installed app's icon
+        // pops up a small menu of named quick actions that jump straight
+        // past the app's normal landing page — so "Scan to Clock In/Out"
+        // is reachable in two taps (long-press icon, tap shortcut) without
+        // opening the app to its usual first screen first. iOS Safari
+        // doesn't support this yet, so this is Android/Windows-only for
+        // now; the in-app header button (AppShell.jsx) covers every
+        // platform once the app itself is open.
+        shortcuts: [
+          {
+            name: 'Scan to Clock In/Out',
+            short_name: 'Clock In/Out',
+            url: '/dashboard/time-attendance',
+            icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+        ],
       },
     }),
   ],
