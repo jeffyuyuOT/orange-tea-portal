@@ -1779,10 +1779,29 @@ async function loadAllData(){
 // stable sort with every key missing (treated as 0) leaves creation order
 // untouched -- so this backfill doesn't visibly reorder anything for Jeff,
 // it just makes the order concrete.
+//
+// Jeff, 2026-10-01 ("sunnybank還是不能移到最上面...發現是toowong那一個一直卡在
+// 上面動不了"): the null-only check above missed a second, worse case --
+// TWO stores sharing the exact same non-null `.order` value (a tie), from
+// before the "give each new store in a batch its own distinct order"
+// fix a few lines down in ingestParsedStores(). reorderStore() swaps
+// `.order` between two ADJACENT stores in the sorted array -- swapping two
+// EQUAL values leaves both unchanged (0<->0 is still 0,0), so the ↑/↓ click
+// visibly does nothing, and whichever of the tied stores a stable sort
+// happens to place first (Toowong, here) is stuck at the top forever, since
+// its only way to move is a swap with its tied neighbour. Now re-numbers
+// EVERY store to its current sorted position (0..n-1) whenever any tie (or
+// null) is found, not just the null ones -- this doesn't move anything
+// visibly (it's renumbering stores in their current, already-sorted order),
+// it just guarantees every store has its own distinct value again so every
+// future ↑/↓ swap actually changes something.
 async function ensureStoreOrder(){
-  if(!currentStores.some(s=>s.order==null)) return;
+  const orders = currentStores.map(s=>s.order);
+  const hasNull = orders.some(o=>o==null);
+  const hasDuplicate = new Set(orders).size !== orders.length;
+  if(!hasNull && !hasDuplicate) return;
   for(let i=0;i<currentStores.length;i++){
-    if(currentStores[i].order==null){ currentStores[i].order = i; await idbPut("stores", currentStores[i]); }
+    if(currentStores[i].order!==i){ currentStores[i].order = i; await idbPut("stores", currentStores[i]); }
   }
 }
 async function saveSettings(){ await idbPut("settings", currentSettings); }
