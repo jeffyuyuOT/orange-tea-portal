@@ -321,7 +321,12 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
               })}
               {sectionKey === 'shop_management' && (
                 <>
-                  <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                  {/* Jeff, 2026-09-30: "Edit attendance logs和Staff
+                      confidential可以用紅字表示嗎" -- red label text (not
+                      the checkbox itself) so these two sensitive,
+                      off-by-default permissions stand out from the ordinary
+                      page-visibility checkboxes above. */}
+                  <label className="flex items-center gap-1.5 text-sm font-medium text-red-600">
                     <input
                       type="checkbox"
                       checked={canEditAttendanceLogs}
@@ -329,7 +334,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                     />
                     Edit attendance logs
                   </label>
-                  <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <label className="flex items-center gap-1.5 text-sm font-medium text-red-600">
                     <input
                       type="checkbox"
                       checked={canViewStaffConfidential}
