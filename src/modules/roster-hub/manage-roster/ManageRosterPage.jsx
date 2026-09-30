@@ -4,8 +4,9 @@ import { addDays, format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
+import Modal from '../../../components/ui/Modal'
 import RosterEntryGrid from './RosterEntryGrid'
-import UnderstaffedWarnings from './UnderstaffedWarnings'
+import UnderstaffedWarnings, { computeUnderstaffedWarnings } from './UnderstaffedWarnings'
 import ImportReconcileModal from './ImportReconcileModal'
 import StaffAvailabilityModal from './StaffAvailabilityModal'
 import {
@@ -40,6 +41,13 @@ export default function ManageRosterPage() {
   // `saveStatus` is set when this review was triggered by Save/Submit
   // (rather than by an upload), so confirming it also completes that save.
   const [importReview, setImportReview] = useState(null)
+  // Jeff, 2026-10-01: "understaffed slots平常不顯示，在按Save和Submit才跳出
+  // 視窗提示，但還是可以繼續儲存跟發布" — { status, warnings } while the
+  // confirm popup is up (status is whichever of 'draft'/'submitted' Save/
+  // Submit was clicked with), null otherwise. Set by handleSaveOrSubmit
+  // below instead of persist() running immediately — a soft warning the
+  // manager can look at and still choose to save/publish past, not a block.
+  const [understaffedConfirm, setUnderstaffedConfirm] = useState(null)
   // Download template / Upload Excel / Export current grid used to be three
   // separate buttons crowding the toolbar — merged into one "Action"
   // dropdown at the right of the row (see the render below). `fileInputRef`
@@ -459,6 +467,25 @@ export default function ManageRosterPage() {
     setImportReview({ parsed: entries, plan: found.plan, known: found.known, saveStatus: status })
   }
 
+  // Save/Submit's actual entry point now — checks for understaffed slots
+  // first (see the understaffedConfirm comment above) and only calls
+  // persist() directly when there's nothing to warn about, matching Jeff's
+  // "平常不顯示" (normally shows nothing at all).
+  function handleSaveOrSubmit(status) {
+    const warnings = computeUnderstaffedWarnings(entries, rules)
+    if (warnings.length) {
+      setUnderstaffedConfirm({ status, warnings })
+      return
+    }
+    persist(status)
+  }
+
+  function confirmUnderstaffedAndPersist() {
+    const status = understaffedConfirm.status
+    setUnderstaffedConfirm(null)
+    persist(status)
+  }
+
   return (
     <div>
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Manage Roster</h1>
@@ -468,22 +495,28 @@ export default function ManageRosterPage() {
         are calculated automatically.
       </p>
 
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      {/* Jeff, 2026-10-01: "電腦版的...Save (not published)和Submit & Publish
+          按鈕移到action右邊，原本的View Staff's Availability跟Action往week
+          starting的日期那邊靠，都在同一行" — one single row now (Save/Submit
+          used to be a separate row below the grid entirely), plain flex
+          (no more justify-between pushing View Availability/Action off to
+          the far right) so everything just follows naturally from the
+          Week starting date. Action/Save/Submit are nested in their own
+          gap-2 group so they stay adjacent as a unit if this row wraps on
+          a narrow screen — "手機板的Save和Submit按鈕則放在action右邊，跟
+          action同一行" — rather than Save/Submit landing on their own line
+          away from Action. */}
+      <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Week starting (Mon)</span>
           <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
         </label>
 
-        {/* View Staff's Availability + Action, grouped together on the
-            right — Jeff, 2026-10-01: "電腦版的view staff's available time按
-            鍵放在action旁邊(左邊)" — they used to just be two items in this
-            row's own justify-between, which left them spread apart rather
-            than sitting next to each other. */}
-        <div className="flex items-end gap-2">
-          <Button variant="secondary" onClick={() => setAvailabilityModalOpen(true)} disabled={!weekStart}>
-            View Staff's Availability
-          </Button>
+        <Button variant="secondary" onClick={() => setAvailabilityModalOpen(true)} disabled={!weekStart}>
+          View Staff's Availability
+        </Button>
 
+        <div className="flex items-end gap-2">
           {/* Jeff, 2026-10-01: "manage roster頁面裡的action按鈕下拉內容將
               export current grid移除(因為hisotry裡可以做到相同的功能)，然後
               新增-> last week, -> current week. -> next week放在最前面，下面
@@ -561,6 +594,13 @@ export default function ManageRosterPage() {
               onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
             />
           </div>
+
+          <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>
+            Save (not published)
+          </Button>
+          <Button disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('submitted')}>
+            Submit & Publish
+          </Button>
         </div>
       </div>
 
@@ -573,21 +613,11 @@ export default function ManageRosterPage() {
         onHideStaff={persistHideStaff}
         availabilityByProfile={availabilityByProfile}
       />
-      <UnderstaffedWarnings entries={entries} rules={rules} />
 
       <label className="mt-4 block">
         <span className="mb-1 block text-xs font-medium text-gray-500">Notes</span>
         <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
-
-      <div className="mt-4 flex gap-2">
-        <Button variant="secondary" disabled={saving || !!importReview} onClick={() => persist('draft')}>
-          Save (not published)
-        </Button>
-        <Button disabled={saving || !!importReview} onClick={() => persist('submitted')}>
-          Submit & Publish
-        </Button>
-      </div>
       {message && <p className="mt-2 text-sm text-brand-600">{message}</p>}
 
       {importReview && (
@@ -606,6 +636,26 @@ export default function ManageRosterPage() {
           staff={staff}
           weekStart={weekStart}
         />
+      )}
+
+      {understaffedConfirm && (
+        <Modal
+          open
+          onClose={() => setUnderstaffedConfirm(null)}
+          title="Understaffed slots"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setUnderstaffedConfirm(null)}>
+                Cancel
+              </Button>
+              <Button disabled={saving} onClick={confirmUnderstaffedAndPersist}>
+                {understaffedConfirm.status === 'submitted' ? 'Submit & Publish anyway' : 'Save anyway'}
+              </Button>
+            </>
+          }
+        >
+          <UnderstaffedWarnings warnings={understaffedConfirm.warnings} />
+        </Modal>
       )}
     </div>
   )
