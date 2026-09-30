@@ -200,6 +200,62 @@ export default function ManageRosterPage() {
     })()
   }, [location.state])
 
+  // Jeff, 2026-10-01: "進入manage roster頁面預設是載入這禮拜的班表，所以要有
+  // 這禮拜班表的資料" — the effect above already lands on the right WEEK
+  // (thisWeekStart()), but nothing was actually fetching that week's
+  // already-saved roster_periods/roster_entries — `entries` only ever got
+  // populated from the database via the loadPeriodId effect above (History
+  // page navigation). Opening Manage Roster directly always showed a blank
+  // grid, even for a week that already had a saved (draft or published)
+  // roster, because nothing queried for it. This fires whenever the week or
+  // store being edited changes — by landing on the default week, picking a
+  // new Week starting date, or an Action dropdown Last/Current/Next week
+  // jump — and loads that week's existing roster_periods row (if any) the
+  // same way the loadPeriodId effect above does; no existing period for
+  // that week yet (a week nobody's touched) just clears the grid to blank,
+  // same as it already did.
+  useEffect(() => {
+    if (!weekStart || !currentStoreId) return
+    let cancelled = false
+    ;(async () => {
+      const { data: period } = await supabase
+        .from('roster_periods')
+        .select('*')
+        .eq('store_id', currentStoreId)
+        .eq('week_start_date', weekStart)
+        .maybeSingle()
+      if (cancelled) return
+      if (!period) {
+        setEntries([])
+        setNotes('')
+        return
+      }
+      setNotes(period.notes ?? '')
+      const [{ data: rows }, { data: nameRows }] = await Promise.all([
+        supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
+        supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', currentStoreId),
+      ])
+      if (cancelled) return
+      const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
+      setEntries(
+        (rows ?? []).map((r) => ({
+          profileId: r.profile_id ?? '',
+          staffName: r.profiles
+            ? rosterDisplayName({ ...r.profiles, roster_display_name: nameByProfile.get(r.profile_id) })
+            : r.staff_name_raw ?? '',
+          date: r.work_date,
+          startTime: timeToDecimal(r.start_time),
+          endTime: timeToDecimal(r.end_time),
+          breakHours: r.break_half_hours ?? '',
+          notes: r.notes ?? '',
+        }))
+      )
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [weekStart, currentStoreId])
+
   useEffect(() => {
     if (!weekStart || !staff.length) {
       setAvailabilityByProfile({})
@@ -497,51 +553,58 @@ export default function ManageRosterPage() {
 
       {/* Jeff, 2026-10-01: "電腦版的...Save (not published)和Submit & Publish
           按鈕移到action右邊，原本的View Staff's Availability跟Action往week
-          starting的日期那邊靠，都在同一行" — one single row now (Save/Submit
-          used to be a separate row below the grid entirely), plain flex
-          (no more justify-between pushing View Availability/Action off to
-          the far right) so everything just follows naturally from the
-          Week starting date. Action/Save/Submit are nested in their own
-          gap-2 group so they stay adjacent as a unit if this row wraps on
-          a narrow screen — "手機板的Save和Submit按鈕則放在action右邊，跟
-          action同一行" — rather than Save/Submit landing on their own line
-          away from Action.
-          2026-10-01 fix: this inner group itself also needs `flex-wrap` —
-          without it, "Action ▾" + "Save (not published)" + "Submit &
-          Publish" together are wider than a phone screen, and with no wrap
-          the extra width just overflows off the right edge instead of
-          wrapping, so Save/Submit silently went invisible on mobile (Jeff
-          screenshot: only "Action ▾" visible, nothing past it). Wrapping
-          lets Submit & Publish drop to a second line while staying
-          grouped right under Action/Save, instead of being cut off
-          entirely. */}
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+          starting的日期那邊靠，都在同一行" — desktop (sm+) keeps every
+          control — Week starting, View Staff's Availability, Action, Save,
+          Submit — in one plain flex-wrap row (no more justify-between
+          pushing View Availability/Action off to the far right).
+          Mobile is its own explicit layout, per Jeff's follow-ups:
+          "手機板的Save和Submit按鈕則放在action右邊，跟action同一行" then
+          "手機板的Save...放在同一行，然後日期，View Staff's Availability
+          和Action有辦法放在同一行嗎，看是要縮小字還是有沒有辦法用圖示表示"
+          — so below `sm`, View Availability/Action swap their label for a
+          single icon (👥/⋯, full text still in the accessible name via
+          `title`) so all three of Week starting + View Availability +
+          Action fit on row one, and an invisible `basis-full sm:hidden`
+          spacer forces Save/Submit onto their own row two (shortened to
+          "Save"/"Submit" there too) instead of wrapping unpredictably
+          wherever the real button widths happen to run out of room. On
+          `sm` and up the spacer is just `hidden` (takes no space, forces
+          nothing), so Save/Submit fall right back in line after Action —
+          the one-row desktop layout above. */}
+      <div className="mb-4 flex flex-wrap items-end gap-2 sm:gap-3">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Week starting (Mon)</span>
           <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
         </label>
 
-        <Button variant="secondary" onClick={() => setAvailabilityModalOpen(true)} disabled={!weekStart}>
-          View Staff's Availability
+        <Button
+          variant="secondary"
+          onClick={() => setAvailabilityModalOpen(true)}
+          disabled={!weekStart}
+          title="View Staff's Availability"
+          aria-label="View Staff's Availability"
+        >
+          <span className="sm:hidden" aria-hidden="true">👥</span>
+          <span className="hidden sm:inline">View Staff's Availability</span>
         </Button>
 
-        <div className="flex flex-wrap items-end gap-2">
-          {/* Jeff, 2026-10-01: "manage roster頁面裡的action按鈕下拉內容將
-              export current grid移除(因為hisotry裡可以做到相同的功能)，然後
-              新增-> last week, -> current week. -> next week放在最前面，下面
-              再放upload excel跟download template" — Export current grid
-              dropped (History already covers it — RosterHistoryPage.jsx's
-              own Export button); Last/Current/Next week added at the top as
-              quick jumps to those three calendar weeks (relative to TODAY,
-              not whatever week is currently loaded — for anything further
-              out, the Week starting date picker above is the general
-              answer, same as before). */}
-          <div className="relative" ref={actionMenuRef}>
-            <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)}>
-              Action ▾
-            </Button>
-            {actionMenuOpen && (
-              <div className="absolute right-0 z-10 mt-1 w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+        {/* Jeff, 2026-10-01: "manage roster頁面裡的action按鈕下拉內容將
+            export current grid移除(因為hisotry裡可以做到相同的功能)，然後
+            新增-> last week, -> current week. -> next week放在最前面，下面
+            再放upload excel跟download template" — Export current grid
+            dropped (History already covers it — RosterHistoryPage.jsx's
+            own Export button); Last/Current/Next week added at the top as
+            quick jumps to those three calendar weeks (relative to TODAY,
+            not whatever week is currently loaded — for anything further
+            out, the Week starting date picker above is the general
+            answer, same as before). */}
+        <div className="relative" ref={actionMenuRef}>
+          <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)} title="Action" aria-label="Action">
+            <span className="sm:hidden" aria-hidden="true">⋯</span>
+            <span className="hidden sm:inline">Action ▾</span>
+          </Button>
+          {actionMenuOpen && (
+            <div className="absolute left-0 z-10 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                 <button
                   type="button"
                   className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
@@ -595,22 +658,27 @@ export default function ManageRosterPage() {
                 </button>
               </div>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
-            />
-          </div>
-
-          <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>
-            Save (not published)
-          </Button>
-          <Button disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('submitted')}>
-            Submit & Publish
-          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
+          />
         </div>
+
+        {/* Forces Save/Submit onto their own row on mobile only — see the
+            comment at the top of this toolbar for why. */}
+        <div className="basis-full sm:hidden" aria-hidden="true" />
+
+        <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>
+          <span className="sm:hidden">Save</span>
+          <span className="hidden sm:inline">Save (not published)</span>
+        </Button>
+        <Button disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('submitted')}>
+          <span className="sm:hidden">Submit</span>
+          <span className="hidden sm:inline">Submit & Publish</span>
+        </Button>
       </div>
 
       <RosterEntryGrid
