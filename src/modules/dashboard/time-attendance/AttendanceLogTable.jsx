@@ -43,7 +43,13 @@ export default function AttendanceLogTable({ profileId, canEdit = false, editor 
   const [loading, setLoading] = useState(true)
   const [editingCell, setEditingCell] = useState(null) // { storeId, date, punches } | null
   const [addingRecord, setAddingRecord] = useState(false)
-  const [historyCell, setHistoryCell] = useState(null) // { storeId, date } | null
+  // Jeff, 2026-09-30: "如果同一天有多段時間被編輯，每一段後面都要放edit" --
+  // used to be { storeId, date }, re-deriving the FULL cell's edits at
+  // render time; now the caller decides exactly which edits this modal
+  // shows (a single session's, or the leftover/unmatched ones — see
+  // sessionEditRows/unmatchedEdits below), so it carries the edits array
+  // + display name/date directly instead.
+  const [historyCell, setHistoryCell] = useState(null) // { storeName, date, edits } | null
 
   async function load() {
     setLoading(true)
@@ -160,21 +166,43 @@ export default function AttendanceLogTable({ profileId, canEdit = false, editor 
             const cellEdits = editsByCell[key] ?? []
             const total = dailyTotals(cell.sessions)[cell.date]
             const punches = cell.sessions.flatMap((s) => [s.clockIn, s.clockOut].filter(Boolean))
+            const storeName = storeNames[cell.storeId] ?? 'Unknown store'
+            // Jeff, 2026-09-30: "如果有經過manager或admin編輯時間，原本的
+            // edit(點擊會顯示詳細視窗)放在被編輯的時間段後面，如果同一天有
+            // 多段時間被編輯，每一段後面都要放edit" -- attendance_event_edits
+            // rows carry the punch's own event_id (migration
+            // 0062_attendance_log_editing.sql), so match each edit to
+            // whichever session it belongs to (its clock_in or clock_out
+            // event) and render that session's own "edit" link right next
+            // to it, instead of one combined "Edited" link for the whole
+            // day. A DELETED punch's edit row has event_id nulled out (FK
+            // "on delete set null" — the attendance_events row it pointed
+            // to is gone), so it can never match a currently-visible
+            // session; those fall back to a single "Other edits" link at
+            // the cell header so that history still isn't lost.
+            const matchedEditIds = new Set()
+            const sessionEditsFor = (s) => {
+              const rows = cellEdits.filter(
+                (e) => e.event_id && (e.event_id === s.clockIn?.id || e.event_id === s.clockOut?.id)
+              )
+              rows.forEach((e) => matchedEditIds.add(e.id))
+              return rows
+            }
+            const sessionEditsList = cell.sessions.map(sessionEditsFor)
+            const unmatchedEdits = cellEdits.filter((e) => !matchedEditIds.has(e.id))
             return (
               <div key={key} className="rounded-xl border border-brand-100 bg-white p-3">
                 <div className="mb-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-gray-800">{format(parseISO(cell.date), 'EEE, MMM d yyyy')}</span>
-                    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
-                      {storeNames[cell.storeId] ?? 'Unknown store'}
-                    </span>
-                    {!!cellEdits.length && (
+                    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">{storeName}</span>
+                    {!!unmatchedEdits.length && (
                       <button
                         type="button"
-                        onClick={() => setHistoryCell({ storeId: cell.storeId, date: cell.date })}
+                        onClick={() => setHistoryCell({ storeName, date: cell.date, edits: unmatchedEdits })}
                         className="text-xs font-medium text-amber-600 hover:underline"
                       >
-                        Edited
+                        Other edits
                       </button>
                     )}
                   </div>
@@ -192,15 +220,27 @@ export default function AttendanceLogTable({ profileId, canEdit = false, editor 
                   </div>
                 </div>
                 <div className="space-y-1">
-                  {cell.sessions.map((s, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-sm text-gray-600">
-                      <span>
-                        {format(new Date(s.clockIn.occurred_at), 'h:mm a')} –{' '}
-                        {s.clockOut ? format(new Date(s.clockOut.occurred_at), 'h:mm a') : 'still clocked in'}
-                      </span>
-                      <span className="text-gray-400">{s.inProgress ? 'In progress' : formatMinutes(s.minutes)}</span>
-                    </div>
-                  ))}
+                  {cell.sessions.map((s, idx) => {
+                    const sessionEdits = sessionEditsList[idx]
+                    return (
+                      <div key={idx} className="flex items-center justify-between text-sm text-gray-600">
+                        <span>
+                          {format(new Date(s.clockIn.occurred_at), 'h:mm a')} –{' '}
+                          {s.clockOut ? format(new Date(s.clockOut.occurred_at), 'h:mm a') : 'still clocked in'}
+                          {!!sessionEdits.length && (
+                            <button
+                              type="button"
+                              onClick={() => setHistoryCell({ storeName, date: cell.date, edits: sessionEdits })}
+                              className="ml-2 text-xs font-medium text-amber-600 hover:underline"
+                            >
+                              edit
+                            </button>
+                          )}
+                        </span>
+                        <span className="text-gray-400">{s.inProgress ? 'In progress' : formatMinutes(s.minutes)}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )
@@ -240,8 +280,8 @@ export default function AttendanceLogTable({ profileId, canEdit = false, editor 
       )}
       {historyCell && (
         <AttendanceCellHistoryModal
-          edits={editsByCell[cellKey(historyCell.date, historyCell.storeId)] ?? []}
-          storeName={storeNames[historyCell.storeId] ?? 'Unknown store'}
+          edits={historyCell.edits}
+          storeName={historyCell.storeName}
           date={historyCell.date}
           onClose={() => setHistoryCell(null)}
         />

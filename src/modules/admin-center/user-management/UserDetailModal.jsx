@@ -34,6 +34,14 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // developer already have edit rights unconditionally at the RLS layer,
   // so this checkbox is a no-op for them either way.
   const [canEditAttendanceLogs, setCanEditAttendanceLogs] = useState(user.can_edit_attendance_logs ?? false)
+  // Jeff, 2026-09-30: "staff information的TFN移到Address下面...只有
+  // developer,admin跟accountant看的到...在shop managerment裡新增可勾取
+  // Staff confidential，如果有勾取的話則可以看到從TFN，銀行資料跟上傳檔案
+  // 那一區塊。manager預設不勾取" -- same per-profile-column pattern as
+  // can_edit_attendance_logs right above (admin/developer/accountant
+  // already see this block unconditionally in StaffDetailModal.jsx, so
+  // this checkbox only matters for shop_manager). Defaults off.
+  const [canViewStaffConfidential, setCanViewStaffConfidential] = useState(user.can_view_staff_confidential ?? false)
   const [overrides, setOverrides] = useState({}) // page_key -> boolean (explicit override) or undefined
   // Store(s) this person shows up on the roster for, beyond their primary
   // Store above — e.g. an admin who only actually works a couple of
@@ -122,6 +130,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         is_active: isActive,
         cash_in_hand: cashInHand,
         can_edit_attendance_logs: canEditAttendanceLogs,
+        can_view_staff_confidential: canViewStaffConfidential,
         join_store_activity: joinStoreActivity,
       })
       .eq('id', user.id)
@@ -311,14 +320,24 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                 )
               })}
               {sectionKey === 'shop_management' && (
-                <label className="flex items-center gap-1.5 text-sm text-gray-600">
-                  <input
-                    type="checkbox"
-                    checked={canEditAttendanceLogs}
-                    onChange={(e) => setCanEditAttendanceLogs(e.target.checked)}
-                  />
-                  Edit attendance logs
-                </label>
+                <>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={canEditAttendanceLogs}
+                      onChange={(e) => setCanEditAttendanceLogs(e.target.checked)}
+                    />
+                    Edit attendance logs
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={canViewStaffConfidential}
+                      onChange={(e) => setCanViewStaffConfidential(e.target.checked)}
+                    />
+                    Staff confidential
+                  </label>
+                </>
               )}
             </div>
           </div>

@@ -27,6 +27,13 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
   async function load() {
     let q = supabase.from('formula_items').select('*').eq('group_key', groupKey)
     q = topTen ? q.eq('top_10', true) : categoryId ? q.eq('category_id', categoryId) : q.is('category_id', null)
+    // Jeff, 2026-09-30: "被勾取menu item的飲料在formula裡會排在非menu item
+    // 上面" (renamed the same day to "Must-Know Items") -- only in the
+    // normal (non-topTen) view; topTen already has its own independent
+    // order (top_10_sort_order) and every row in it is a Top 10 drink
+    // regardless of is_must_know, so this ordering wouldn't mean anything
+    // there.
+    if (!topTen) q = q.order('is_must_know', { ascending: false })
     // Secondary "id" tiebreak: bulk-imported items used to all share the
     // same sort_order, and Postgres doesn't promise a stable order among
     // tied rows — without this, the list (and the ↑↓ buttons) could
@@ -178,6 +185,11 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
                 <DragHandle {...handleProps(item.id)} />
                 <button onClick={() => setEditing(item)} className="flex-1 text-left font-medium text-gray-800 hover:text-brand-600">
                   {item.name_en} {item.name_zh && <span className="font-zh text-brand-500">· {item.name_zh}</span>}
+                  {item.is_must_know && (
+                    <span className="ml-1.5 text-amber-500" title="Must-Know Items">
+                      ⭐
+                    </span>
+                  )}
                 </button>
                 {!topTen && (
                   <div className="flex items-center gap-2">

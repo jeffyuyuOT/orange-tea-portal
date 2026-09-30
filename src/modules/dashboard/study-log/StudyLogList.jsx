@@ -15,7 +15,16 @@ import FormulaItemDetail from '../../operations-training/formula/FormulaItemDeta
 // owned since migration 0052, no drink categories/Top 10) so it's handled
 // as its own special case throughout this file rather than folded into the
 // group-filtering logic the other four share.
+// Jeff, 2026-09-30 (same-day revision to item 7): "study log 多出Must-Know
+// Items的分類tab，並放在最前面" — a brand-new top-level tab, placed FIRST,
+// that merges must-know DRINKS (formula_items.is_must_know) with must-know
+// SHOP TRAINING items (shop_training_items.is_must_know, migration 0082)
+// into one combined list — unlike Top 10 (a drink-only, within-Drink-group
+// filter), this spans two different tables/types at once, so it's handled
+// as its own special case in mustKnowFormulaItems/mustKnowTrainingItems
+// below, the same way 'shop_training' already gets its own rendering branch.
 const GROUPS = [
+  { key: 'must_know', label: '⭐ Must-Know Items' },
   { key: 'drink', label: 'Drink' },
   { key: 'tea', label: 'Tea' },
   { key: 'toppings', label: 'Toppings' },
@@ -32,6 +41,13 @@ const GROUPS = [
 // state — there's only ever one study_progress row per item, so there's
 // nothing extra to keep in sync.
 const TOP10_CATEGORY_ID = '__top10__'
+
+// Jeff, 2026-09-30 (same-day revision): "下拉選單也要多出Must-Know Items去
+// 選，放在top10下面" — a second synthetic option in the SAME Drink-group
+// dropdown as Top 10, right below it. Unlike the new top-level 'must_know'
+// GROUPS tab above, this one stays drink-only and within the Drink group,
+// same shape as Top 10 — it does NOT pull in Shop Training items.
+const MUST_KNOW_CATEGORY_ID = '__must_know__'
 
 // Shared between "My Dashboard > Study Log" (own progress) and
 // "Shop Management > Learning Tracker" (a manager/admin viewing + bulk
@@ -144,6 +160,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
       if (i.group_key !== group) return false
       if (group !== 'drink' || !categoryId) return true
       if (categoryId === TOP10_CATEGORY_ID) return !!i.top_10
+      if (categoryId === MUST_KNOW_CATEGORY_ID) return !!i.is_must_know
       return i.category_id === categoryId
     })
     // Top 10 has its own order (top_10_sort_order, set in Admin Center >
@@ -154,6 +171,13 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
     }
     return filtered
   }, [items, group, categoryId])
+
+  // The new top-level "⭐ Must-Know Items" tab (GROUPS, first entry) — spans
+  // every drink group (is_must_know is drink-only, migration 0081's
+  // constraint) merged with Shop Training's own must-know items (migration
+  // 0082), rendered together below as one combined list.
+  const mustKnowFormulaItems = useMemo(() => items.filter((i) => i.is_must_know), [items])
+  const mustKnowTrainingItems = useMemo(() => shopTrainingItems.filter((i) => i.is_must_know), [shopTrainingItems])
 
   async function toggle(itemId, value) {
     setProgress((prev) => ({ ...prev, [itemId]: { ...prev[itemId], memorized: value } }))
@@ -192,7 +216,10 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   const memorizedCount =
     group === 'shop_training'
       ? shopTrainingItems.filter((i) => shopTrainingProgress[i.id]?.memorized).length
-      : filteredItems.filter((i) => progress[i.id]?.memorized).length
+      : group === 'must_know'
+        ? mustKnowFormulaItems.filter((i) => progress[i.id]?.memorized).length +
+          mustKnowTrainingItems.filter((i) => shopTrainingProgress[i.id]?.memorized).length
+        : filteredItems.filter((i) => progress[i.id]?.memorized).length
 
   return (
     <div>
@@ -232,6 +259,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
             >
               <option value="">All categories</option>
               <option value={TOP10_CATEGORY_ID}>⭐ Top 10</option>
+              <option value={MUST_KNOW_CATEGORY_ID}>⭐ Must-Know Items</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -240,13 +268,64 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
             </select>
           )}
           <p className="text-sm text-gray-500">
-            {memorizedCount} of {group === 'shop_training' ? shopTrainingItems.length : filteredItems.length} memorized
+            {memorizedCount} of{' '}
+            {group === 'shop_training'
+              ? shopTrainingItems.length
+              : group === 'must_know'
+                ? mustKnowFormulaItems.length + mustKnowTrainingItems.length
+                : filteredItems.length}{' '}
+            memorized
           </p>
-          {qualified && group !== 'shop_training' && <span className="text-xs font-medium text-brand-500">Qualified</span>}
+          {qualified && group !== 'shop_training' && group !== 'must_know' && (
+            <span className="text-xs font-medium text-brand-500">Qualified</span>
+          )}
         </div>
       </div>
 
-      {group === 'shop_training' ? (
+      {group === 'must_know' ? (
+        !mustKnowFormulaItems.length && !mustKnowTrainingItems.length ? (
+          <EmptyState label="No items marked Must-Know Items yet — check it when editing a drink or a Shop Training item." />
+        ) : (
+          <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+            {mustKnowFormulaItems.map((item) => (
+              <div key={`formula-${item.id}`} className="flex items-center justify-between px-4 py-2.5">
+                <button onClick={() => setOpenItem(item)} className="flex-1 text-left">
+                  {item.formula_categories && (
+                    <span className="text-xs text-brand-400">{item.formula_categories.name}</span>
+                  )}
+                  <div className="font-medium text-gray-800">
+                    {item.name_en} {item.name_zh && <span className="font-zh text-brand-600">· {item.name_zh}</span>}
+                  </div>
+                </button>
+                <label className="flex items-center gap-2 text-sm text-gray-500">
+                  Memorized
+                  <input
+                    type="checkbox"
+                    checked={!!progress[item.id]?.memorized}
+                    onChange={(e) => toggle(item.id, e.target.checked)}
+                  />
+                </label>
+              </div>
+            ))}
+            {mustKnowTrainingItems.map((item) => (
+              <div key={`training-${item.id}`} className="flex items-center justify-between px-4 py-2.5">
+                <button onClick={() => setOpenTrainingItem(item)} className="flex-1 text-left">
+                  <span className="text-xs text-brand-400">Shop Training</span>
+                  <div className="font-medium text-gray-800">{item.title}</div>
+                </button>
+                <label className="flex items-center gap-2 text-sm text-gray-500">
+                  Memorized
+                  <input
+                    type="checkbox"
+                    checked={!!shopTrainingProgress[item.id]?.memorized}
+                    onChange={(e) => toggleShopTraining(item.id, e.target.checked)}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        )
+      ) : group === 'shop_training' ? (
         !shopTrainingItems.length ? (
           <EmptyState label="No shop training content yet." />
         ) : (

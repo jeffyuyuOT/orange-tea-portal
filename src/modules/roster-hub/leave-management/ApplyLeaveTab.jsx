@@ -5,10 +5,27 @@ import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { findBlockedDate } from '../../../lib/leaveLimits'
 
+// Jeff, 2026-09-30: "Leave申請的時候，start的時間預設是一天的開始(12am)，End
+// 的時間預設是一天的最後,而不是當下的時間，因為通常leave是請一整天，除非有特定
+// 時段才會自己去輸入時間" -- leave is normally requested for a whole day, so
+// default Start/End to today's 00:00/23:59 instead of the browser's "now"
+// (a bare `useState('')` datetime-local input just shows the current time
+// when first opened). Editing only the date portion of a datetime-local
+// input via its native picker leaves the time portion untouched, so picking
+// a different day keeps these same full-day bounds -- someone who actually
+// needs a partial-day leave can still type a specific time in manually.
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+function todayAt(hh, mm) {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(hh)}:${pad2(mm)}`
+}
+
 export default function ApplyLeaveTab() {
   const { profile, currentStoreId } = useAuth()
-  const [startAt, setStartAt] = useState('')
-  const [endAt, setEndAt] = useState('')
+  const [startAt, setStartAt] = useState(() => todayAt(0, 0))
+  const [endAt, setEndAt] = useState(() => todayAt(23, 59))
   const [reason, setReason] = useState('')
   const [overlapping, setOverlapping] = useState([])
   // This store's leave-limit settings (Roster Hub > Setting > Leave
@@ -74,8 +91,8 @@ export default function ApplyLeaveTab() {
       setMessage(`Error: ${error.message}`)
     } else {
       setMessage('Leave registered.')
-      setStartAt('')
-      setEndAt('')
+      setStartAt(todayAt(0, 0))
+      setEndAt(todayAt(23, 59))
       setReason('')
     }
   }

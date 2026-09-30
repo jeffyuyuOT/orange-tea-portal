@@ -79,16 +79,53 @@ export default function StaffStudyDetail({ staff, onBack }) {
     return filterVisibleForStore(itemRows ?? [], storeRows ?? [], 'formula_item_id', currentStoreId)
   }
 
-  // Every visible formula item this staff member hasn't ticked "Memorized"
-  // for in Study Log yet. Used to warn (not block — see togglePass below)
-  // a manager reviewing a Formal Quiz Pass.
+  // Jeff, 2026-09-30: "然後formal考試manager在審核的時候也只會check menu
+  // item跟shop training並跳出警示說明哪裡還沒memorized。沒有被勾取menu
+  // item的飲料等於非必要背記的飲料，但study log的勾選還是保留" (the flag
+  // was renamed the same day, before shipping, to "Must-Know Items" and
+  // extended to Shop Training too — see below) -- deliberately a SEPARATE
+  // function from visibleFormulaItems() above (not just that one filtered)
+  // since markAllCurrentItemsMemorized() ("Mark as Qualified") still
+  // snapshots every visible item as memorized, must-know or not — only the
+  // Formal Quiz Pass warning below narrows to must-know items.
+  async function visibleMustKnowItems() {
+    const [{ data: itemRows }, { data: storeRows }] = await Promise.all([
+      supabase.from('formula_items').select('id, name_en, name_zh').eq('is_active', true).eq('is_must_know', true),
+      supabase.from('formula_item_stores').select('*'),
+    ])
+    return filterVisibleForStore(itemRows ?? [], storeRows ?? [], 'formula_item_id', currentStoreId)
+  }
+
+  // Every visible Must-Know formula item + Must-Know Shop Training item this
+  // staff member hasn't ticked "Memorized" for in Study Log yet. Used to
+  // warn (not block — see togglePass below) a manager reviewing a Formal
+  // Quiz Pass. Shop Training items don't carry a name_zh, so they're shaped
+  // the same as a formula item (name_en/name_zh) purely so the warning
+  // message below can list both kinds with the one .map() it already had.
+  //
+  // Jeff, 2026-09-30 (same-day revision): "shop training的部分也要有
+  // Must-Know Items勾選選項" -- Shop Training items now carry their own
+  // is_must_know flag (migration 0082) too, so this check is narrowed the
+  // same way the drink side already is: only must-know Shop Training items
+  // count as required here (a non-must-know one still keeps its own Study
+  // Log "Memorized" self-tracking checkbox, just isn't required for
+  // approval), mirroring the drink side exactly.
   async function getUnmemorizedItems() {
-    const [visibleItems, { data: progressRows }] = await Promise.all([
-      visibleFormulaItems(),
+    const [mustKnowItems, { data: progressRows }, { data: trainingItems }, { data: trainingProgressRows }] = await Promise.all([
+      visibleMustKnowItems(),
       supabase.from('study_progress').select('formula_item_id').eq('profile_id', staff.id).eq('memorized', true),
+      currentStoreId
+        ? supabase.from('shop_training_items').select('id, title').eq('store_id', currentStoreId).eq('is_must_know', true)
+        : Promise.resolve({ data: [] }),
+      supabase.from('shop_training_progress').select('shop_training_item_id').eq('profile_id', staff.id).eq('memorized', true),
     ])
     const memorizedIds = new Set((progressRows ?? []).map((p) => p.formula_item_id))
-    return visibleItems.filter((i) => !memorizedIds.has(i.id))
+    const unmemorizedMustKnowItems = mustKnowItems.filter((i) => !memorizedIds.has(i.id))
+    const memorizedTrainingIds = new Set((trainingProgressRows ?? []).map((p) => p.shop_training_item_id))
+    const unmemorizedTraining = (trainingItems ?? [])
+      .filter((i) => !memorizedTrainingIds.has(i.id))
+      .map((i) => ({ id: i.id, name_en: i.title, name_zh: null }))
+    return [...unmemorizedMustKnowItems, ...unmemorizedTraining]
   }
 
   // Jeff, 2026-09: becoming Qualified via the direct "Mark as Qualified"

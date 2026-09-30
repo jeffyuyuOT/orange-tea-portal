@@ -192,16 +192,28 @@ async function buildQuizSet(profile, storeId) {
   // Top 10 drink gets boosted consistently in both quiz types, not just one.
   let top10Ids = new Set()
   let top10Weight = 1
+  // Jeff, 2026-09-30: "quik quiz跟formal quize在Formula fill-in-the-blank
+  // questions的部分只會從menu item裡抓取(非menu item不會抓)" (the flag was
+  // renamed the same day, before shipping, to "Must-Know Items") -- narrow
+  // memorizedIds down to Must-Know items ONLY before generating the
+  // ingredient-fill-blank questions below; the bank (multiple-choice)
+  // questions further down still draw from every memorized item as before
+  // — this restriction is specifically about the formula fill-in-the-blank
+  // pool, not the whole quiz.
+  let mustKnowIds = new Set()
   const formulaTarget = Math.round((questionCount * formulaRatio) / 100)
   if (formulaTarget > 0) {
-    const [{ data: formalSettings }, { data: top10Rows }] = await Promise.all([
+    const [{ data: formalSettings }, { data: itemFlagRows }] = await Promise.all([
       supabase.from('formal_quiz_settings').select('top10_fill_blank_weight').maybeSingle(),
-      supabase.from('formula_items').select('id, top_10').in('id', memorizedIds),
+      supabase.from('formula_items').select('id, top_10, is_must_know').in('id', memorizedIds),
     ])
     top10Weight = formalSettings?.top10_fill_blank_weight ?? 3
-    top10Ids = new Set((top10Rows ?? []).filter((r) => r.top_10).map((r) => r.id))
+    top10Ids = new Set((itemFlagRows ?? []).filter((r) => r.top_10).map((r) => r.id))
+    mustKnowIds = new Set((itemFlagRows ?? []).filter((r) => r.is_must_know).map((r) => r.id))
   }
-  const formulaQuestions = formulaTarget > 0 ? await buildFormulaQuestions(memorizedIds, formulaTarget, top10Ids, top10Weight) : []
+  const mustKnowMemorizedIds = memorizedIds.filter((id) => mustKnowIds.has(id))
+  const formulaQuestions =
+    formulaTarget > 0 ? await buildFormulaQuestions(mustKnowMemorizedIds, formulaTarget, top10Ids, top10Weight) : []
 
   const bankTarget = questionCount - formulaQuestions.length
   const bankQuestions = bankTarget > 0 ? await buildBankQuestions(memorizedIds, storeId, bankTarget, ratio) : []

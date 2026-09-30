@@ -18,6 +18,23 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
   // migration 0060_accountant_role_and_profile_fields.sql); this is just
   // what stops that role from editing anyone it CAN see.
   const isReadOnly = me?.role === 'accountant'
+  // Jeff, 2026-09-30: "staff information的TFN移到Address下面...只有
+  // developer,admin跟accountant看的到...在shop managerment裡新增可勾取
+  // Staff confidential，如果有勾取的話則可以看到...manager預設不勾取" --
+  // developer/admin/accountant always see TFN/bank/documents; a
+  // shop_manager only does with the new can_view_staff_confidential flag
+  // (UserDetailModal.jsx's Shop Management permissions, off by default —
+  // same per-profile-column pattern as can_edit_attendance_logs).
+  //
+  // Note this is a UI-level gate only, same class of protection as the
+  // rest of this modal's isReadOnly/disabled logic — every manager/admin/
+  // developer already has RLS SELECT access to the full profiles row
+  // (migration 0060's "read own or same-store profiles" policy is
+  // row-level, not column-level), so this stops the fields from being
+  // SHOWN to a manager without the flag, not from being read via a direct
+  // Supabase query. Flag for Jeff if stronger (DB-level) enforcement is
+  // ever needed — see handoff notes.
+  const canViewConfidential = ['admin', 'developer', 'accountant'].includes(me?.role) || !!me?.can_view_staff_confidential
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? 'this store'
   const [form, setForm] = useState({
     first_name: staff.first_name ?? '',
@@ -159,14 +176,6 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
             onChange={(e) => setForm({ ...form, hire_date: e.target.value })}
           />
         </Field>
-        <Field label="Tax File Number">
-          <input
-            className="input disabled:bg-gray-50 disabled:text-gray-400"
-            disabled={isReadOnly}
-            value={form.tax_file_number}
-            onChange={(e) => setForm({ ...form, tax_file_number: e.target.value })}
-          />
-        </Field>
         <Field label="Address" span2>
           <input
             className="input disabled:bg-gray-50 disabled:text-gray-400"
@@ -175,30 +184,42 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
             onChange={(e) => setForm({ ...form, address: e.target.value })}
           />
         </Field>
-        <Field label="Bank account name">
-          <input
-            className="input disabled:bg-gray-50 disabled:text-gray-400"
-            disabled={isReadOnly}
-            value={form.bank_account_name}
-            onChange={(e) => setForm({ ...form, bank_account_name: e.target.value })}
-          />
-        </Field>
-        <Field label="BSB">
-          <input
-            className="input disabled:bg-gray-50 disabled:text-gray-400"
-            disabled={isReadOnly}
-            value={form.bsb}
-            onChange={(e) => setForm({ ...form, bsb: e.target.value })}
-          />
-        </Field>
-        <Field label="Account number">
-          <input
-            className="input disabled:bg-gray-50 disabled:text-gray-400"
-            disabled={isReadOnly}
-            value={form.account_number}
-            onChange={(e) => setForm({ ...form, account_number: e.target.value })}
-          />
-        </Field>
+        {canViewConfidential && (
+          <>
+            <Field label="Tax File Number">
+              <input
+                className="input disabled:bg-gray-50 disabled:text-gray-400"
+                disabled={isReadOnly}
+                value={form.tax_file_number}
+                onChange={(e) => setForm({ ...form, tax_file_number: e.target.value })}
+              />
+            </Field>
+            <Field label="Bank account name">
+              <input
+                className="input disabled:bg-gray-50 disabled:text-gray-400"
+                disabled={isReadOnly}
+                value={form.bank_account_name}
+                onChange={(e) => setForm({ ...form, bank_account_name: e.target.value })}
+              />
+            </Field>
+            <Field label="BSB">
+              <input
+                className="input disabled:bg-gray-50 disabled:text-gray-400"
+                disabled={isReadOnly}
+                value={form.bsb}
+                onChange={(e) => setForm({ ...form, bsb: e.target.value })}
+              />
+            </Field>
+            <Field label="Account number">
+              <input
+                className="input disabled:bg-gray-50 disabled:text-gray-400"
+                disabled={isReadOnly}
+                value={form.account_number}
+                onChange={(e) => setForm({ ...form, account_number: e.target.value })}
+              />
+            </Field>
+          </>
+        )}
       </div>
 
       {!isReadOnly && confirmDelete && (
@@ -216,9 +237,11 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
         </div>
       )}
 
-      <div className="mt-6">
-        <StaffDocumentsSection profileId={staff.id} storeId={currentStoreId} readOnly={isReadOnly} />
-      </div>
+      {canViewConfidential && (
+        <div className="mt-6">
+          <StaffDocumentsSection profileId={staff.id} storeId={currentStoreId} readOnly={isReadOnly} />
+        </div>
+      )}
     </Modal>
   )
 }

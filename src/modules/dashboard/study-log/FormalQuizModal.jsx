@@ -67,8 +67,18 @@ async function buildFormalQuizSet(profileId, storeId) {
   // Which of the memorized items are ⭐ Top 10 — used to weight both kinds
   // of fill-blank candidate below (the auto-generated ones and any Quiz
   // Bank fill-blank question linked to a formula item).
-  const { data: top10Rows } = await supabase.from('formula_items').select('id, top_10').in('id', memorizedIds)
-  const top10Ids = new Set((top10Rows ?? []).filter((r) => r.top_10).map((r) => r.id))
+  //
+  // Jeff, 2026-09-30: "然後現在quik quiz跟formal quize在Formula
+  // fill-in-the-blank questions的部分只會從menu item裡抓取(非menu item不會
+  // 抓)" (renamed the same day, before shipping, to "Must-Know Items") --
+  // also fetch is_must_know here so both kinds of fill-blank candidate
+  // below can be restricted to it (a bank fill-blank question with NO
+  // linked formula item — a cross-drink concept question, see the big
+  // comment further down — isn't "from" any specific item, must-know or
+  // not, so it's left alone).
+  const { data: itemFlagRows } = await supabase.from('formula_items').select('id, top_10, is_must_know').in('id', memorizedIds)
+  const top10Ids = new Set((itemFlagRows ?? []).filter((r) => r.top_10).map((r) => r.id))
+  const mustKnowIds = new Set((itemFlagRows ?? []).filter((r) => r.is_must_know).map((r) => r.id))
 
   // --- Fill-in-the-blank candidates: one per ingredient line that has both
   // an ingredient name and a typed quantity (a custom-image-only line with
@@ -79,7 +89,7 @@ async function buildFormalQuizSet(profileId, storeId) {
   const [{ data: ingredientRows }, { data: excludedRows }, { data: allQuantityRows }] = await Promise.all([
     supabase
       .from('formula_item_ingredients')
-      .select('id, ingredient_id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh)')
+      .select('id, ingredient_id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh, is_must_know)')
       .in('formula_item_id', memorizedIds)
       .not('ingredient_id', 'is', null),
     // Same admin-curated exclusion list Quick Quiz's buildFormulaQuestions
@@ -102,7 +112,14 @@ async function buildFormalQuizSet(profileId, storeId) {
   ])
   const excludedIngredientIds = new Set((excludedRows ?? []).map((r) => r.ingredient_id))
   const fillBlankCandidates = (ingredientRows ?? [])
-    .filter((r) => r.quantity_text?.trim() && r.ingredient_master?.name && !r.is_hot && !excludedIngredientIds.has(r.ingredient_id))
+    .filter(
+      (r) =>
+        r.quantity_text?.trim() &&
+        r.ingredient_master?.name &&
+        !r.is_hot &&
+        !excludedIngredientIds.has(r.ingredient_id) &&
+        r.formula_items?.is_must_know
+    )
     .map((r) => ({
       type: 'fill_blank',
       isGenerated: true,
@@ -158,7 +175,12 @@ async function buildFormalQuizSet(profileId, storeId) {
       .filter((q) => (q.question_type ?? 'single') !== 'fill_blank')
       .map((q) => ({ type: q.question_type === 'multi' ? 'multi' : 'choice', localId: q.id, ...q }))
     bankFillBlankVisible = candidateQuestions
-      .filter((q) => q.question_type === 'fill_blank')
+      // A bank fill-blank question linked to a specific (non-must-know)
+      // drink is excluded too, same rule as the auto-generated candidates
+      // above; one with NO linked formula item is a cross-drink concept
+      // question (see the big comment above), not "from" any item, so it's
+      // unaffected.
+      .filter((q) => q.question_type === 'fill_blank' && (!q.formula_item_id || mustKnowIds.has(q.formula_item_id)))
       .map((q) => ({
         type: 'fill_blank',
         localId: q.id,

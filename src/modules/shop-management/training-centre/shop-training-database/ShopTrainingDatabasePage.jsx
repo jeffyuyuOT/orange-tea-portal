@@ -102,6 +102,11 @@ export default function ShopTrainingDatabasePage() {
             <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
               <button onClick={() => setEditing(item)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <span className="font-medium text-gray-800">{item.title}</span>
+                {item.is_must_know && (
+                  <span className="text-amber-500" title="Must-Know Items">
+                    ⭐
+                  </span>
+                )}
                 {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
               </button>
               <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -176,6 +181,15 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   const [title, setTitle] = useState(item.title ?? '')
   const [content, setContent] = useState(item.content_html ?? '')
   const [visible, setVisible] = useState(item.visible_to_training ?? false)
+  // Jeff, 2026-09-30 (migration 0082): same "Must-Know Items" concept as
+  // Formula Database's flag (ItemEditModal.jsx) — which Shop Training
+  // content is the store's official required-memorization set, used by
+  // Study Log's new "Must-Know Items" tab/dropdown, Progress Chart/Study
+  // Summary's Must-Know breakdown, and narrows the Formal Quiz manager-
+  // approval "not yet memorized" check the same way it already does for
+  // drinks (StaffStudyDetail.jsx). An unchecked item stays fully visible
+  // and keeps its own Study Log "Memorized" self-tracking checkbox.
+  const [mustKnow, setMustKnow] = useState(item.is_must_know ?? false)
   // Attached files staff can download alongside the content — same
   // "upload immediately, only link it to the item at Save" pattern Formula
   // Database's videos use, since a brand-new item has no id yet for a
@@ -226,6 +240,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           title,
           content_html: content,
           visible_to_training: visible,
+          is_must_know: mustKnow,
           sort_order: nextSortOrder,
           store_id: currentStoreId,
           created_by: profileId,
@@ -242,7 +257,14 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
     } else {
       await supabase
         .from('shop_training_items')
-        .update({ title, content_html: content, visible_to_training: visible, updated_by: profileId, updated_by_name: profileName })
+        .update({
+          title,
+          content_html: content,
+          visible_to_training: visible,
+          is_must_know: mustKnow,
+          updated_by: profileId,
+          updated_by_name: profileName,
+        })
         .eq('id', item.id)
       await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', itemId)
     }
@@ -280,6 +302,13 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
           Visible to Training-role logins
+        </label>
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={mustKnow} onChange={(e) => setMustKnow(e.target.checked)} />
+          ⭐ Must-Know Items
+          <span className="text-xs font-normal text-gray-400">
+            — required for the Formal Quiz memorization check (a non-must-know item stays optional to memorize)
+          </span>
         </label>
 
         <div>
@@ -373,6 +402,7 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
           title: item.title,
           content_html: item.content_html,
           visible_to_training: item.visible_to_training,
+          is_must_know: item.is_must_know,
           sort_order: count ?? 0,
           store_id: storeId,
         })

@@ -1,0 +1,27 @@
+-- Jeff, 2026-09-30: "staff information的TFN移到Address下面，所以從TFN到銀行
+-- 資訊跟上傳的檔案的這一區塊，只有developer,admin跟accountant看的到。User
+-- management設定user權限時，在shop managerment裡新增可勾取"Staff
+-- confidential"，如果有勾取的話則可以看到從TFN，銀行資料跟上傳檔案那一區塊。
+-- manager預設不勾取。"
+--
+-- Per-user capability flag, same pattern as profiles.can_edit_attendance_logs
+-- (migration 0062) -- a capability WITHIN the existing Staff Information
+-- page, not a whole page of its own, so it doesn't belong in
+-- permissions.js's SECTIONS/page-key system. Gates the TFN/Address(kept
+-- visible)/bank-info/uploaded-documents block in StaffDetailModal.jsx for a
+-- shop_manager; admin/developer/accountant already see that block
+-- unconditionally regardless of this flag (checked in the client, same as
+-- can_edit_attendance_logs). Defaults to false for everyone, including
+-- shop_manager, per Jeff's spec above.
+--
+-- NOTE (UI-level gate only, same caveat as other per-profile-column
+-- capability flags in this schema): `profiles` RLS ("read own or same-store
+-- profiles", migration 0060) is row-level, not column-level -- any
+-- shop_manager already has SELECT access to the full profiles row,
+-- including tax_file_number/bank_account_name/bsb/account_number, via
+-- is_manager_or_admin() regardless of this flag. This column stops those
+-- fields from being SHOWN in the UI to a manager without it; it does not by
+-- itself stop a direct Supabase query. If stronger (DB-level) enforcement
+-- is ever wanted, follow the accountant_visible_profile() pattern
+-- (migration 0060) with a can_view_staff_confidential_check() function.
+alter table profiles add column if not exists can_view_staff_confidential boolean not null default false;

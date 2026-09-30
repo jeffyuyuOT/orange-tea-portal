@@ -58,6 +58,20 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   // It's just this one boolean flag, not a real formula_categories row, so
   // the item never actually leaves its own category.
   const [topTen, setTopTen] = useState(item.top_10 ?? false)
+  // Jeff, 2026-09-30: "formula編輯頁面在top10勾取下面新增menu item" -- a
+  // second, independent flag: which drinks are the store's official
+  // required-memorization menu (used to sort/tag them in the Formula list
+  // and to scope Quick/Formal Quiz's fill-in-the-blank pool and the Formal
+  // Quiz manager-approval "not yet memorized" check -- see
+  // ItemManager.jsx/FormulaPage.jsx/QuickQuizModal.jsx/FormalQuizModal.jsx/
+  // StaffStudyDetail.jsx). Renamed the same day, before ever shipping, from
+  // "Menu item" to "Must-Know Items" (Jeff: "將勾選menu item改成
+  // "Must-Know Items""), tagged with a star instead of a text badge in the
+  // Formula lists, and extended to Study Log's tab/dropdown + Progress
+  // Chart/Study Summary. A non-must-know drink stays fully visible and
+  // keeps its own Study Log "Memorized" self-tracking checkbox; it's just
+  // no longer mandatory.
+  const [mustKnow, setMustKnow] = useState(item.is_must_know ?? false)
   const [activeHot, setActiveHot] = useState(false) // which ingredient set is showing: false = Iced/Cold, true = Hot
   const [ingredients, setIngredients] = useState([])
   const [annotations, setAnnotations] = useState([]) // small notes shown just above/below the table on the Formula page
@@ -340,6 +354,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         notes_image_path: notesImagePath || null,
         has_hot_version: isDrink ? hasHotVersion : false,
         top_10: isDrink ? topTen : false,
+        is_must_know: isDrink ? mustKnow : false,
       }
       if (isNew) {
         const { data, error } = await supabase
@@ -474,6 +489,16 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
               ⭐ Top 10
               <span className="text-xs font-normal text-gray-400">
                 — also shows this drink under the Top 10 category, on top of its own category
+              </span>
+            </label>
+          )}
+          {isDrink && (
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input type="checkbox" checked={mustKnow} onChange={(e) => setMustKnow(e.target.checked)} />
+              ⭐ Must-Know Items
+              <span className="text-xs font-normal text-gray-400">
+                — sorts above non-must-know items and gets a ⭐ tag; required for Quiz fill-in-the-blank and the
+                Formal Quiz memorization check (a non-must-know item stays optional to memorize)
               </span>
             </label>
           )}

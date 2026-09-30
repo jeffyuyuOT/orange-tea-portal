@@ -1,0 +1,19 @@
+-- Jeff, 2026-09-30 (same-day revision to migration 0081/item 7): "shop
+-- training的部分也要有Must-Know Items勾選選項" -- Shop Training items get
+-- their own independent "Must-Know Items" flag, same concept/name as
+-- formula_items.is_must_know (migration 0081) but its own column, since
+-- shop_training_items is a completely separate table (store-owned since
+-- migration 0052).
+--
+-- Used by: the Shop Training edit form's new checkbox
+-- (ShopTrainingDatabasePage.jsx), Study Log's new top-level "Must-Know
+-- Items" tab and its merge with must-know formula items (StudyLogList.jsx),
+-- Progress Chart / Study Summary's Must-Know breakdown (ProgressChartModal.jsx
+-- / StudySummaryModal.jsx), and the Formal Quiz manager-approval
+-- "not yet memorized" check, which now narrows the Shop Training half of
+-- its check to must-know items only too, mirroring how that check already
+-- only requires must-know DRINKS, not every drink (StaffStudyDetail.jsx).
+-- A shop training item left unchecked stays fully visible/editable and
+-- keeps its own Study Log "Memorized" self-tracking checkbox -- it's simply
+-- not required for the Formal Quiz approval check.
+alter table shop_training_items add column if not exists is_must_know boolean not null default false;

@@ -3049,12 +3049,27 @@ async function ingestParsedStores(parsedStores, warnings){
   // Resolve (but don't yet save) each parsed store against existing records, and
   // collect any date-range issues so we can confirm with the user before committing.
   const pending = [];
+  // Jeff, 2026-09-30 (investigating "sunnybank不能調到最上面"): if an
+  // import batch creates MORE THAN ONE brand-new store in this same loop,
+  // every one of them used to get the exact same `order: currentStores.length`
+  // (currentStores itself is never mutated inside this loop, so that
+  // expression stayed constant across iterations) -- a tie that the ↑/↓
+  // buttons can still resolve one click at a time (each click always swaps
+  // two ADJACENT stores and re-persists both), but it's not a sound
+  // starting state, and depending on exactly which stores tied and in what
+  // creation order the DB happens to return them, a store that "should"
+  // sort right after an existing one could initially land somewhere less
+  // obvious. Give each new store in this batch its own distinct,
+  // increasing order value instead, so ties across a multi-store import
+  // never happen in the first place.
+  let nextNewStoreOrder = currentStores.length;
   for(const ps of parsedStores){
     let store = currentStores.find(s=>s.name.trim().toLowerCase()===ps.storeName.trim().toLowerCase());
     let isNewStore = false;
     if(!store){
       const id = "store_"+await nextId("store");
-      store = {id, name: ps.storeName||("分店"+id), publicHolidays:[], order: currentStores.length};
+      store = {id, name: ps.storeName||("分店"+id), publicHolidays:[], order: nextNewStoreOrder};
+      nextNewStoreOrder += 1;
       isNewStore = true;
     }
     pending.push({ps, store, isNewStore});

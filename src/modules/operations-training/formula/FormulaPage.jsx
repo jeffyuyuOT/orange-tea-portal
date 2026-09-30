@@ -235,6 +235,10 @@ function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, on
     async function load() {
       let query = supabase.from('formula_items').select('*').eq('group_key', groupKey).eq('is_active', true)
       query = topTen ? query.eq('top_10', true) : categoryId ? query.eq('category_id', categoryId) : query.is('category_id', null)
+      // Jeff, 2026-09-30: "被勾取menu item的飲料在formula裡會排在非menu item
+      // 上面" (renamed the same day to "Must-Know Items") -- same as
+      // ItemManager.jsx's admin list, only for the normal (non-topTen) view.
+      if (!topTen) query = query.order('is_must_know', { ascending: false })
       const { data: itemRows } = await query.order(topTen ? 'top_10_sort_order' : 'sort_order').order('id')
       const ids = (itemRows ?? []).map((i) => i.id)
       let restrictionRows = []
@@ -278,6 +282,11 @@ function ItemList({ groupKey, categoryId, topTen, storeId, onBack, backLabel, on
                   <span className="flex items-center gap-1 text-sm text-brand-600 font-zh">
                     {item.name_zh}
                     <PronounceButton text={item.name_zh} />
+                  </span>
+                )}
+                {item.is_must_know && (
+                  <span className="text-amber-500" title="Must-Know Items">
+                    ⭐
                   </span>
                 )}
               </span>
