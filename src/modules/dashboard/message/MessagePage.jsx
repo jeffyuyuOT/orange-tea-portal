@@ -19,9 +19,13 @@ function nameOf(p, storeId, nameByStoreProfile) {
   return rosterDisplayName(withDisplayName) || p.email || 'Unknown'
 }
 
+// Jeff, 2026-10-01: "message裡除了inbox跟sent，新增Important tab" — Important
+// shows starred items from EITHER side (received or sent), so it sits after
+// both source tabs rather than being its own separate data source.
 const TABS = [
   { key: 'inbox', label: 'Inbox' },
   { key: 'sent', label: 'Sent' },
+  { key: 'important', label: 'Important' },
 ]
 
 // Jeff, 2026-09: Message moved out of Bulletin Board into its own "My
@@ -42,6 +46,19 @@ const TABS = [
 // can still find one message ("以方便多家店的user去管理"). Also surfaces a
 // Complete/Incomplete badge for a Support-request message (migration
 // 0069_support_requests.sql) alongside the existing New/Update badge.
+//
+// Jeff, 2026-10-01: "message可以刪除，並支持多重選擇的功能。...訊息清單的
+// 訊息左邊顯示星星跟垃圾桶圖案。星星代表將此訊息標註成important...垃圾桶代
+// 表刪除。如果多重選擇訊息的時候刪除選項會出現在important tab旁邊" — every
+// row now carries a checkbox (multi-select), a star (toggle Important) and
+// a trash icon (soft delete) on its left; a "Delete selected" button
+// appears next to the tab pills whenever anything's checked. Each item
+// carries its own `origin` ('received' or 'sent', set when inboxItems/
+// sentItems are built below) so these actions — and the Important tab,
+// which mixes both — know whether to write to message_recipients (my own
+// copy as a recipient) or messages (my own copy as the sender); see
+// migration 0085_message_important_and_delete.sql for why each side needs
+// its own pair of columns.
 export default function MessagePage() {
   const { profile, currentStoreId, accessibleStores, refreshUnreadMessages } = useAuth()
   const [tab, setTab] = useState('inbox')
@@ -66,6 +83,10 @@ export default function MessagePage() {
   // replies. Keyed by root message id, shared across both tabs (each tab
   // just looks up its own entries).
   const [expandedRootIds, setExpandedRootIds] = useState(new Set())
+  // Jeff, 2026-10-01: checked rows for bulk delete — cleared whenever the
+  // tab switches (see the tab button's onClick below) so a selection made
+  // in one tab can't silently carry into another.
+  const [selectedIds, setSelectedIds] = useState(new Set())
 
   const storeNameById = useMemo(() => new Map(accessibleStores.map((s) => [s.id, s.name])), [accessibleStores])
 
@@ -77,18 +98,20 @@ export default function MessagePage() {
       const [{ data: receivedRows }, { data: sent }] = await Promise.all([
         supabase
           .from('message_recipients')
-          .select('read_at, message:messages(*, support_request:support_requests(id, case_number, completed))')
-          .eq('profile_id', profile.id),
+          .select('read_at, is_important, message:messages(*, support_request:support_requests(id, case_number, completed))')
+          .eq('profile_id', profile.id)
+          .is('deleted_at', null),
         supabase
           .from('messages')
           .select('*, support_request:support_requests(id, case_number, completed)')
           .eq('sender_id', profile.id)
+          .is('sender_deleted_at', null)
           .order('created_at', { ascending: false }),
       ])
 
       const received = (receivedRows ?? [])
         .filter((r) => r.message)
-        .map((r) => ({ ...r.message, readAt: r.read_at }))
+        .map((r) => ({ ...r.message, readAt: r.read_at, isImportant: r.is_important, origin: 'received' }))
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
       const sentRows = sent ?? []
@@ -133,6 +156,8 @@ export default function MessagePage() {
           sentRows.map((m) => ({
             ...m,
             toProfiles: recipientNamesByMessage.get(m.id) ?? [],
+            isImportant: m.sender_is_important,
+            origin: 'sent',
           }))
         )
         setNameByStoreProfile(nameMap)
@@ -149,7 +174,68 @@ export default function MessagePage() {
     refreshUnreadMessages?.()
   }
 
-  const rawItems = tab === 'inbox' ? inboxItems : sentItems
+  // Jeff, 2026-10-01: star toggles write to whichever side this copy
+  // actually belongs to — message_recipients.is_important when it's my own
+  // received copy, messages.sender_is_important when it's my own sent
+  // copy — never the other party's row.
+  async function toggleImportant(item, e) {
+    e.stopPropagation()
+    const next = !item.isImportant
+    if (item.origin === 'received') {
+      await supabase.from('message_recipients').update({ is_important: next }).eq('message_id', item.id).eq('profile_id', profile.id)
+    } else {
+      await supabase.from('messages').update({ sender_is_important: next }).eq('id', item.id).eq('sender_id', profile.id)
+    }
+    reload()
+  }
+
+  // Soft-deletes (sets a timestamp, doesn't actually remove the row) a
+  // batch of items, split by origin into the two tables that carry each
+  // side's own "deleted" marker.
+  async function deleteItems(itemsToDelete) {
+    const receivedIds = itemsToDelete.filter((i) => i.origin === 'received').map((i) => i.id)
+    const sentIds = itemsToDelete.filter((i) => i.origin === 'sent').map((i) => i.id)
+    const now = new Date().toISOString()
+    await Promise.all([
+      receivedIds.length
+        ? supabase.from('message_recipients').update({ deleted_at: now }).eq('profile_id', profile.id).in('message_id', receivedIds)
+        : Promise.resolve(),
+      sentIds.length
+        ? supabase.from('messages').update({ sender_deleted_at: now }).eq('sender_id', profile.id).in('id', sentIds)
+        : Promise.resolve(),
+    ])
+    setSelectedIds(new Set())
+    reload()
+  }
+
+  function deleteOne(item, e) {
+    e.stopPropagation()
+    if (!confirm('Delete this message?')) return
+    deleteItems([item])
+  }
+
+  async function deleteSelected() {
+    const byId = new Map([...inboxItems, ...sentItems].map((i) => [i.id, i]))
+    const toDelete = Array.from(selectedIds)
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+    if (!toDelete.length) return
+    if (!confirm(`Delete ${toDelete.length} selected message(s)?`)) return
+    await deleteItems(toDelete)
+  }
+
+  function toggleSelected(id, e) {
+    e.stopPropagation()
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const importantItems = useMemo(() => [...inboxItems, ...sentItems].filter((i) => i.isImportant), [inboxItems, sentItems])
+  const rawItems = tab === 'inbox' ? inboxItems : tab === 'sent' ? sentItems : importantItems
   const items = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rawItems.filter((item) => {
@@ -158,10 +244,10 @@ export default function MessagePage() {
       if (storeFilter && item.store_id !== storeFilter) return false
       if (!q) return true
       const counterpartNames =
-        tab === 'inbox' ? item.sender_name ?? '' : (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)).join(' ')
+        item.origin === 'received' ? item.sender_name ?? '' : (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)).join(' ')
       return item.subject.toLowerCase().includes(q) || counterpartNames.toLowerCase().includes(q)
     })
-  }, [rawItems, dateFrom, dateTo, storeFilter, search, tab, nameByStoreProfile])
+  }, [rawItems, dateFrom, dateTo, storeFilter, search, nameByStoreProfile])
 
   // Jeff, 2026-09: "同一訊息reply，在inbox跟sent裡面是不是要以第一封為主，下
   // 拉展開，這樣才會知道是同一個主題" — group each tab's own rows by thread
@@ -243,20 +329,49 @@ export default function MessagePage() {
   // expanded replies — `supportBadge` is looked up by thread root (see
   // above), never the row's own item, and `threadCount`/`expanded`/`onToggle`
   // are only passed for a group's primary row when it actually has replies
-  // to reveal.
+  // to reveal. The row itself is a plain div (not a <button>) so the
+  // checkbox/star/trash controls on its left can be real interactive
+  // elements without illegally nesting a button inside a button.
   function renderRow(item, { nested = false, supportBadge = null, threadCount = 0, expanded = false, onToggle = null } = {}) {
-    const unread = tab === 'inbox' && !item.readAt
+    const unread = item.origin === 'received' && !item.readAt
     const isReply = !!item.in_reply_to
-    const toNames = tab === 'sent' ? (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)) : []
+    const toNames = item.origin === 'sent' ? (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)) : []
+    const selected = selectedIds.has(item.id)
     return (
-      <button
+      <div
         key={item.id}
+        role="button"
+        tabIndex={0}
         onClick={() => setOpenMessageId(item.id)}
-        className={`flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-brand-50 sm:flex-row sm:items-center sm:justify-between ${
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setOpenMessageId(item.id)}
+        className={`flex w-full cursor-pointer flex-col gap-1 px-4 py-3 text-left hover:bg-brand-50 sm:flex-row sm:items-center sm:justify-between ${
           nested ? 'bg-brand-50/40 pl-9' : ''
         }`}
       >
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => toggleSelected(item.id, e)}
+            className="shrink-0"
+          />
+          <button
+            type="button"
+            onClick={(e) => toggleImportant(item, e)}
+            title={item.isImportant ? 'Unmark Important' : 'Mark Important'}
+            className={`shrink-0 text-base leading-none ${item.isImportant ? 'text-amber-400' : 'text-gray-300 hover:text-amber-300'}`}
+          >
+            {item.isImportant ? '★' : '☆'}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => deleteOne(item, e)}
+            title="Delete"
+            className="shrink-0 text-gray-300 hover:text-red-500"
+          >
+            🗑
+          </button>
           {threadCount > 0 && (
             <span
               role="button"
@@ -280,28 +395,42 @@ export default function MessagePage() {
           {threadCount > 0 && !expanded && <span className="text-xs text-gray-400">+{threadCount} in thread</span>}
         </div>
         <span className="shrink-0 text-xs text-gray-400">
-          {tab === 'sent' ? `To: ${toNames.join(', ') || '—'}` : `From: ${item.sender_name}`} ·{' '}
+          {item.origin === 'sent' ? `To: ${toNames.join(', ') || '—'}` : `From: ${item.sender_name}`} ·{' '}
           {new Date(item.created_at).toLocaleString()}
         </span>
-      </button>
+      </div>
     )
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                tab === t.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => {
+                  setTab(t.key)
+                  setSelectedIds(new Set())
+                }}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                  tab === t.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {/* Jeff, 2026-10-01: "如果多重選擇訊息的時候刪除選項會出現在
+              important tab旁邊" — a bulk-delete button appears right next to
+              the tab pills (which include Important) the moment anything's
+              checked, and disappears again once the selection's cleared. */}
+          {selectedIds.size > 0 && (
+            <Button variant="danger" onClick={deleteSelected}>
+              Delete selected ({selectedIds.size})
+            </Button>
+          )}
         </div>
         <Button onClick={() => setComposing(true)}>+ New message</Button>
       </div>
@@ -348,7 +477,17 @@ export default function MessagePage() {
       {loading ? (
         <LoadingSpinner />
       ) : !items.length ? (
-        <EmptyState label={rawItems.length ? 'No messages match.' : tab === 'inbox' ? 'No messages received yet.' : 'No messages sent yet.'} />
+        <EmptyState
+          label={
+            rawItems.length
+              ? 'No messages match.'
+              : tab === 'inbox'
+                ? 'No messages received yet.'
+                : tab === 'sent'
+                  ? 'No messages sent yet.'
+                  : 'No important messages.'
+          }
+        />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {groupedItems.map(({ rootId, primary, replies }) => {

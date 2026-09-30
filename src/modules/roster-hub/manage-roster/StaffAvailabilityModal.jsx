@@ -9,15 +9,37 @@ import { weekDatesFrom, loadWeekAvailabilityForProfiles, describeDay } from '../
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 // Jeff, 2026-09: "在roster hub上的manage roster的action旁邊新增view staff's
-// availability，點擊則會跳出視窗顯示編排該週員工登記的available time，以清單
-// 方式全部顯示，不需要再做任何點擊" — read-only, everyone's whole week shown
-// flat, no per-person expand/click needed. Staff with nothing saved for a
-// day just read "All day available" (the same default computeAvailableWindows
-// falls back to when there's no row), so this list is complete for every
-// staff member on the roster, not just the ones who've actually filled
-// something in.
+// availability，點擊則會跳出視窗顯示編排該週員工登記的available time" — a
+// read-only view of everyone's registered availability for the week. Staff
+// with nothing saved for a day just read "All day available" (the same
+// default computeAvailableWindows falls back to when there's no row), so
+// this list is complete for every staff member on the roster, not just the
+// ones who've actually filled something in.
+//
+// Jeff, 2026-10-01: "view staff available time的視窗能做到員工時間資訊用展
+// 開顯示，預設不展開，所以視窗一開始是名字的清單，要看哪一個員工再點擊名字
+// 展開。再點擊一下則收起" — collapsed by default; the modal opens as a plain
+// name list and clicking a name expands just that person's day-by-day grid
+// (click again to collapse).
 export default function StaffAvailabilityModal({ open, onClose, staff, weekStart }) {
   const [byProfile, setByProfile] = useState(null)
+  // Jeff, 2026-10-01: "view staff available time的視窗能做到員工時間資訊用展
+  // 開顯示，預設不展開，所以視窗一開始是名字的清單，要看哪一個員工再點擊名字
+  // 展開。再點擊一下則收起" — collapsed by default; clicking a name toggles
+  // just that person's row independently of every other one (a Set of
+  // expanded profile ids, same toggle pattern MessagePage.jsx's thread
+  // expand/collapse already uses), so more than one can be open at once if
+  // that's what someone wants.
+  const [expandedIds, setExpandedIds] = useState(new Set())
+
+  function toggleExpanded(profileId) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(profileId)) next.delete(profileId)
+      else next.add(profileId)
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!open) return
@@ -54,24 +76,36 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
       ) : !sorted.length ? (
         <p className="text-sm text-gray-400">No staff on this store's roster.</p>
       ) : (
-        <div className="space-y-4">
-          {sorted.map((s) => (
-            <div key={s.id} className="rounded-lg border border-brand-100 p-3">
-              <div className="mb-1.5 text-sm font-semibold text-gray-800">{rosterDisplayName(s)}</div>
-              <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-7">
-                {dates.map((dateStr, i) => {
-                  const entry = byProfile[s.id]?.[dateStr]
-                  const desc = describeDay(entry?.dayRow, entry?.windows)
-                  return (
-                    <div key={dateStr}>
-                      <span className="text-xs font-medium text-gray-400">{DAY_LABELS[i]} {format(parseISO(dateStr), 'd/M')}</span>
-                      <div className={desc === 'Unavailable' ? 'text-red-600' : 'text-gray-700'}>{desc}</div>
-                    </div>
-                  )
-                })}
+        <div className="space-y-2">
+          {sorted.map((s) => {
+            const isOpen = expandedIds.has(s.id)
+            return (
+              <div key={s.id} className="rounded-lg border border-brand-100 p-3">
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(s.id)}
+                  className="flex w-full items-center justify-between text-left text-sm font-semibold text-gray-800"
+                >
+                  <span>{rosterDisplayName(s)}</span>
+                  <span className="text-xs font-normal text-gray-400">{isOpen ? '▲' : '▼'}</span>
+                </button>
+                {isOpen && (
+                  <div className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-7">
+                    {dates.map((dateStr, i) => {
+                      const entry = byProfile[s.id]?.[dateStr]
+                      const desc = describeDay(entry?.dayRow, entry?.windows)
+                      return (
+                        <div key={dateStr}>
+                          <span className="text-xs font-medium text-gray-400">{DAY_LABELS[i]} {format(parseISO(dateStr), 'd/M')}</span>
+                          <div className={desc === 'Unavailable' ? 'text-red-600' : 'text-gray-700'}>{desc}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </Modal>
