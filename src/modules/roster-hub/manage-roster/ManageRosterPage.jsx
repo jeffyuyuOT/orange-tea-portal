@@ -505,7 +505,16 @@ export default function ManageRosterPage() {
           gap-2 group so they stay adjacent as a unit if this row wraps on
           a narrow screen — "手機板的Save和Submit按鈕則放在action右邊，跟
           action同一行" — rather than Save/Submit landing on their own line
-          away from Action. */}
+          away from Action.
+          2026-10-01 fix: this inner group itself also needs `flex-wrap` —
+          without it, "Action ▾" + "Save (not published)" + "Submit &
+          Publish" together are wider than a phone screen, and with no wrap
+          the extra width just overflows off the right edge instead of
+          wrapping, so Save/Submit silently went invisible on mobile (Jeff
+          screenshot: only "Action ▾" visible, nothing past it). Wrapping
+          lets Submit & Publish drop to a second line while staying
+          grouped right under Action/Save, instead of being cut off
+          entirely. */}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">Week starting (Mon)</span>
@@ -516,7 +525,7 @@ export default function ManageRosterPage() {
           View Staff's Availability
         </Button>
 
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           {/* Jeff, 2026-10-01: "manage roster頁面裡的action按鈕下拉內容將
               export current grid移除(因為hisotry裡可以做到相同的功能)，然後
               新增-> last week, -> current week. -> next week放在最前面，下面
