@@ -169,6 +169,13 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
     if (categoryId === TOP10_CATEGORY_ID) {
       return [...filtered].sort((a, b) => (a.top_10_sort_order ?? 0) - (b.top_10_sort_order ?? 0) || a.id - b.id)
     }
+    // Jeff, 2026-10-02: "must-know item分類裡(formula跟study log都是)，同時
+    // 是top10的item要排在上面" — same treatment as FormulaPage.jsx's own
+    // Must Know Item category: a drink that's also Top 10 floats to the top
+    // of this (drink-group-only) Must Know dropdown view too.
+    if (categoryId === MUST_KNOW_CATEGORY_ID) {
+      return [...filtered].sort((a, b) => (b.top_10 ? 1 : 0) - (a.top_10 ? 1 : 0))
+    }
     return filtered
   }, [items, group, categoryId])
 
@@ -176,7 +183,15 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   // every drink group (is_must_know is drink-only, migration 0081's
   // constraint) merged with Shop Training's own must-know items (migration
   // 0082), rendered together below as one combined list.
-  const mustKnowFormulaItems = useMemo(() => items.filter((i) => i.is_must_know), [items])
+  // Jeff, 2026-10-02: "must-know item分類裡(formula跟study log都是)，同時是
+  // top10的item要排在上面" — a drink that's both Must Know and Top 10 sorts
+  // to the top of this combined top-level tab too. Shop Training items have
+  // no Top 10 concept at all (drink-only), so mustKnowTrainingItems below is
+  // untouched — they just stay after, in their existing sort_order.
+  const mustKnowFormulaItems = useMemo(
+    () => [...items.filter((i) => i.is_must_know)].sort((a, b) => (b.top_10 ? 1 : 0) - (a.top_10 ? 1 : 0)),
+    [items]
+  )
   const mustKnowTrainingItems = useMemo(() => shopTrainingItems.filter((i) => i.is_must_know), [shopTrainingItems])
 
   async function toggle(itemId, value) {

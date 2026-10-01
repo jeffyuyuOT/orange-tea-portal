@@ -262,6 +262,10 @@ function ItemList({ groupKey, categoryId, topTen, mustKnow, storeId, onBack, bac
       // non-mustKnow) view; the Must Know Item category is meaningless to
       // sort by this (every row in it already has is_must_know = true).
       if (!topTen && !mustKnow) query = query.order('is_must_know', { ascending: false })
+      // Jeff, 2026-10-02: "must-know item分類裡(formula跟study log都是)，同時
+      // 是top10的item要排在上面" — within the Must Know Item category itself,
+      // a drink that's ALSO Top 10 still floats to the top of this list.
+      if (mustKnow) query = query.order('top_10', { ascending: false })
       const { data: itemRows } = await query.order(topTen ? 'top_10_sort_order' : 'sort_order').order('id')
       const ids = (itemRows ?? []).map((i) => i.id)
       let restrictionRows = []
