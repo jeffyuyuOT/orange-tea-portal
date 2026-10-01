@@ -24,10 +24,25 @@ export default function ClockFeedbackModal({ feedback, onClose }) {
       open
       onClose={onClose}
       dismissable={false}
-      title={isSuccess ? '✅ Recorded' : '⚠️ Not recorded'}
-      footer={<Button onClick={onClose}>OK</Button>}
+      title={isSuccess ? 'Recorded' : 'Not recorded'}
+      footer={
+        <Button onClick={onClose} className="!w-full !py-3 !text-base">
+          OK
+        </Button>
+      }
     >
-      <p className={`text-center text-lg font-medium ${isSuccess ? 'text-green-700' : 'text-red-600'}`}>{feedback.text}</p>
+      {/* Jeff, 2026-10-02: "能大一點嗎，要跳出獨立視窗在螢幕中間的效果" — the
+          original was just a title bar + one line of text, easy to mistake
+          for a small toast rather than something that demands a tap to
+          dismiss. A big icon + much larger message (same modal/backdrop
+          mechanics, dismissable=false) makes it read as a real standalone
+          popup rather than an inline status line. */}
+      <div className="flex flex-col items-center gap-3 py-5 text-center">
+        <span className="text-6xl leading-none" aria-hidden>
+          {isSuccess ? '✅' : '⚠️'}
+        </span>
+        <p className={`text-2xl font-semibold ${isSuccess ? 'text-green-700' : 'text-red-600'}`}>{feedback.text}</p>
+      </div>
     </Modal>
   )
 }

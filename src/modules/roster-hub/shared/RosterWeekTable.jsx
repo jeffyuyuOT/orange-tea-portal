@@ -181,16 +181,24 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
 
   return (
     <div className="overflow-x-auto rounded-xl border border-brand-100">
-      <table className="min-w-full divide-y divide-brand-100 text-sm">
+      {/* Jeff, 2026-10-02: "手機板bulletin裡的roster...名字跟時間的字能小一
+          點嗎，這樣手機螢幕可以看到多一點的資訊" — text-sm/text-xs below
+          (and the cell padding) now only apply from the `sm` breakpoint up;
+          on a phone it drops a size (text-xs/text-[11px]) so more of the
+          week is visible per screen without scrolling as much. Desktop is
+          completely unaffected. */}
+      <table className="min-w-full divide-y divide-brand-100 text-xs sm:text-sm">
         <thead className="bg-brand-50">
           <tr>
             {/* Sticky staff column — on a narrow phone screen this table has
                 to scroll sideways to see the later weekdays, so this stays
                 pinned in place (same trick as Leave Schedule's mobile sticky
                 date column) rather than scrolling the name out of view too. */}
-            <th className="sticky left-0 z-10 bg-brand-50 px-3 py-2 text-left font-medium text-brand-700">Staff</th>
+            <th className="sticky left-0 z-10 bg-brand-50 px-2 py-1.5 text-left font-medium text-brand-700 sm:px-3 sm:py-2">
+              Staff
+            </th>
             {days.map((d) => (
-              <th key={d.toISOString()} className="px-3 py-2 text-left font-medium text-brand-700">
+              <th key={d.toISOString()} className="px-2 py-1.5 text-left font-medium text-brand-700 sm:px-3 sm:py-2">
                 {format(d, 'EEE d/M')}
               </th>
             ))}
@@ -205,7 +213,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
             const notQualified = info.isStaff && !info.qualified
             return (
               <tr key={key}>
-                <td className="sticky left-0 z-10 bg-white px-3 py-2 font-medium text-gray-700">
+                <td className="sticky left-0 z-10 bg-white px-2 py-1.5 font-medium text-gray-700 sm:px-3 sm:py-2">
                   <div className={notQualified ? 'text-red-600' : undefined} title={notQualified ? 'Not yet Qualified' : undefined}>
                     {info.name || 'Unassigned'}
                   </div>
@@ -213,7 +221,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                       repeated in every day cell — each cell below then only needs to
                       show the count, per Jeff, since everyone already knows what it
                       refers to and one break = 30 min. */}
-                  <div className="text-xs font-normal text-red-500">Break</div>
+                  <div className="text-[11px] font-normal text-red-500 sm:text-xs">Break</div>
                 </td>
                 {days.map((d) => {
                   const dayStr = format(d, 'yyyy-MM-dd')
@@ -221,14 +229,14 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                     (e) => (e.profile_id ?? e.staff_name_raw) === key && e.work_date === dayStr
                   )
                   return (
-                    <td key={dayStr} className="px-3 py-2 text-gray-600">
+                    <td key={dayStr} className="px-2 py-1.5 text-gray-600 sm:px-3 sm:py-2">
                       {shift ? (
                         <>
                           <div className={`whitespace-nowrap ${notQualified ? 'text-red-600 font-medium' : ''}`}>
                             {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
                           </div>
                           {shift.break_half_hours ? (
-                            <div className="text-xs text-red-500">x{shift.break_half_hours}</div>
+                            <div className="text-[11px] text-red-500 sm:text-xs">x{shift.break_half_hours}</div>
                           ) : null}
                         </>
                       ) : (

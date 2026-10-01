@@ -502,20 +502,26 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
     : "Clear this row's hours"
   const notQualified = row.kind === 'staff' && !row.qualified
   const entry = findEntry(row, date)
+  // Jeff, 2026-10-02: "手機板...manage roster名字跟時間的字能小一點嗎，這樣
+  // 手機螢幕可以看到多一點的資訊" — name/time text here used to render at
+  // the browser's plain default size (no Tailwind text-* class at all on
+  // the name span), noticeably bigger than everything else on this card.
+  // Shrinking it (+ tighter card padding/gaps) fits more staff cards in
+  // view without scrolling as much, without touching the desktop grid.
   return (
-    <div className="space-y-2 p-3">
-      <div className="flex items-center gap-2">
+    <div className="space-y-1.5 p-2">
+      <div className="flex items-center gap-1.5">
         <div className="min-w-0 flex-1">
           {row.profileId ? (
             <span
-              className={`truncate font-medium ${notQualified ? 'text-red-600' : 'text-gray-800'}`}
+              className={`truncate text-sm font-medium ${notQualified ? 'text-red-600' : 'text-gray-800'}`}
               title={notQualified ? 'Not yet Qualified' : undefined}
             >
               {row.name || <span className="text-gray-400">Unnamed</span>}
             </span>
           ) : (
             <input
-              className="input !py-1"
+              className="input !py-1 text-sm"
               placeholder="Name"
               value={row.name}
               onChange={(e) => renameRow(row, e.target.value)}
