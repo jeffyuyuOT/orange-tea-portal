@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../lib/AuthContext'
 import { useClockInOut } from '../../../lib/useClockInOut'
 import QrScannerModal from './QrScannerModal'
@@ -10,6 +11,15 @@ import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 export default function TimeAttendancePage() {
   const { profile, accessibleStores } = useAuth()
   const [tab, setTab] = useState('clock') // 'clock' | 'logs'
+  // Jeff, 2026-10-02: "長按app選clock in/out的快捷鍵能直接進入掃碼的camera
+  // 介面嗎" — the PWA home-screen shortcut (vite.config.js manifest
+  // `shortcuts`) used to just land on this tab same as tapping the sidebar
+  // link would, leaving the manager/staff to still tap "Scan to Clock
+  // In/Out" themselves. The shortcut's url now carries `?scan=1`, which
+  // ClockInOutTab below reads to open the camera itself the instant this
+  // page is ready, instead of only getting you to one tap away from it.
+  const [searchParams] = useSearchParams()
+  const autoScan = searchParams.get('scan') === '1'
 
   return (
     <div>
@@ -31,7 +41,7 @@ export default function TimeAttendancePage() {
       </div>
 
       {tab === 'clock' ? (
-        <ClockInOutTab profileId={profile?.id} accessibleStores={accessibleStores} />
+        <ClockInOutTab profileId={profile?.id} accessibleStores={accessibleStores} autoScan={autoScan} />
       ) : (
         <AttendanceLogTable profileId={profile?.id} />
       )}
@@ -39,7 +49,7 @@ export default function TimeAttendancePage() {
   )
 }
 
-function ClockInOutTab({ profileId, accessibleStores }) {
+function ClockInOutTab({ profileId, accessibleStores, autoScan }) {
   // Jeff, 2026-10-01: this tab's own scan/submit logic moved into
   // useClockInOut (src/lib/useClockInOut.js) so the new header shortcut in
   // AppShell.jsx could reuse the exact same flow instead of a second,
@@ -48,6 +58,21 @@ function ClockInOutTab({ profileId, accessibleStores }) {
     profileId,
     accessibleStores
   )
+
+  // Fires the camera open exactly once, as soon as `profileId` is actually
+  // ready (AuthContext may still be loading the profile on a cold PWA
+  // launch straight from the home-screen shortcut) — the ref stops it from
+  // firing again on every re-render afterwards (e.g. once `lastEvent` comes
+  // back and this re-renders), which would otherwise reopen the camera right
+  // after the manager/staff closes or finishes it.
+  const autoScanFired = useRef(false)
+  useEffect(() => {
+    if (autoScan && profileId && !autoScanFired.current) {
+      autoScanFired.current = true
+      openScanner()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoScan, profileId])
 
   return (
     <div className="mx-auto max-w-md text-center">

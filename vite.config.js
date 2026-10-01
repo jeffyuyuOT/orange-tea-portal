@@ -69,11 +69,19 @@ export default defineConfig({
         // doesn't support this yet, so this is Android/Windows-only for
         // now; the in-app header button (AppShell.jsx) covers every
         // platform once the app itself is open.
+        //
+        // Jeff, 2026-10-02: "長按app選clock in/out的快捷鍵能直接進入掃碼的
+        // camera介面嗎" — the `?scan=1` here is what makes that actually
+        // true: TimeAttendancePage.jsx reads it and opens the camera itself
+        // the moment the page is ready, instead of landing on the Clock
+        // In/Out tab and still needing one more tap on "Scan to Clock
+        // In/Out". Two taps total now (long-press icon, tap shortcut)
+        // lands straight in the camera view.
         shortcuts: [
           {
             name: 'Scan to Clock In/Out',
             short_name: 'Clock In/Out',
-            url: '/dashboard/time-attendance',
+            url: '/dashboard/time-attendance?scan=1',
             icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
           },
         ],
