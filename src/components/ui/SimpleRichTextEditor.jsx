@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import CameraCaptureModal from './CameraCaptureModal'
 
+// Jeff, 2026-10-02: "能限制圖片上傳的size嗎" — this editor's Camera/Library
+// buttons had no size check at all before a file went straight to Supabase
+// Storage, on a `documents` bucket with no size limit of its own either (see
+// the 2026-10-02 storage-quota conversation — free tier, ~226MB/1GB already
+// used). A normal phone camera photo is typically 2-6MB, so 5MB comfortably
+// covers that without ever needing the person to resize first, while still
+// capping how fast one oversized photo can eat into the shared quota.
+// Checked client-side (fast, friendly message) rather than relying solely
+// on a bucket-level limit, which would surface as a much less helpful raw
+// storage error after the upload attempt.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
 // A minimal contentEditable-based rich text editor (bold / italic / list /
 // link) that stores its value as an HTML string. This keeps the project
 // dependency-free; swap in TipTap or Quill later if richer editing
@@ -54,6 +66,10 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder = 'T
 
   async function insertImage(file) {
     if (!file || !imageUploadPath) return
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`Image is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB) — please use a photo under ${MAX_IMAGE_BYTES / (1024 * 1024)}MB.`)
+      return
+    }
     setUploadingImage(true)
     const path = `${imageUploadPath}/${Date.now()}-${file.name}`
     const { error } = await supabase.storage.from(imageBucket).upload(path, file, { upsert: true })
