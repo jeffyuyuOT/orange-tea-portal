@@ -7,6 +7,7 @@ import Badge from '../../../components/ui/Badge'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
 import AnnouncementViewersModal from './AnnouncementViewersModal'
+import { deleteStorageImages } from '../../../lib/richTextImages'
 
 // The category dropdown is really just a friendlier front end over two
 // independent fields: `category` (Normal vs Customer Complaint — a real
@@ -283,6 +284,13 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       alert(`${deleteLabel} failed: ${error.message}`)
       return
     }
+    // Jeff, 2026-10-02: "公告刪除時一併刪除對應的 storage 檔案" — the post row
+    // is already gone at this point; `content` (this modal's loaded
+    // content_html) is the only place that knows which storage image(s), if
+    // any, belonged to it. Best-effort — see deleteStorageImages' comment —
+    // so a cleanup failure here never makes a successful delete look like
+    // it failed.
+    deleteStorageImages(content, 'documents')
     onSaved()
   }
 
