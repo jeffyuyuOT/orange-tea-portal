@@ -76,6 +76,13 @@ export default function ManageRosterPage() {
   // dropdown rather than inside it since it's a lookup, not a
   // destructive/file operation the way the other three menu items are.
   const [availabilityModalOpen, setAvailabilityModalOpen] = useState(false)
+  // Jeff, 2026-10-02: "上面的那一段說明改到instruction小圖示放在submit那一
+  // 行的最右邊，點擊圖示在跳出視窗顯示這一段說明" — the "Fill in the grid
+  // below..." paragraph that used to sit permanently under the page title
+  // (taking up vertical space on every visit, mobile especially) is now
+  // only shown on demand, via this ℹ️ icon at the end of the Save/Submit
+  // toolbar.
+  const [showInstructions, setShowInstructions] = useState(false)
   // Feeds RosterEntryGrid's soft "outside declared availability" warning
   // (task 29) — refetched whenever the staff list or the week being edited
   // changes, so the check is always against the right week's declarations.
@@ -608,12 +615,7 @@ export default function ManageRosterPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">Manage Roster</h1>
-      <p className="mb-4 text-sm text-gray-500">
-        Fill in the grid below — Start/End hours (e.g. 11, 22.5 for 10:30pm) and each day's Break in half-hour units
-        (1 = 30 min, 2 = 1 hr) — or download the template, fill it in Excel, and upload it back. Total hr and WKD hr
-        are calculated automatically.
-      </p>
+      <h1 className="mb-4 text-xl font-semibold text-gray-900">Manage Roster</h1>
 
       {/* Jeff, 2026-10-01: "電腦版的...Save (not published)和Submit & Publish
           按鈕移到action右邊，原本的View Staff's Availability跟Action往week
@@ -767,7 +769,24 @@ export default function ManageRosterPage() {
           <span className="sm:hidden">Submit</span>
           <span className="hidden sm:inline">Submit & Publish</span>
         </Button>
+        <button
+          type="button"
+          onClick={() => setShowInstructions(true)}
+          className="shrink-0 rounded-full border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:bg-gray-50 hover:text-brand-600"
+          title="How to fill in the grid"
+          aria-label="How to fill in the grid"
+        >
+          ℹ️
+        </button>
       </div>
+
+      <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="How to fill in the grid">
+        <p className="text-sm text-gray-600">
+          Fill in the grid below — Start/End hours (e.g. 11, 22.5 for 10:30pm) and each day's Break in half-hour
+          units (1 = 30 min, 2 = 1 hr) — or download the template, fill it in Excel, and upload it back. Total hr
+          and WKD hr are calculated automatically.
+        </p>
+      </Modal>
 
       <RosterEntryGrid
         staff={staff}

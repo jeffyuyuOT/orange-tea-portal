@@ -320,10 +320,18 @@ export function AuthProvider({ children }) {
       if (r.changed_at > cur) periodLatestChange.set(r.roster_period_id, r.changed_at)
     })
     const periodViewedAt = new Map((periodViewRows ?? []).map((r) => [r.roster_period_id, r.viewed_at]))
+    // Jeff, 2026-10-02: "Bulletin的roster更新時不用顯示小紅點，除了有新增的
+    // roster之外" — this used to also light up for a week that had ALREADY
+    // been opened once but then got edited again (`latestChange >
+    // viewedAt`), same as BulletinPage.jsx's own per-item "Update" badge
+    // used to. Narrowed to only a week that's never been opened at all
+    // (`!viewedAt`) — a genuinely new roster posting, not a re-edit of one
+    // already seen. See BulletinPage.jsx's matching fix (same condition,
+    // computed independently there for its own item list).
     const hasUnviewedRoster = (rosterRows ?? []).some((r) => {
       const latestChange = periodLatestChange.get(r.id)
       const viewedAt = periodViewedAt.get(r.id)
-      return !!latestChange && (!viewedAt || latestChange > viewedAt)
+      return !!latestChange && !viewedAt
     })
 
     setHasBulletinUpdates(hasUnviewedAnnouncement || hasUnviewedComplaint || hasUnviewedRoster)

@@ -502,72 +502,71 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
     : "Clear this row's hours"
   const notQualified = row.kind === 'staff' && !row.qualified
   const entry = findEntry(row, date)
-  // Jeff, 2026-10-02: "手機板...manage roster名字跟時間的字能小一點嗎，這樣
-  // 手機螢幕可以看到多一點的資訊" — name/time text here used to render at
-  // the browser's plain default size (no Tailwind text-* class at all on
-  // the name span), noticeably bigger than everything else on this card.
-  // Shrinking it (+ tighter card padding/gaps) fits more staff cards in
-  // view without scrolling as much, without touching the desktop grid.
+  // Jeff, 2026-10-02: "想辦法讓名字，S/E/B的資訊，刪除跟total work hr的資訊
+  // 都放在同一行嗎，名字的字可以再縮小一點讓後面空間大一點" — Start/End/
+  // Break used to be their own labeled 3-column grid below the name/
+  // delete/total row (two visual rows per person). They're now inline on
+  // that SAME row instead: "Start"/"End"/"Break (½h)" shortened to single
+  // letters (S/E/B per Jeff's wording), each letter sitting directly next
+  // to its own narrowed input (`!w-11`, was effectively 1/3 of the card's
+  // width) rather than stacked above it, and the name text shrunk again
+  // (text-xs, was text-sm) to help make room for the trio now sharing its
+  // line. flex-wrap stays as a fallback for a genuinely narrow phone, but
+  // every piece here is sized to fit one row on an ordinary phone width.
+  // The WKD half of the old "Wk Xh · WKD Yh" text moved into this span's
+  // title (a tap-and-hold/hover tooltip) rather than staying inline, since
+  // there wasn't room left for both numbers as plain text any more.
   return (
-    <div className="space-y-1.5 p-2">
-      <div className="flex items-center gap-1.5">
-        <div className="min-w-0 flex-1">
-          {row.profileId ? (
-            <span
-              className={`truncate text-sm font-medium ${notQualified ? 'text-red-600' : 'text-gray-800'}`}
-              title={notQualified ? 'Not yet Qualified' : undefined}
-            >
-              {row.name || <span className="text-gray-400">Unnamed</span>}
-            </span>
-          ) : (
-            <input
-              className="input !py-1 text-sm"
-              placeholder="Name"
-              value={row.name}
-              onChange={(e) => renameRow(row, e.target.value)}
-            />
-          )}
-        </div>
-        <button onClick={() => removeRow(row)} className="shrink-0 text-gray-300 hover:text-red-500" title={removeTitle}>
-          ✕
-        </button>
-        <span className="shrink-0 text-xs text-gray-400">
-          Wk {total || 0}h{wkd ? ` · WKD ${wkd}h` : ''}
-        </span>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-gray-400">Start</span>
-          <HourInput
-            value={entry?.startTime}
-            disabled={nameEmpty}
-            onChange={(v) => updateCell(row, date, { startTime: v })}
-            onBlur={() => onCheckConflict?.(row, date)}
-            className={notQualified ? 'text-red-600 font-medium' : ''}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-gray-400">End</span>
-          <HourInput
-            value={entry?.endTime}
-            disabled={nameEmpty}
-            onChange={(v) => updateCell(row, date, { endTime: v })}
-            onBlur={() => onCheckConflict?.(row, date)}
-            className={notQualified ? 'text-red-600 font-medium' : ''}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
-            Break (½h)
+    <div className="flex flex-wrap items-center gap-1 p-2">
+      <div className="min-w-0 flex-1">
+        {row.profileId ? (
+          <span
+            className={`block truncate text-xs font-medium ${notQualified ? 'text-red-600' : 'text-gray-800'}`}
+            title={notQualified ? 'Not yet Qualified' : row.name}
+          >
+            {row.name || <span className="text-gray-400">Unnamed</span>}
           </span>
-          <HourInput
-            value={entry?.breakHours}
-            disabled={nameEmpty}
-            onChange={(v) => updateCell(row, date, { breakHours: v })}
-            className="text-red-600"
+        ) : (
+          <input
+            className="input !py-1 text-xs"
+            placeholder="Name"
+            value={row.name}
+            onChange={(e) => renameRow(row, e.target.value)}
           />
-        </label>
+        )}
       </div>
+      <span className="shrink-0 text-[10px] font-medium text-gray-400">S</span>
+      <HourInput
+        value={entry?.startTime}
+        disabled={nameEmpty}
+        onChange={(v) => updateCell(row, date, { startTime: v })}
+        onBlur={() => onCheckConflict?.(row, date)}
+        className={`!w-11 shrink-0 !px-0.5 text-xs ${notQualified ? 'text-red-600 font-medium' : ''}`}
+      />
+      <span className="shrink-0 text-[10px] font-medium text-gray-400">E</span>
+      <HourInput
+        value={entry?.endTime}
+        disabled={nameEmpty}
+        onChange={(v) => updateCell(row, date, { endTime: v })}
+        onBlur={() => onCheckConflict?.(row, date)}
+        className={`!w-11 shrink-0 !px-0.5 text-xs ${notQualified ? 'text-red-600 font-medium' : ''}`}
+      />
+      <span className="shrink-0 text-[10px] font-medium text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
+        B
+      </span>
+      <HourInput
+        value={entry?.breakHours}
+        disabled={nameEmpty}
+        onChange={(v) => updateCell(row, date, { breakHours: v })}
+        className="!w-11 shrink-0 !px-0.5 text-xs text-red-600"
+        title="Half-hour units — 1 = 30 min, 2 = 1 hr"
+      />
+      <button onClick={() => removeRow(row)} className="shrink-0 text-gray-300 hover:text-red-500" title={removeTitle}>
+        ✕
+      </button>
+      <span className="shrink-0 text-[10px] text-gray-400" title={wkd ? `Week total ${total || 0}h, incl. ${wkd}h weekend` : `Week total ${total || 0}h`}>
+        {total || 0}h
+      </span>
     </div>
   )
 }

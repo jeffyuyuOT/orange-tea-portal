@@ -6,6 +6,7 @@ import Badge from '../../../../components/ui/Badge'
 import Modal from '../../../../components/ui/Modal'
 import SimpleRichTextEditor from '../../../../components/ui/SimpleRichTextEditor'
 import { EmptyState } from '../../../../components/ui/LoadingSpinner'
+import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker'
 
 // Moved here from Admin Center (migration 0052): each store now owns its own
 // training content outright — no more one shared global list with an
@@ -156,6 +157,7 @@ export default function ShopTrainingDatabasePage() {
           currentStoreId={currentStoreId}
           profileId={profile.id}
           profileName={`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email}
+          isAdmin={isAdmin}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -176,7 +178,13 @@ export default function ShopTrainingDatabasePage() {
   )
 }
 
-function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName, onClose, onSaved }) {
+// Jeff, 2026-10-02: attachments here used to have no size limit at all —
+// same reasoning/figure as SimpleRichTextEditor.jsx's image cap (free-tier
+// Storage quota; 5MB comfortably covers a phone photo or a typical PDF
+// without the person needing to resize/compress first).
+const MAX_FILE_BYTES = 5 * 1024 * 1024
+
+function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName, isAdmin, onClose, onSaved }) {
   const isNew = !item.id
   const [title, setTitle] = useState(item.title ?? '')
   const [content, setContent] = useState(item.content_html ?? '')
@@ -196,6 +204,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   // shop_training_item_files row to point at until it's actually inserted.
   const [files, setFiles] = useState([])
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [pickingFile, setPickingFile] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -213,6 +222,10 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
     // Uploaded one at a time (not Promise.all) so a shared timestamp prefix
     // can't collide two files picked in the same click into the same path.
     for (const file of Array.from(fileList)) {
+      if (file.size > MAX_FILE_BYTES) {
+        alert(`"${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB) — please use a file under ${MAX_FILE_BYTES / (1024 * 1024)}MB.`)
+        continue
+      }
       const path = `shop-training/${Date.now()}-${file.name}`
       const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
       if (error) {
@@ -285,6 +298,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   }
 
   return (
+    <>
     <Modal
       open
       onClose={onClose}
@@ -314,20 +328,33 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
         <div>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-xs font-medium text-gray-500">Attached files (optional)</span>
-            <label className="cursor-pointer text-xs text-brand-600 hover:underline">
-              {uploadingFile ? 'Uploading…' : '+ Add file'}
-              <input
-                type="file"
-                multiple
-                className="hidden"
-                disabled={uploadingFile}
-                onChange={(e) => e.target.files.length && addFiles(e.target.files)}
-              />
-            </label>
+            <div className="flex items-center gap-3">
+              {/* Jeff, 2026-10-02: "因為只有admin權限以上的人才能access file
+                  repository" — shop_manager can edit Shop Training items but
+                  not browse File Repository (admin_center.file_repository is
+                  excluded from its default pages), so only admin/developer
+                  get this option here; everyone keeps "+ Add file". */}
+              {isAdmin && (
+                <button type="button" onClick={() => setPickingFile(true)} className="text-xs text-brand-600 hover:underline">
+                  + from file repository
+                </button>
+              )}
+              <label className="cursor-pointer text-xs text-brand-600 hover:underline">
+                {uploadingFile ? 'Uploading…' : '+ Add file'}
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  disabled={uploadingFile}
+                  onChange={(e) => e.target.files.length && addFiles(e.target.files)}
+                />
+              </label>
+            </div>
           </div>
           <p className="mb-1 text-xs text-gray-400">
             Shown as downloadable links below the content on the staff-facing Shop Training page — a checklist,
             reference sheet, or any other file that's easier to hand over as-is than to type into the content above.
+            Uploaded files are capped at 5MB each.
           </p>
           {files.length > 0 && (
             <div className="space-y-1.5">
@@ -352,6 +379,17 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
         </div>
       </div>
     </Modal>
+    {pickingFile && (
+      <FileRepositoryPicker
+        accept="all"
+        onSelect={(f) => {
+          setFiles((prev) => [...prev, { _key: Math.random(), display_name: f.display_name, file_path: f.file_path }])
+          setPickingFile(false)
+        }}
+        onClose={() => setPickingFile(false)}
+      />
+    )}
+    </>
   )
 }
 

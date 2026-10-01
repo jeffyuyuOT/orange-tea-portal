@@ -8,12 +8,23 @@ import IngredientPicker from './IngredientPicker'
 import FormulaIngredientsView from '../../operations-training/formula/FormulaIngredientsView'
 import MediaPreview from '../../../components/ui/MediaPreview'
 import { getMediaKind } from '../../../lib/mediaType'
+import FileRepositoryPicker from '../../../components/ui/FileRepositoryPicker'
 
 async function uploadImage(file, pathPrefix) {
   const path = `${pathPrefix}/${Date.now()}-${file.name}`
   const { error } = await supabase.storage.from('formula-images').upload(path, file, { upsert: true })
   if (error) throw error
   return supabase.storage.from('formula-images').getPublicUrl(path).data.publicUrl
+}
+
+// Jeff, 2026-10-02: "admin centre裡的formula...add image/video旁都新增
+// '+ from file repository'" — every upload point on this page stores a
+// full public URL (the `formula-images` bucket, unlike File Repository's
+// own bucket-relative paths), so picking an existing File Repository file
+// here needs converting to that same full-URL shape before it can slot
+// into customImagePath/step.image_path/notesImagePath/video.url.
+function fileRepositoryUrl(file) {
+  return supabase.storage.from('documents').getPublicUrl(file.file_path).data.publicUrl
 }
 
 // A handful of save() steps (delete-then-reinsert for ingredients,
@@ -79,6 +90,11 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   const [steps, setSteps] = useState([])
   const [visibleStoreIds, setVisibleStoreIds] = useState(null) // null = all stores
   const [saving, setSaving] = useState(false)
+  // Which "+ from file repository" picker is currently open, if any — only
+  // one at a time, so a single bit of state covers all four insertion
+  // points (custom image, a step's media by index, notes media, a video
+  // row's media by key) instead of one boolean per field/row.
+  const [picking, setPicking] = useState(null) // null | 'custom' | 'notes' | {type:'step', idx} | {type:'video', key}
   const [ingredientMasterMap, setIngredientMasterMap] = useState(new Map()) // id -> {name, unit, ingredient_format_rules} — only for the live Preview
 
   // Drink-only: the shop-wide list of sizes to choose from (Admin Center >
@@ -459,6 +475,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   }
 
   return (
+    <>
     <Modal
       open
       onClose={onClose}
@@ -536,19 +553,28 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                 Custom image
               </label>
               {displayMode === 'custom' && (
-                <label className="cursor-pointer rounded-lg border border-brand-300 px-2 py-1 text-xs text-brand-700">
-                  {customImagePath ? 'Change image' : 'Upload'}
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const f = e.target.files[0]
-                      if (!f) return
-                      const url = await uploadImage(f, 'items')
-                      setCustomImagePath(url)
-                    }}
-                  />
-                </label>
+                <>
+                  <label className="cursor-pointer rounded-lg border border-brand-300 px-2 py-1 text-xs text-brand-700">
+                    {customImagePath ? 'Change image' : 'Upload'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const f = e.target.files[0]
+                        if (!f) return
+                        const url = await uploadImage(f, 'items')
+                        setCustomImagePath(url)
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPicking('custom')}
+                    className="text-xs text-brand-600 hover:underline"
+                  >
+                    + from file repository
+                  </button>
+                </>
               )}
             </div>
             {displayMode === 'custom' && customImagePath && (
@@ -748,6 +774,13 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                           }}
                         />
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => setPicking({ type: 'step', idx })}
+                        className="text-xs text-brand-600 hover:underline"
+                      >
+                        + from file repository
+                      </button>
                       <button onClick={() => removeStep(idx)} className="text-gray-400 hover:text-red-500">
                         ✕
                       </button>
@@ -786,20 +819,29 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
           <section>
             <div className="mb-1 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-brand-700">Notes (optional)</h4>
-              <label className="cursor-pointer text-xs text-brand-600 hover:underline">
-                {notesImagePath ? 'Change image/video' : '+ Add image/video'}
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const f = e.target.files[0]
-                    if (!f) return
-                    const url = await uploadImage(f, 'notes')
-                    setNotesImagePath(url)
-                  }}
-                />
-              </label>
+              <div className="flex items-center gap-3">
+                <label className="cursor-pointer text-xs text-brand-600 hover:underline">
+                  {notesImagePath ? 'Change image/video' : '+ Add image/video'}
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const f = e.target.files[0]
+                      if (!f) return
+                      const url = await uploadImage(f, 'notes')
+                      setNotesImagePath(url)
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setPicking('notes')}
+                  className="text-xs text-brand-600 hover:underline"
+                >
+                  + from file repository
+                </button>
+              </div>
             </div>
             <p className="mb-1 text-xs text-gray-400">
               For things that aren't really an ingredient/quantity — a mixing ratio, "see table", a clarifying footnote.
@@ -860,6 +902,13 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
                           }}
                         />
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => setPicking({ type: 'video', key })}
+                        className="shrink-0 text-xs text-brand-600 hover:underline"
+                      >
+                        + from file repository
+                      </button>
                       <button onClick={() => removeVideo(key)} className="shrink-0 text-gray-400 hover:text-red-500">
                         ✕
                       </button>
@@ -906,6 +955,21 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         </div>
       </div>
     </Modal>
+    {picking && (
+      <FileRepositoryPicker
+        accept={picking === 'custom' ? 'image' : 'media'}
+        onSelect={(f) => {
+          const url = fileRepositoryUrl(f)
+          if (picking === 'custom') setCustomImagePath(url)
+          else if (picking === 'notes') setNotesImagePath(url)
+          else if (picking.type === 'step') updateStep(picking.idx, { image_path: url })
+          else if (picking.type === 'video') updateVideo(picking.key, { url })
+          setPicking(null)
+        }}
+        onClose={() => setPicking(null)}
+      />
+    )}
+    </>
   )
 }
 

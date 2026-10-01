@@ -353,8 +353,14 @@ export default function BulletinPage() {
         date: new Date(r.submitted_at),
         title: `Roster posted: ${r.week_start_date} – ${r.week_end_date}`,
         subtitle: `${new Date(r.submitted_at).toLocaleString()}${creatorName ? ` · ${creatorName}` : ''}`,
-        // This specific week's own "Update" badge — see the comment above.
-        hasUpdate: !!latestChange && (!viewedAt || latestChange > viewedAt),
+        // Jeff, 2026-10-02: "Bulletin的roster更新時不用顯示小紅點，除了有
+        // 新增的roster之外" — only a week that's NEVER been opened at all
+        // (`!viewedAt`) counts now; a week already opened once that then
+        // got edited again (`latestChange > viewedAt`, the old condition)
+        // no longer raises this. Renamed from `hasUpdate`/"Update" badge to
+        // `isNew`/"New" below since that's genuinely what's left of this
+        // flag's meaning now.
+        isNew: !!latestChange && !viewedAt,
         raw: r,
       }
     })
@@ -375,7 +381,7 @@ export default function BulletinPage() {
   // row in the (unfiltered) list still has an unopened update — switching
   // filters never affects this, only actually opening a week does (openItem
   // below), so it only goes out once every week's been opened.
-  const hasUnviewedRoster = useMemo(() => items.some((i) => i.type === 'roster' && i.hasUpdate), [items])
+  const hasUnviewedRoster = useMemo(() => items.some((i) => i.type === 'roster' && i.isNew), [items])
   // Same small-dot treatment for the other two tabs (migration 0056) —
   // "unviewed" covers both a never-opened item (isNewItem) and one that's
   // been edited again since this person last opened it (hasUpdate).
@@ -405,15 +411,15 @@ export default function BulletinPage() {
     } else if (item.type === 'roster') {
       setOpenRosterPeriod(item.raw)
       // Opening THIS specific week is "having looked at it" — clears its own
-      // Update badge (migration 0048), independent of every other week's.
+      // New badge (migration 0048), independent of every other week's.
       // Other people's own copies of this same week's badge are unaffected;
       // this is deliberately per-person, not "everyone who opens the tab".
-      if (item.hasUpdate && profile?.id) {
+      if (item.isNew && profile?.id) {
         supabase
           .from('roster_period_views')
           .upsert({ profile_id: profile.id, roster_period_id: item.raw.id, viewed_at: new Date().toISOString() }, { onConflict: 'profile_id,roster_period_id' })
           .then(() => {
-            setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, hasUpdate: false } : i)))
+            setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, isNew: false } : i)))
             // Clears the Sidebar's Bulletin dot too, if this was the last
             // unviewed thing — see AuthContext.jsx's hasBulletinUpdates.
             refreshBulletinUpdates?.()
@@ -441,7 +447,7 @@ export default function BulletinPage() {
                   rather than repeating an "Update" pill here too. Stays lit
                   until every week in the list has actually been opened. */}
               {f.key === 'roster' && hasUnviewedRoster && (
-                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
+                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="New" />
               )}
               {f.key === 'announcement' && hasUnviewedAnnouncement && (
                 <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
@@ -489,7 +495,7 @@ export default function BulletinPage() {
                       tag + title on the left — same slot for both: which
                       week's roster just changed, and whether a complaint's
                       been solved. */}
-                  {item.type === 'roster' && item.hasUpdate && <Badge color="red">Update</Badge>}
+                  {item.type === 'roster' && item.isNew && <Badge color="red">New</Badge>}
                   {(item.type === 'announcement' || item.type === 'customer_complaint') && item.isNewItem && (
                     <Badge color="red">New</Badge>
                   )}

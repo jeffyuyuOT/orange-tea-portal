@@ -25,6 +25,15 @@ const QUIZ_IMAGE_CATEGORY_ID = '00000000-0000-0000-0000-000000000007'
 export default function QuestionEditModal({ question, groupKey, categoryId, currentStoreId, onClose, onSaved }) {
   const { profile } = useAuth()
   const isNew = !question.id
+  // Jeff, 2026-10-02: "因為只有admin權限以上的人才能access file repository"
+  // — this modal is shared by Admin Quiz Bank (already admin/developer-only
+  // at the page level, so this check never actually hides anything there)
+  // and Branch Quiz Bank (shop_manager-reachable too, per permissions.js —
+  // shop_management.quiz_bank isn't excluded from shop_manager's default
+  // pages the way admin_center.file_repository is). "Upload new image"
+  // stays available to everyone who can edit a question either way — only
+  // browsing File Repository's existing files is restricted.
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'developer'
   const [items, setItems] = useState([]) // formula_items or shop_training_items to link to
   const [linkedId, setLinkedId] = useState(question.formula_item_id ?? question.shop_training_item_id ?? '')
   const [text, setText] = useState(question.question ?? '')
@@ -204,9 +213,11 @@ export default function QuestionEditModal({ question, groupKey, categoryId, curr
               />
             )}
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => setPickingImage(true)}>
-                Choose from File Repository
-              </Button>
+              {isAdmin && (
+                <Button variant="secondary" onClick={() => setPickingImage(true)}>
+                  Choose from File Repository
+                </Button>
+              )}
               <label className="cursor-pointer rounded-lg border border-brand-300 px-3.5 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50">
                 {uploadingImage ? 'Uploading…' : 'Upload new image'}
                 <input

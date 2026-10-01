@@ -9,29 +9,46 @@ import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerMod
 import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
 
 export default function AppShell() {
-  const { profile, effectivePages, accessibleStores, signOut, unreadMessageCount } = useAuth()
+  const { profile, effectivePages, accessibleStores, signOut, unreadMessageCount, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates } =
+    useAuth()
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // Jeff, 2026-10-02: "桌面捷徑有辦法有訊息提示嗎" — a badge/dot on the
-  // installed-app icon itself (desktop taskbar / Android home screen),
-  // reflecting the same unread-Message count already shown inside the app
-  // (Sidebar's own badge). This is the Badging API (navigator.setAppBadge /
-  // clearAppBadge) — NOT real push notifications (a popup alert when the
-  // app isn't even open), which would need a service worker push handler,
-  // VAPID keys and a backend trigger this project doesn't have. Badging
-  // only works on an installed PWA icon, and only on Chrome/Edge-family
-  // browsers (desktop + Android) — iOS has no equivalent for a home-screen
-  // web app, same platform gap as the 2026-10-01 "shortcuts" discussion.
-  // `'setAppBadge' in navigator` guards every other browser/OS combo (a
-  // normal browser tab, Safari, etc.) to a harmless no-op.
+  // installed-app icon itself (desktop taskbar / Android home screen). This
+  // is the Badging API (navigator.setAppBadge / clearAppBadge) — NOT real
+  // push notifications (a popup alert when the app isn't even open), which
+  // would need a service worker push handler, VAPID keys and a backend
+  // trigger this project doesn't have. Badging only works on an installed
+  // PWA icon, and only on Chrome/Edge-family browsers (desktop + Android) —
+  // iOS has no equivalent for a home-screen web app, same platform gap as
+  // the 2026-10-01 "shortcuts" discussion. `'setAppBadge' in navigator`
+  // guards every other browser/OS combo (a normal browser tab, Safari,
+  // etc.) to a harmless no-op.
+  //
+  // Jeff, 2026-10-02 (later): "改成紅底加數字...提示除了之前說的new
+  // message，還包括my roster更新，formula update，跟bulletin的新提示消息"
+  // — originally just unreadMessageCount, now the sum of four Sidebar-dot
+  // signals already tracked in AuthContext: unreadMessageCount is a real
+  // count (one per unread message), while rosterUpdates.myRoster/
+  // hasFormulaUpdates/hasBulletinUpdates are each a plain "something's
+  // unread here" boolean under the current data model (no per-item count
+  // exists for those three yet), so each contributes at most 1 toward the
+  // total rather than the exact number of unread items within it. Staff
+  // Time Logs' own red dot (hasTimeDiscrepancies) is deliberately NOT
+  // included here, per Jeff: "有edit attendance logs權限的人在staff time
+  // logs的提示不用算在這裡" — it's a manager-facing review flag, not a
+  // personal "something of yours needs attention" signal like the four
+  // above.
+  const badgeCount =
+    unreadMessageCount + (rosterUpdates.myRoster ? 1 : 0) + (hasFormulaUpdates ? 1 : 0) + (hasBulletinUpdates ? 1 : 0)
   useEffect(() => {
     if (!('setAppBadge' in navigator)) return
-    if (unreadMessageCount > 0) {
-      navigator.setAppBadge(unreadMessageCount).catch(() => {})
+    if (badgeCount > 0) {
+      navigator.setAppBadge(badgeCount).catch(() => {})
     } else {
       navigator.clearAppBadge().catch(() => {})
     }
-  }, [unreadMessageCount])
+  }, [badgeCount])
   // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
   // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
   // ANY page, not just after navigating into My Dashboard > Time & Attendance
