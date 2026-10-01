@@ -48,6 +48,22 @@ export default function ManageRosterPage() {
   // below instead of persist() running immediately — a soft warning the
   // manager can look at and still choose to save/publish past, not a block.
   const [understaffedConfirm, setUnderstaffedConfirm] = useState(null)
+  // Jeff, 2026-10-01: "action裡新增clear, 如果按clear消除表格載入的資料，給
+  // 有時候存好草稿(save not publish)但要清除資料時重做班表用。但已發布的班
+  // 表如果清除並發布的話會跳出警示視窗確認" — `loadedPeriodStatus` tracks
+  // whichever roster_periods row is currently loaded for this week ('draft'/
+  // 'submitted'/null for "nothing saved yet"), refreshed by the week-loading
+  // effect below every time the week or store changes. `clearedFromPublished`
+  // only turns true when Clear is used while that loaded period was already
+  // 'submitted' (published) — Jeff's "已發布的班表...清除" case specifically,
+  // not a draft being cleared and redone, which needs no extra warning at
+  // all. `clearPublishConfirm` is the { status } for that one special
+  // confirm popup, separate from the ordinary understaffedConfirm below
+  // since it's about a different risk (wiping a LIVE published roster, not
+  // staffing levels) and can apply even when staffing itself looks fine.
+  const [loadedPeriodStatus, setLoadedPeriodStatus] = useState(null)
+  const [clearedFromPublished, setClearedFromPublished] = useState(false)
+  const [clearPublishConfirm, setClearPublishConfirm] = useState(null)
   // Download template / Upload Excel / Export current grid used to be three
   // separate buttons crowding the toolbar — merged into one "Action"
   // dropdown at the right of the row (see the render below). `fileInputRef`
@@ -217,6 +233,10 @@ export default function ManageRosterPage() {
   useEffect(() => {
     if (!weekStart || !currentStoreId) return
     let cancelled = false
+    // Loading a (possibly different) week starts the Clear-while-published
+    // tracking fresh — whatever was cleared before belongs to the PREVIOUS
+    // week being edited, not this one.
+    setClearedFromPublished(false)
     ;(async () => {
       const { data: period } = await supabase
         .from('roster_periods')
@@ -225,6 +245,7 @@ export default function ManageRosterPage() {
         .eq('week_start_date', weekStart)
         .maybeSingle()
       if (cancelled) return
+      setLoadedPeriodStatus(period?.status ?? null)
       if (!period) {
         setEntries([])
         setNotes('')
@@ -496,6 +517,12 @@ export default function ManageRosterPage() {
         }
       }
 
+      // A fresh save/publish just wrote real entries for this week again —
+      // whatever got Cleared before is no longer the state of this period,
+      // so the "clear a published week then publish" warning shouldn't
+      // follow the manager into their NEXT Save/Submit click on this week.
+      setClearedFromPublished(false)
+      setLoadedPeriodStatus(status)
       setMessage(status === 'submitted' ? 'Roster submitted and published.' : 'Roster saved as draft.')
     } catch (err) {
       setMessage(`Error: ${err.message}`)
@@ -523,11 +550,48 @@ export default function ManageRosterPage() {
     setImportReview({ parsed: entries, plan: found.plan, known: found.known, saveStatus: status })
   }
 
-  // Save/Submit's actual entry point now — checks for understaffed slots
-  // first (see the understaffedConfirm comment above) and only calls
-  // persist() directly when there's nothing to warn about, matching Jeff's
-  // "平常不顯示" (normally shows nothing at all).
+  // Jeff, 2026-10-01: "action裡新增clear, 如果按clear消除表格載入的資料，給
+  // 有時候存好草稿(save not publish)但要清除資料時重做班表用" — wipes the
+  // on-screen grid back to blank so the manager can rebuild a week's shifts
+  // from scratch, without touching anything in the database until they
+  // actually Save/Submit again (Clear itself never writes anything). Only
+  // `entries` is cleared, deliberately leaving `notes` alone — Jeff's
+  // wording was specifically "消除表格" (clear the TABLE/grid), not the
+  // notes field below it. When the week currently loaded was already
+  // published ('submitted'), remember that so a Submit & Publish click
+  // right after Clear (with nothing rebuilt yet, or a rebuilt-but-different
+  // week) gets the extra confirmation below instead of silently overwriting
+  // a live roster with an empty/incomplete one.
+  function clearGrid() {
+    if (!window.confirm('Clear all shifts from this grid? This does not save anything until you Save/Submit again.')) return
+    setEntries([])
+    if (loadedPeriodStatus === 'submitted') setClearedFromPublished(true)
+  }
+
+  // Save/Submit's actual entry point now — checks for the Clear-while-
+  // published case first (see clearGrid/clearedFromPublished above), since
+  // that's a "did you mean to do this" question about the SAVE ITSELF
+  // (overwriting a live published roster), separate from and upstream of
+  // the understaffed-slots warning further down, which is about staffing
+  // levels, not about publish-safety.
   function handleSaveOrSubmit(status) {
+    if (status === 'submitted' && clearedFromPublished) {
+      setClearPublishConfirm({ status })
+      return
+    }
+    proceedPastClearCheck(status)
+  }
+
+  function confirmClearPublishAndContinue() {
+    const status = clearPublishConfirm.status
+    setClearPublishConfirm(null)
+    proceedPastClearCheck(status)
+  }
+
+  // Checks for understaffed slots (see the understaffedConfirm comment
+  // above) and only calls persist() directly when there's nothing to warn
+  // about, matching Jeff's "平常不顯示" (normally shows nothing at all).
+  function proceedPastClearCheck(status) {
     const warnings = computeUnderstaffedWarnings(entries, rules)
     if (warnings.length) {
       setUnderstaffedConfirm({ status, warnings })
@@ -656,6 +720,22 @@ export default function ManageRosterPage() {
                 >
                   Download template
                 </button>
+                <div className="my-1 border-t border-gray-100" />
+                {/* Jeff, 2026-10-01: "action裡新增clear, 如果按clear消除表格
+                    載入的資料" — own section at the bottom, visually
+                    separated (red text, like MessagePage's delete action)
+                    since it's destructive to what's on screen, unlike every
+                    other item in this menu. */}
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    clearGrid()
+                  }}
+                >
+                  Clear
+                </button>
               </div>
             )}
           <input
@@ -732,6 +812,30 @@ export default function ManageRosterPage() {
           }
         >
           <UnderstaffedWarnings warnings={understaffedConfirm.warnings} />
+        </Modal>
+      )}
+
+      {clearPublishConfirm && (
+        <Modal
+          open
+          onClose={() => setClearPublishConfirm(null)}
+          title="Publish over an already-published roster?"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setClearPublishConfirm(null)}>
+                Cancel
+              </Button>
+              <Button disabled={saving} onClick={confirmClearPublishAndContinue}>
+                Publish anyway
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-700">
+            This week's roster was already published, and the grid was cleared since then. Publishing now will
+            replace the live, already-published roster with {entries.length ? "what's currently on the grid" : 'an empty roster'}
+            . Staff who can already see their published shifts for this week will see this change.
+          </p>
         </Modal>
       )}
     </div>
