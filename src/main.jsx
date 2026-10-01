@@ -35,3 +35,29 @@ if (isAuthEmailLink) {
     </StrictMode>
   )
 }
+
+// Jeff, 2026-10-02: "下載到手機後...swipe起來不會重新整理...有時候軟體
+// update後沒辦法即時呈現,必須uninstall再install才有辦法" — the generated
+// service worker (vite-plugin-pwa, registerType: 'autoUpdate') already
+// self.skipWaiting()s and clientsClaim()s the instant a newer version is
+// found (see vite.config.js / the built sw.js), which hands control of
+// this page over to the new worker — but nothing was ever listening for
+// that handover, so the page just kept running on whatever JS it already
+// had loaded in memory until the next *genuinely fresh* network load.
+// "Swipe up" to dismiss an installed home-screen app (especially on iOS)
+// usually just suspends it rather than tearing it down, so that fresh load
+// often never happened — only a full uninstall/reinstall reliably forced
+// one. `controllerchange` fires exactly once, the moment a different
+// service worker actually takes over an already-open page — reloading
+// right then is what makes an update actually show up on its own. See
+// src/lib/pwaUpdate.js for the companion manual "check now" button
+// (My Information > App) for when the browser hasn't even noticed a newer
+// version exists yet.
+if ('serviceWorker' in navigator) {
+  let reloadedForUpdate = false
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadedForUpdate) return
+    reloadedForUpdate = true
+    window.location.reload()
+  })
+}

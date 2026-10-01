@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
+import { checkForAppUpdate } from '../../../lib/pwaUpdate'
 import Button from '../../../components/ui/Button'
 import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 import MyStaffIdModal from './MyStaffIdModal'
@@ -12,6 +13,17 @@ export default function MyInformationPage() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [showStaffId, setShowStaffId] = useState(false)
+  // Jeff, 2026-10-02: "有沒有什麼辦法...在my information裡設置一個重新整理
+  // 的按鈕，讓下載程式可以更新" — '' (idle) | 'checking' | 'updating' |
+  // 'uptodate' | 'unsupported'. See lib/pwaUpdate.js for what this actually
+  // does and why a manual check is needed at all.
+  const [updateStatus, setUpdateStatus] = useState('')
+
+  async function handleCheckForUpdate() {
+    setUpdateStatus('checking')
+    const { supported, updateFound } = await checkForAppUpdate()
+    setUpdateStatus(!supported ? 'unsupported' : updateFound ? 'updating' : 'uptodate')
+  }
 
   useEffect(() => {
     if (profile) {
@@ -128,6 +140,26 @@ export default function MyInformationPage() {
         <Button variant="secondary" onClick={() => navigate('/set-password')}>
           Change password
         </Button>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-semibold text-brand-700">App</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={handleCheckForUpdate}
+            disabled={updateStatus === 'checking' || updateStatus === 'updating'}
+          >
+            {updateStatus === 'checking' ? 'Checking…' : '🔄 Check for Updates'}
+          </Button>
+          {updateStatus === 'updating' && <p className="text-sm text-brand-600">Update found — reloading…</p>}
+          {updateStatus === 'uptodate' && <p className="text-sm text-gray-500">You're already on the latest version.</p>}
+          {updateStatus === 'unsupported' && <p className="text-sm text-gray-500">Not available on this browser.</p>}
+        </div>
+        <p className="mt-2 text-xs text-gray-400">
+          If the app ever seems out of date after an update — e.g. after not opening it for a while — tap this instead
+          of uninstalling and reinstalling. It'll reload on its own if a newer version is found.
+        </p>
       </section>
 
       <StaffDocumentsSection profileId={profile?.id} storeId={currentStoreId} />

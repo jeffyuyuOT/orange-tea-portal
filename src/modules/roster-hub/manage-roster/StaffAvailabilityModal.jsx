@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { format, parseISO } from 'date-fns'
+import { addDays, format, parseISO } from 'date-fns'
+import { supabase } from '../../../lib/supabaseClient'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import { rosterDisplayName } from '../../../lib/excelRoster'
-import { weekDatesFrom, loadWeekAvailabilityForProfiles, describeDay } from '../../../lib/availability'
+import { weekDatesFrom, loadWeekAvailabilityForProfiles, describeDayWithLeave, leaveWindowOnDate } from '../../../lib/availability'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -23,6 +24,12 @@ const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 // (click again to collapse).
 export default function StaffAvailabilityModal({ open, onClose, staff, weekStart }) {
   const [byProfile, setByProfile] = useState(null)
+  // profileId -> that profile's active leave_requests rows touching this
+  // week — fetched alongside availability so a day's declared pattern can
+  // be reconciled against leave before it's shown (describeDayWithLeave).
+  // Jeff, 2026-10-02: "manager roster看staff's available time時會把leave的
+  // 時間加上去" — see availability.js's describeDayWithLeave comment for why.
+  const [leavesByProfile, setLeavesByProfile] = useState({})
   // Jeff, 2026-10-01: "view staff available time的視窗能做到員工時間資訊用展
   // 開顯示，預設不展開，所以視窗一開始是名字的清單，要看哪一個員工再點擊名字
   // 展開。再點擊一下則收起" — collapsed by default; clicking a name toggles
@@ -44,10 +51,29 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
   useEffect(() => {
     if (!open) return
     setByProfile(null)
-    loadWeekAvailabilityForProfiles(
-      staff.map((s) => s.id),
-      weekStart
-    ).then(setByProfile)
+    setLeavesByProfile({})
+    const profileIds = staff.map((s) => s.id)
+    const weekStartDate = parseISO(weekStart)
+    const weekEndExclusive = addDays(weekStartDate, 7)
+    Promise.all([
+      loadWeekAvailabilityForProfiles(profileIds, weekStart),
+      profileIds.length
+        ? supabase
+            .from('leave_requests')
+            .select('*')
+            .in('profile_id', profileIds)
+            .eq('status', 'active')
+            .lt('start_at', weekEndExclusive.toISOString())
+            .gt('end_at', weekStartDate.toISOString())
+        : Promise.resolve({ data: [] }),
+    ]).then(([avail, { data: leaves }]) => {
+      setByProfile(avail)
+      const grouped = {}
+      ;(leaves ?? []).forEach((l) => {
+        ;(grouped[l.profile_id] ??= []).push(l)
+      })
+      setLeavesByProfile(grouped)
+    })
     // `staff` is re-derived from a fresh query each time ManageRosterPage
     // loads — comparing its length keeps this from re-fetching every render
     // once the modal's open without missing a genuine roster change.
@@ -93,7 +119,10 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
                   <div className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-7">
                     {dates.map((dateStr, i) => {
                       const entry = byProfile[s.id]?.[dateStr]
-                      const desc = describeDay(entry?.dayRow, entry?.windows)
+                      const leaveWindowsForDay = (leavesByProfile[s.id] ?? [])
+                        .map((l) => leaveWindowOnDate(l, dateStr))
+                        .filter(Boolean)
+                      const desc = describeDayWithLeave(entry?.dayRow, entry?.windows, leaveWindowsForDay)
                       return (
                         <div key={dateStr}>
                           <span className="text-xs font-medium text-gray-400">{DAY_LABELS[i]} {format(parseISO(dateStr), 'd/M')}</span>

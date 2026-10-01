@@ -48,6 +48,13 @@ export default function QuizBankPage() {
   const [copyingQuestion, setCopyingQuestion] = useState(null)
   // Which question's ✕ button is mid-delete — locks just that button.
   const [removingId, setRemovingId] = useState(null)
+  // Jeff, 2026-10-02: "這段在branch quiz的說明也要小圖示表示，按了再顯示" —
+  // same treatment ManageRosterPage.jsx's own intro paragraph already got
+  // (see its 2026-10-02 comment): the "Questions feed both Quick Quiz and
+  // Formal Quiz..." paragraph that used to sit permanently under the page
+  // title is now only shown on demand, via an ℹ️ icon next to the
+  // group/category pickers.
+  const [showInfo, setShowInfo] = useState(false)
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'developer'
 
@@ -102,31 +109,44 @@ export default function QuizBankPage() {
 
   return (
     <div>
-      <p className="mb-4 text-sm text-gray-500">
-        Questions feed both Quick Quiz and Formal Quiz in My Dashboard &gt; Study Log — the Admin Quiz Bank below is
-        shared by every store; this store's own Branch Quiz Bank is below that. Switch stores to edit another
-        store's branch bank.
-        {isAdmin && ' As an admin, you can also copy a branch question from here straight into other stores.'}
-      </p>
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select className="input w-40" value={group} onChange={(e) => setGroup(e.target.value)}>
-          {GROUPS.map((g) => (
-            <option key={g.key} value={g.key}>
-              {g.label}
-            </option>
-          ))}
-        </select>
-        {group === 'drink' && (
-          <select className="input w-48" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="input w-40" value={group} onChange={(e) => setGroup(e.target.value)}>
+            {GROUPS.map((g) => (
+              <option key={g.key} value={g.key}>
+                {g.label}
               </option>
             ))}
           </select>
-        )}
+          {group === 'drink' && (
+            <select className="input w-48" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowInfo(true)}
+          className="shrink-0 rounded-full border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:bg-gray-50 hover:text-brand-600"
+          title="About the Admin Quiz Bank and Branch Quiz Bank"
+          aria-label="About the Admin Quiz Bank and Branch Quiz Bank"
+        >
+          ℹ️
+        </button>
       </div>
+
+      <Modal open={showInfo} onClose={() => setShowInfo(false)} title="About the Quiz Bank">
+        <p className="text-sm text-gray-600">
+          Questions feed both Quick Quiz and Formal Quiz in My Dashboard &gt; Study Log — the Admin Quiz Bank below is
+          shared by every store; this store's own Branch Quiz Bank is below that. Switch stores to edit another
+          store's branch bank.
+          {isAdmin && ' As an admin, you can also copy a branch question from here straight into other stores.'}
+        </p>
+      </Modal>
 
       <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700">
         🔒 Admin Quiz Bank <span className="text-xs font-normal text-gray-400">(shared, read-only)</span>

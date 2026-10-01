@@ -198,6 +198,56 @@ export function findLeaveConflicts(byDate, leaves) {
   return conflicts
 }
 
+// Subtracts one or more "blocking" windows (leave, in this file's only use
+// so far) from a list of available windows, returning what's left — a
+// window fully covered by a block disappears entirely; one only partly
+// covered is clipped down to whatever portion the block didn't touch.
+// Plain interval subtraction, applied one blocking window at a time.
+function subtractWindows(avail, blockWindows) {
+  let result = avail
+  ;(blockWindows ?? []).forEach((b) => {
+    const next = []
+    result.forEach((w) => {
+      if (!windowsOverlap(w, b)) {
+        next.push(w)
+        return
+      }
+      if (w.start < b.start) next.push({ start: w.start, end: b.start })
+      if (w.end > b.end) next.push({ start: b.end, end: w.end })
+    })
+    result = next
+  })
+  return result
+}
+
+function formatWindows(avail) {
+  if (!avail.length) return 'Unavailable'
+  if (avail.length === 1 && avail[0].start === 0 && avail[0].end === 1440) return 'All day available'
+  return avail.map((w) => `${minutesToLabel(w.start)} – ${minutesToLabel(w.end)}`).join(', ')
+}
+
+// Manage Roster's "View Staff's Availability" — same day description as
+// describeDay, but with any leave that falls on this day cut out of the
+// result first, leave always winning over whatever's declared. Jeff,
+// 2026-10-02: "如果my availability勾選lock time pattern的員工，在遇到跟他請
+// 假leave有衝突的時候，還是會以leave的為優先，所以my availability time頁面
+// 顯示不變，但manager roster看staff's available time時會把leave的時間加上
+// 去" — a staff member with "Lock time pattern" checked has their pattern
+// auto-copied forward every week by a server-side cron job (see
+// MyAvailabilityPage.jsx's comment) that never re-runs the save-time
+// leave-conflict check a manual edit goes through, so their stored pattern
+// can end up overlapping leave registered afterwards. Rather than making
+// them unlock/edit My Availability just to clear that conflict, this is the
+// one place that reconciles it for roster purposes — My Availability's own
+// page (describeDay, findLeaveConflicts) is left showing the untouched
+// pattern, on purpose.
+export function describeDayWithLeave(dayRow, windows, leaveWindowsForDay) {
+  const avail = computeAvailableWindows(dayRow, windows)
+  const touchedByLeave = (leaveWindowsForDay ?? []).some((lw) => avail.some((aw) => windowsOverlap(aw, lw)))
+  if (!touchedByLeave) return describeDay(dayRow, windows)
+  return formatWindows(subtractWindows(avail, leaveWindowsForDay))
+}
+
 // Manage Roster's per-shift warning ("排時間的時候如果跟該員的available
 // time有衝突的話...提示該時間不在該員的available time裡") — true if any
 // part of the shift [startDecHour, endDecHour) (the same decimal-hour
