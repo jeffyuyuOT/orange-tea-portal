@@ -45,6 +45,17 @@ export function useClockInOut(profileId, accessibleStores) {
     setShowScanner(false)
   }
 
+  // Jeff, 2026-10-02: the "Scan" button itself (both callers) is disabled
+  // while `feedback` is still set — this is what actually enforces "不能再
+  // scan一次" (can't scan again) — so this is the only way `feedback` gets
+  // cleared once a scan result comes in: explicitly, from the result
+  // modal's own OK button, never a timer and never just by opening the
+  // scanner again (openScanner also clears it, but it can't be reached
+  // while the Scan button is disabled on account of feedback still being set).
+  function dismissFeedback() {
+    setFeedback(null)
+  }
+
   async function handleScan(raw) {
     if (handledRef.current) return
     handledRef.current = true
@@ -78,6 +89,7 @@ export function useClockInOut(profileId, accessibleStores) {
     showScanner,
     feedback,
     setFeedback,
+    dismissFeedback,
     openScanner,
     closeScanner,
     handleScan,

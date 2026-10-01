@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../../../lib/AuthContext'
 import { useClockInOut } from '../../../lib/useClockInOut'
 import QrScannerModal from './QrScannerModal'
+import ClockFeedbackModal from './ClockFeedbackModal'
 import AttendanceLogTable from './AttendanceLogTable'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
@@ -43,7 +44,7 @@ function ClockInOutTab({ profileId, accessibleStores }) {
   // useClockInOut (src/lib/useClockInOut.js) so the new header shortcut in
   // AppShell.jsx could reuse the exact same flow instead of a second,
   // easy-to-drift copy of it.
-  const { lastEvent, isClockedIn, showScanner, feedback, openScanner, closeScanner, handleScan } = useClockInOut(
+  const { lastEvent, isClockedIn, showScanner, feedback, dismissFeedback, openScanner, closeScanner, handleScan } = useClockInOut(
     profileId,
     accessibleStores
   )
@@ -66,15 +67,18 @@ function ClockInOutTab({ profileId, accessibleStores }) {
         </div>
       )}
 
-      <Button className="!px-6 !py-3 text-base" onClick={openScanner}>
+      {/* Jeff, 2026-10-02: disabled while `feedback` is up (the result modal
+          below is still open) — this is the actual enforcement of "小視窗
+          彈出沒有按掉前，沒辦法再scan一次": the button can't be tapped again
+          until OK is pressed on the previous result, so a staff member who
+          lingers in front of the camera can't fire off a second scan before
+          they've even seen whether the first one worked. */}
+      <Button className="!px-6 !py-3 text-base" onClick={openScanner} disabled={!!feedback}>
         📷 Scan to {isClockedIn ? 'Clock Out' : 'Clock In'}
       </Button>
 
-      {feedback && (
-        <p className={`mt-4 text-sm ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</p>
-      )}
-
       {showScanner && <QrScannerModal onScan={handleScan} onClose={closeScanner} />}
+      {feedback && <ClockFeedbackModal feedback={feedback} onClose={dismissFeedback} />}
     </div>
   )
 }
