@@ -224,9 +224,23 @@ export default function RosterEntryGrid({
 
   return (
     <div className="rounded-xl border border-brand-100">
-      <div className="hidden overflow-x-auto sm:block">
+      {/* Jeff, 2026-10-01: "manage roster往下拉的時候，禮拜幾跟日期還有S和E欄
+          要固定，要不然排比較下面的人的班表的時候會看不到上面是哪一天" — this
+          table used to just grow as tall as the full staff list and scroll
+          away with the rest of the page, so the weekday/date + S/E header
+          scrolled out of view the moment you got a few rows down. Giving
+          this wrapper its own bounded height + `overflow-auto` (both axes,
+          not just overflow-x-auto — a header stuck with `overflow-x-auto`
+          alone doesn't actually pin to the page scroll, since that computed
+          value forces overflow-y to 'auto' too and makes THIS div the
+          sticky positioning container instead of the page) turns the grid
+          into its own scrollable region, and `sticky top-0` on the thead
+          then pins the header to the top of THAT region as the rows inside
+          it scroll — so the day/date + S/E labels stay visible no matter
+          how far down the staff list you scroll. */}
+      <div className="hidden max-h-[65vh] overflow-auto sm:block">
         <table className="min-w-full border-collapse text-sm">
-          <thead className="bg-brand-50">
+          <thead className="sticky top-0 z-10 bg-brand-50">
             <tr>
               <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-left font-medium text-brand-700">
                 Name
@@ -284,7 +298,14 @@ export default function RosterEntryGrid({
       </div>
 
       <div className="sm:hidden">
-        <div className="flex border-b border-brand-100">
+        {/* Same freeze, mobile's equivalent of the header row: the day tabs
+            ARE the weekday/date header here (one day's Start/End shown at a
+            time, picked by tapping a day), so pinning this bar is what lets
+            you keep track of which day you're filling in while scrolling
+            down a long staff list — no overflow-x-auto wrapper around this
+            one, so a plain `sticky top-0` pins it straight to the page's own
+            scroll, same effect as the desktop table above. */}
+        <div className="sticky top-0 z-10 flex border-b border-brand-100 bg-white">
           {weekDates.map((d, i) => (
             <button
               key={d}
