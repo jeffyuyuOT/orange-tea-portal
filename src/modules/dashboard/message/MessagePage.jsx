@@ -441,9 +441,26 @@ export default function MessagePage() {
           per Jeff's spec for managing messages across several stores at once. */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1.5">
-          <input type="date" className="input w-auto" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          {/* Jeff, 2026-10-02: "所有選日期的選項都要有防呆檢查" — same
+              native min/max guard AttendanceLogTable's own From/To date
+              filter already uses, so picking an end date earlier than the
+              start (or vice versa) simply isn't selectable in the date
+              picker, rather than silently returning zero/wrong results. */}
+          <input
+            type="date"
+            className="input w-auto"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
           <span className="text-sm text-gray-400">–</span>
-          <input type="date" className="input w-auto" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <input
+            type="date"
+            className="input w-auto"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
           {(dateFrom || dateTo) && (
             <button
               onClick={() => {

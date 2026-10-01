@@ -1,0 +1,12 @@
+-- Jeff, 2026-10-02: "my available time的copy last week左邊新增lock time
+-- pattern。勾取的話，就會自動將目前的time pattern帶到下個禮拜，而且勾取此
+-- 選項的user不會收到系統提示" — the flag itself. Profile-level (not
+-- per-week) since the point is "stop making me re-enter this every week",
+-- an ongoing setting rather than something tied to one specific week.
+-- See migration 0088 for the actual weekly auto-copy job this drives, and
+-- 0084 (Thursday availability reminder) for why no change is needed there
+-- to get the "this user doesn't get the reminder" half of the request —
+-- once 0088 has copied a locked profile's pattern into next week, 0084's
+-- own "not exists a next-week row" check already excludes them, the exact
+-- same way it already excludes anyone who filled next week in themselves.
+alter table profiles add column if not exists availability_pattern_locked boolean not null default false;

@@ -8,8 +8,6 @@ import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import { thisWeekStart, nextWeekStart } from '../shared/rosterWeeks'
 import {
   AVAILABILITY_MODES,
-  QUARTER_HOUR_TIMES,
-  formatQuarterHour,
   minutesToLabel,
   weekDatesFrom,
   loadWeekAvailability,
@@ -18,6 +16,7 @@ import {
   rowToEditDay,
   editDayToRowShape,
 } from '../../../lib/availability'
+import TimeOfDaySelect from './TimeOfDaySelect'
 
 // Jeff, 2026-09: "在roster hub新增my availability...裡面像my roster一樣顯示
 // this week...跟next week...兩個區塊" — same This Week / Next Week shape as
@@ -25,7 +24,33 @@ import {
 // own Copy-last-week, own Save) rather than one shared form, since a save on
 // one week has no bearing on the other.
 export default function MyAvailabilityPage() {
-  const { profile } = useAuth()
+  const { profile, refreshProfile } = useAuth()
+  // Jeff, 2026-10-02: "my available time的copy last week左邊新增lock time
+  // pattern。勾取的話，就會自動將目前的time pattern帶到下個禮拜，而且勾取此
+  // 選項的user不會收到系統提示" — profile-level (not tied to either week
+  // section specifically), so it's lifted up here and passed to both
+  // sections below rather than each keeping its own copy that could get
+  // out of sync with the other. `locked` mirrors `profile.availability_
+  // pattern_locked` (migration 0087) but as its own state so the checkbox
+  // responds immediately on click rather than waiting on a full profile
+  // refetch; `saving` just disables it mid-request so a second click can't
+  // race the first. The actual weekly auto-copy + reminder-suppression
+  // this flag drives happens server-side (migration 0088's pg_cron job) —
+  // this page only sets the flag.
+  const [locked, setLocked] = useState(false)
+  const [savingLock, setSavingLock] = useState(false)
+
+  useEffect(() => {
+    setLocked(!!profile?.availability_pattern_locked)
+  }, [profile?.availability_pattern_locked])
+
+  async function toggleLocked(next) {
+    setLocked(next)
+    setSavingLock(true)
+    await supabase.from('profiles').update({ availability_pattern_locked: next }).eq('id', profile.id)
+    setSavingLock(false)
+    refreshProfile()
+  }
 
   return (
     <div>
@@ -36,8 +61,22 @@ export default function MyAvailabilityPage() {
       </p>
 
       <div className="space-y-8">
-        <AvailabilityWeekSection title="This Week" weekStart={thisWeekStart()} profileId={profile?.id} />
-        <AvailabilityWeekSection title="Next Week" weekStart={nextWeekStart()} profileId={profile?.id} />
+        <AvailabilityWeekSection
+          title="This Week"
+          weekStart={thisWeekStart()}
+          profileId={profile?.id}
+          locked={locked}
+          savingLock={savingLock}
+          onToggleLocked={toggleLocked}
+        />
+        <AvailabilityWeekSection
+          title="Next Week"
+          weekStart={nextWeekStart()}
+          profileId={profile?.id}
+          locked={locked}
+          savingLock={savingLock}
+          onToggleLocked={toggleLocked}
+        />
       </div>
     </div>
   )
@@ -45,7 +84,7 @@ export default function MyAvailabilityPage() {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-function AvailabilityWeekSection({ title, weekStart, profileId }) {
+function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLock, onToggleLocked }) {
   const dates = weekDatesFrom(weekStart)
   const [editState, setEditState] = useState(null) // null while loading; then { 'yyyy-MM-dd': {mode, boundaryTime, windows} }
   const [saving, setSaving] = useState(false)
@@ -126,9 +165,21 @@ function AvailabilityWeekSection({ title, weekStart, profileId }) {
         <h3 className="text-sm font-semibold text-gray-700">
           {title} <span className="font-normal text-gray-400">({format(parseISO(weekStart), 'd MMM')} – {format(parseISO(weekEnd), 'd MMM')})</span>
         </h3>
-        <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={copyLastWeek} disabled={!editState}>
-          Copy last week
-        </Button>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+              checked={locked}
+              disabled={savingLock}
+              onChange={(e) => onToggleLocked(e.target.checked)}
+            />
+            Lock time pattern
+          </label>
+          <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={copyLastWeek} disabled={!editState}>
+            Copy last week
+          </Button>
+        </div>
       </div>
 
       {!editState ? (
@@ -217,37 +268,16 @@ function DayEditor({ label, day, onChange }) {
       </select>
 
       {(day.mode === 'before' || day.mode === 'after') && (
-        <select className="input !w-40 !py-1.5" value={day.boundaryTime} onChange={(e) => onChange({ boundaryTime: e.target.value })}>
-          <option value="" disabled>
-            Select time…
-          </option>
-          {QUARTER_HOUR_TIMES.map((t) => (
-            <option key={t} value={t}>
-              {formatQuarterHour(t)}
-            </option>
-          ))}
-        </select>
+        <TimeOfDaySelect value={day.boundaryTime || '09:00'} onChange={(t) => onChange({ boundaryTime: t })} />
       )}
 
       {day.mode === 'custom' && (
         <div className="flex flex-1 flex-col gap-1.5">
           {(day.windows ?? []).map((w, i) => (
             <div key={i} className="flex items-center gap-1.5">
-              <select className="input !w-36 !py-1.5" value={w.start} onChange={(e) => updateWindow(i, { start: e.target.value })}>
-                {QUARTER_HOUR_TIMES.map((t) => (
-                  <option key={t} value={t}>
-                    {formatQuarterHour(t)}
-                  </option>
-                ))}
-              </select>
+              <TimeOfDaySelect value={w.start} onChange={(t) => updateWindow(i, { start: t })} />
               <span className="text-gray-400">–</span>
-              <select className="input !w-36 !py-1.5" value={w.end} onChange={(e) => updateWindow(i, { end: e.target.value })}>
-                {QUARTER_HOUR_TIMES.map((t) => (
-                  <option key={t} value={t}>
-                    {formatQuarterHour(t)}
-                  </option>
-                ))}
-              </select>
+              <TimeOfDaySelect value={w.end} onChange={(t) => updateWindow(i, { end: t })} />
               <button type="button" className="px-1.5 text-gray-400 hover:text-red-500" onClick={() => removeWindow(i)} aria-label="Remove time range">
                 ✕
               </button>

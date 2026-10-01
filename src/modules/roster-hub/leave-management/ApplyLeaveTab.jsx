@@ -4,6 +4,8 @@ import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { findBlockedDate } from '../../../lib/leaveLimits'
+import { brisbaneLocalToIso } from '../../../lib/brisbaneTime'
+import LeaveDateRangeFields from './LeaveDateRangeFields'
 
 // Jeff, 2026-09-30: "Leave申請的時候，start的時間預設是一天的開始(12am)，End
 // 的時間預設是一天的最後,而不是當下的時間，因為通常leave是請一整天，除非有特定
@@ -26,6 +28,11 @@ export default function ApplyLeaveTab() {
   const { profile, currentStoreId } = useAuth()
   const [startAt, setStartAt] = useState(() => todayAt(0, 0))
   const [endAt, setEndAt] = useState(() => todayAt(23, 59))
+  // Jeff, 2026-10-02: "specific time" checkbox — unchecked (the default,
+  // matching the whole-day-by-default behavior above) shows date-only
+  // pickers; checking it reveals the full start/end time pickers. See
+  // LeaveDateRangeFields.jsx.
+  const [specificTime, setSpecificTime] = useState(false)
   const [reason, setReason] = useState('')
   const [overlapping, setOverlapping] = useState([])
   // This store's leave-limit settings (Roster Hub > Setting > Leave
@@ -48,19 +55,27 @@ export default function ApplyLeaveTab() {
   }, [currentStoreId])
 
   useEffect(() => {
-    if (!startAt || !endAt || !currentStoreId) {
+    if (!startAt || !endAt || !currentStoreId || endAt < startAt) {
       setOverlapping([])
       return
     }
+    // Jeff, 2026-10-02: compared against the raw datetime-local strings
+    // before — same missing-timezone bug as the insert below (see
+    // brisbaneTime.js), which could make this overlap check itself wrong
+    // by up to 10 hours. Converted the same way for an accurate comparison.
     supabase
       .from('leave_requests')
       .select('*, profiles(first_name,last_name)')
       .eq('store_id', currentStoreId)
       .eq('status', 'active')
-      .lt('start_at', endAt)
-      .gt('end_at', startAt)
+      .lt('start_at', brisbaneLocalToIso(endAt))
+      .gt('end_at', brisbaneLocalToIso(startAt))
       .then(({ data }) => setOverlapping(data ?? []))
   }, [startAt, endAt, currentStoreId])
+
+  // Jeff, 2026-10-02: "end的日期比開始日期還早要跳出錯誤提示" — every
+  // date-range picker needs this same guard; this is Apply Leave's.
+  const rangeInvalid = startAt && endAt && endAt < startAt
 
   // The first day (if any) in the picked range that's already at this
   // store's leave-limit cap, checked against everyone ELSE already on
@@ -70,6 +85,10 @@ export default function ApplyLeaveTab() {
     startAt && endAt ? findBlockedDate(startAt, endAt, limitDefaults, limitPeriods, overlapping) : null
 
   async function submit() {
+    if (rangeInvalid) {
+      setMessage('Error: End date/time can’t be before the start.')
+      return
+    }
     if (blockedDate) {
       alert(
         `Leave is full for ${new Date(`${blockedDate.dateKey}T00:00:00`).toLocaleDateString()} (max ${blockedDate.max} ` +
@@ -82,8 +101,8 @@ export default function ApplyLeaveTab() {
     const { error } = await supabase.from('leave_requests').insert({
       profile_id: profile.id,
       store_id: currentStoreId,
-      start_at: startAt,
-      end_at: endAt,
+      start_at: brisbaneLocalToIso(startAt),
+      end_at: brisbaneLocalToIso(endAt),
       reason,
     })
     setSubmitting(false)
@@ -93,22 +112,24 @@ export default function ApplyLeaveTab() {
       setMessage('Leave registered.')
       setStartAt(todayAt(0, 0))
       setEndAt(todayAt(23, 59))
+      setSpecificTime(false)
       setReason('')
     }
   }
 
   return (
     <div className="max-w-lg space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Start</span>
-          <input type="datetime-local" className="input" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">End</span>
-          <input type="datetime-local" className="input" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
-        </label>
-      </div>
+      <LeaveDateRangeFields
+        startAt={startAt}
+        endAt={endAt}
+        specificTime={specificTime}
+        onChange={(next) => {
+          setStartAt(next.startAt)
+          setEndAt(next.endAt)
+          setSpecificTime(next.specificTime)
+        }}
+      />
+      {rangeInvalid && <p className="text-sm text-red-600">End date/time can’t be before the start.</p>}
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-gray-500">Reason (optional)</span>
         <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -139,7 +160,7 @@ export default function ApplyLeaveTab() {
         </div>
       )}
 
-      <Button onClick={submit} disabled={submitting || !startAt || !endAt}>
+      <Button onClick={submit} disabled={submitting || !startAt || !endAt || rangeInvalid}>
         {submitting ? 'Submitting…' : 'Confirm & Register Leave'}
       </Button>
       {message && <p className="text-sm text-brand-600">{message}</p>}

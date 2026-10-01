@@ -4,7 +4,18 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Jeff, 2026-10-02: "手機版bulletin的roster班表要可以縮小(目前只能放大)"
+         — pinch-to-zoom OUT wasn't working on the mobile roster table, only
+         zoom in. minimum-scale was left unset before, which some mobile
+         browsers/WebViews effectively treat as "can't go below 1.0" even
+         though max/initial-scale alone don't say that — explicitly allowing
+         down to 0.5x (and up to 5x) fixes that for any browser that honors
+         these values. On iOS specifically, though, pinch-zoom is disabled
+         altogether while running as an installed home-screen app (the
+         apple-mobile-web-app-capable mode below) — a platform limitation no
+         viewport meta or CSS can override; this fix is for everywhere else
+         (Android, and iOS Safari when not launched from the home screen). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
     <!-- Without this, some Android phones' "auto dark theme for web content"
          setting (Chrome's forced/simplified dark mode) rewrites this light
          page into a black background with light text on its own — the app

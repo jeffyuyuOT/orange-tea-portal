@@ -314,3 +314,94 @@ export async function deleteAttendanceEvent({ event, note, editor }) {
   const { error } = await supabase.from('attendance_events').delete().eq('id', event.id)
   return { error }
 }
+
+// Jeff, 2026-10-02 ("add attendance record" redesign): a per-(profile,
+// store, day) break value, in the SAME half-hour units as the roster's own
+// roster_entries.break_half_hours (migration 0008 — "e.g. 1 = 30 min, 2 = 1
+// hr"), stored in the new attendance_day_breaks table (migration 0089).
+// One current-value row per cell (upserted), not an event log — see that
+// migration's comment for why.
+export function breakMinutesFromHalfHours(breakHalfHours) {
+  const n = Number(breakHalfHours)
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 30) : 0
+}
+
+// "break x2" / "break x1.5" — Jeff's own label shape from his spec example
+// ("下面break x2"). null (not "x0") when there's nothing to show, so callers
+// can skip rendering the badge entirely for a day with no break logged.
+export function formatBreakUnits(breakHalfHours) {
+  const n = Number(breakHalfHours)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return `×${n % 1 === 0 ? n : n.toFixed(1)}`
+}
+
+// profileId -> keyed by cellKey(date, storeId) in the caller (same grouping
+// AttendanceLogTable already uses for punches/edits) — returns the raw rows
+// so the caller decides how to key them, same shape as the events/edits
+// queries it already runs alongside this one.
+export async function getAttendanceDayBreaks(profileId) {
+  const { data } = await supabase.from('attendance_day_breaks').select('*').eq('profile_id', profileId)
+  return data ?? []
+}
+
+// Upsert (one row per profile/store/day) — same "write the value, plus who/
+// when/why" shape as the punch-correction functions above, but a single
+// current-value row rather than an audit-trail insert, since that's all
+// Jeff asked this feature to carry (migration 0089's comment). `note` is
+// the same required reason the modal already collects for punch edits
+// (migration 0090 added the column after this was first missed).
+export async function upsertAttendanceDayBreak({ profileId, storeId, eventDate, breakHalfHours, note, editor }) {
+  const { error } = await supabase.from('attendance_day_breaks').upsert(
+    {
+      profile_id: profileId,
+      store_id: storeId,
+      event_date: eventDate,
+      break_half_hours: breakHalfHours,
+      note,
+      edited_by: editor.id,
+      edited_by_name: editor.name,
+      edited_at: new Date().toISOString(),
+    },
+    { onConflict: 'profile_id,store_id,event_date' }
+  )
+  return { error }
+}
+
+// Jeff, 2026-10-02: "Copy roster...則會直接將clock in/out的時間照班表帶入，
+// 並有幾次休息" — pulls ONE day's published ('submitted', migration 0048)
+// roster shift for this person at this store, the same source
+// src/lib/timeDiscrepancy.js already reads scheduled times from. A roster
+// period can be re-saved (migration 0048's own "allows re-saving
+// iterations" comment), so this takes the latest submitted period whose
+// week actually covers the date, same as timeDiscrepancy's own "latest
+// submitted wins" handling. Returns null when there's no published shift
+// for that day — nothing to copy — rather than throwing, so the caller can
+// just show "no roster shift found" instead of a crash.
+export async function getRosterShiftForDay(profileId, storeId, dateStr) {
+  const { data: period } = await supabase
+    .from('roster_periods')
+    .select('id')
+    .eq('store_id', storeId)
+    .eq('status', 'submitted')
+    .lte('week_start_date', dateStr)
+    .gte('week_end_date', dateStr)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!period) return null
+
+  const { data: entry } = await supabase
+    .from('roster_entries')
+    .select('start_time, end_time, break_half_hours')
+    .eq('roster_period_id', period.id)
+    .eq('profile_id', profileId)
+    .eq('work_date', dateStr)
+    .maybeSingle()
+  if (!entry?.start_time || !entry?.end_time) return null
+
+  return {
+    startTime: entry.start_time.slice(0, 5),
+    endTime: entry.end_time.slice(0, 5),
+    breakHalfHours: Number(entry.break_half_hours) || 0,
+  }
+}

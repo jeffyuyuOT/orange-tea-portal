@@ -54,6 +54,40 @@ export function timeToMinutes(hhmm) {
   return h * 60 + m
 }
 
+// Jeff, 2026-10-02: "選取after, before, 或specific time按save後，切換頁面再
+// 回來時間都會變成12am" — the save itself was fine; this is a read-back bug.
+// Postgres `time` columns round-trip as "HH:MM:SS", but every option in
+// QUARTER_HOUR_TIMES (and now the hour/minute/AM-PM picker below) is
+// "HH:MM" with no seconds — so the stored "14:00:00" never matched any
+// option, and the browser silently fell back to rendering the first one
+// ("00:00" / 12:00 AM). Stripping the seconds here, once, is what makes
+// the saved value actually match an option again.
+function stripSeconds(hhmmss) {
+  return hhmmss ? hhmmss.slice(0, 5) : hhmmss
+}
+
+export const MINUTE_OPTIONS = ['00', '15', '30', '45']
+
+// Jeff, 2026-10-02: "選時間的時候可以時分...分開選，這樣才不用像現在要選下午
+// 要拉很長一段" — decompose/compose a "HH:MM" (or the special "24:00" end-
+// of-day marker) into/from separate hour(1-12)/minute(15-min)/AM-PM parts,
+// so TimeOfDaySelect.jsx can offer three short pickers instead of one
+// <select> with 97 entries to scroll through to reach an afternoon time.
+export function decomposeQuarterHour(hhmm) {
+  if (!hhmm || hhmm === '24:00') return { hour12: 12, minute: '00', ampm: 'midnight' }
+  const [h, m] = hhmm.split(':').map(Number)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const hour12 = h % 12 === 0 ? 12 : h % 12
+  return { hour12, minute: String(m).padStart(2, '0'), ampm }
+}
+
+export function composeQuarterHour(hour12, minute, ampm) {
+  if (ampm === 'midnight') return '24:00'
+  let h = Number(hour12) % 12
+  if (ampm === 'PM') h += 12
+  return `${String(h).padStart(2, '0')}:${minute}`
+}
+
 export function minutesToLabel(min) {
   const clamped = min >= 1440 ? 0 : min
   const h = Math.floor(clamped / 60)
@@ -193,8 +227,8 @@ export function weekDatesFrom(weekStartStr) {
 export function rowToEditDay({ dayRow, windows } = {}) {
   return {
     mode: dayRow?.mode ?? 'all_available',
-    boundaryTime: dayRow?.boundary_time ?? '',
-    windows: (windows ?? []).map((w) => ({ start: w.start_time, end: w.end_time })),
+    boundaryTime: stripSeconds(dayRow?.boundary_time) ?? '',
+    windows: (windows ?? []).map((w) => ({ start: stripSeconds(w.start_time), end: stripSeconds(w.end_time) })),
   }
 }
 

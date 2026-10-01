@@ -180,6 +180,7 @@ export default function StaffTimeLogsPage() {
           canEdit={canEdit}
           editor={editor}
           editorAccessibleStoreIds={editorAccessibleStoreIds}
+          currentStoreId={currentStoreId}
         />
       </div>
     )

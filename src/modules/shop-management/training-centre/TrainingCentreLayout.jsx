@@ -26,17 +26,23 @@ export default function TrainingCentreLayout() {
 
       {/* Jeff, 2026-09-29: "手機板的shop training database介面要好操作一
           點，都超出螢幕了" — three tab labels this long (esp. "Shop Training
-          Database") don't fit a phone width and used to just overflow the
-          page sideways. overflow-x-auto + shrink-0/whitespace-nowrap on each
-          tab makes this bar itself the thing that scrolls horizontally
-          (a swipeable tab strip) instead of the whole page. */}
-      <div className="mb-5 flex gap-1 overflow-x-auto border-b border-brand-100">
+          Database") don't fit a phone width. That round's fix made the bar
+          itself scroll horizontally (overflow-x-auto + shrink-0/
+          whitespace-nowrap, a swipeable tab strip) — but Jeff, 2026-10-02:
+          "手機板training centre要選分頁時會超出頁面，必須往旁邊滑" says
+          needing that sideways swipe at all is itself the problem. Switched
+          to flex-wrap instead: each tab is still one unbroken label (no
+          whitespace-nowrap needed for that — a flex item just wraps as a
+          whole onto the next line), but now the BAR wraps onto a second
+          line on a narrow phone rather than requiring any horizontal
+          scrolling to reach a tab. */}
+      <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-100">
         {TABS.filter((t) => canAccessPage(effectivePages, t.key)).map((t) => (
           <NavLink
             key={t.key}
             to={t.to}
             className={({ isActive }) =>
-              `flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2 text-sm font-medium ${
+              `flex items-center gap-1.5 px-3 py-2 text-sm font-medium ${
                 isActive ? 'border-b-2 border-brand-500 text-brand-700' : 'text-gray-500 hover:text-brand-600'
               }`
             }
