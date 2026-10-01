@@ -227,11 +227,6 @@ export default function AttendanceLogTable({
                     <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">{storeName}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {breakRow && breakMinutes > 0 && (
-                      <span className="text-xs text-gray-500" title={editTitle(breakRow)}>
-                        Break {formatBreakUnits(breakRow.break_half_hours)} (−{formatMinutes(breakMinutes)}) · {editNote(breakRow)}
-                      </span>
-                    )}
                     <span className="text-sm font-medium text-brand-700">Total: {formatMinutes(total)}</span>
                     {canEdit && (
                       <button
@@ -280,6 +275,26 @@ export default function AttendanceLogTable({
                       {e.before_occurred_at ? format(new Date(e.before_occurred_at), 'h:mm a') : '—'} ({editNote(e)})
                     </div>
                   ))}
+                  {/* Jeff, 2026-10-02: "Break x1寫在所有log in/out時間的最下
+                      面，時間-30min顯示在最後面(跟clock in/out一樣)，break資
+                      訊不要放在total的旁邊，看起來沒有跟下面時間一起統計的感
+                      覺" — moved from the header row (next to Total) down to
+                      its own line below every session, styled the exact same
+                      way a session line is (label on the left, the
+                      minutes figure on the right) so it visually reads as
+                      part of the same list being totalled, not a separate
+                      header-level figure. */}
+                  {breakRow && breakMinutes > 0 && (
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      <span>
+                        Break {formatBreakUnits(breakRow.break_half_hours)}
+                        <span className="ml-2 text-xs text-amber-600" title={editTitle(breakRow)}>
+                          {editNote(breakRow)}
+                        </span>
+                      </span>
+                      <span className="text-gray-400">−{formatMinutes(breakMinutes)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )

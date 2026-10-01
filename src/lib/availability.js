@@ -69,12 +69,21 @@ function stripSeconds(hhmmss) {
 export const MINUTE_OPTIONS = ['00', '15', '30', '45']
 
 // Jeff, 2026-10-02: "選時間的時候可以時分...分開選，這樣才不用像現在要選下午
-// 要拉很長一段" — decompose/compose a "HH:MM" (or the special "24:00" end-
-// of-day marker) into/from separate hour(1-12)/minute(15-min)/AM-PM parts,
-// so TimeOfDaySelect.jsx can offer three short pickers instead of one
-// <select> with 97 entries to scroll through to reach an afternoon time.
+// 要拉很長一段" — decompose/compose a "HH:MM" into/from separate hour(1-12)/
+// minute(15-min)/AM-PM parts, so TimeOfDaySelect.jsx can offer three short
+// pickers instead of one <select> with 97 entries to scroll through to
+// reach an afternoon time.
+//
+// Jeff, 2026-10-02 (later): "系統所有填寫am/pm的部分不需要midnight (end of
+// day)的選項，當天最晚能選的時間就是11:59pm" — dropped the special "24:00"/
+// "midnight (end of day)" marker this used to decompose an empty value (or
+// literal "24:00") into; a window now always ends by 11:45 PM at the
+// latest (the last quarter-hour option TimeOfDaySelect.jsx offers), never
+// a separate end-of-day marker. Confirmed no existing availability window
+// or boundary time is actually stored as "24:00" before removing this, so
+// nothing needed migrating.
 export function decomposeQuarterHour(hhmm) {
-  if (!hhmm || hhmm === '24:00') return { hour12: 12, minute: '00', ampm: 'midnight' }
+  if (!hhmm) return { hour12: 12, minute: '00', ampm: 'AM' }
   const [h, m] = hhmm.split(':').map(Number)
   const ampm = h >= 12 ? 'PM' : 'AM'
   const hour12 = h % 12 === 0 ? 12 : h % 12
@@ -82,7 +91,6 @@ export function decomposeQuarterHour(hhmm) {
 }
 
 export function composeQuarterHour(hour12, minute, ampm) {
-  if (ampm === 'midnight') return '24:00'
   let h = Number(hour12) % 12
   if (ampm === 'PM') h += 12
   return `${String(h).padStart(2, '0')}:${minute}`

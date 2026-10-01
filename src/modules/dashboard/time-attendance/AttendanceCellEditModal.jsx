@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import TypedTimeInput from './TypedTimeInput'
 import {
   addAttendanceEvent,
   updateAttendanceEvent,
@@ -306,13 +307,7 @@ export default function AttendanceCellEditModal({
                   <option value="clock_in">Clock in</option>
                   <option value="clock_out">Clock out</option>
                 </select>
-                <input
-                  type="time"
-                  className="input w-auto"
-                  value={r.time}
-                  disabled={r.deleted}
-                  onChange={(e) => updateRow(r.key, { time: e.target.value })}
-                />
+                <TypedTimeInput value={r.time} disabled={r.deleted} onChange={(t) => updateRow(r.key, { time: t })} />
                 {r.existing ? (
                   <button
                     type="button"
