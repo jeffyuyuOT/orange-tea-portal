@@ -668,7 +668,15 @@ export default function ManageRosterPage() {
             <span className="hidden sm:inline">Action ▾</span>
           </Button>
           {actionMenuOpen && (
-            <div className="absolute left-0 z-10 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+            // Jeff, 2026-10-02 (screenshot): this dropdown used to be z-10,
+            // same as the grid's sticky day/date header below it (see
+            // RosterEntryGrid's 2026-10-01 "freeze header on scroll" change)
+            // — two siblings at the same z-index paint in DOM order, and the
+            // grid (mounted after this toolbar) came later, so its sticky
+            // header painted OVER this menu instead of under it. z-30 makes
+            // sure this transient dropdown always wins against anything
+            // sticky further down the page.
+            <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                 <button
                   type="button"
                   className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
