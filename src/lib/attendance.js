@@ -144,7 +144,22 @@ export function pairEventsIntoSessions(events) {
     ...s,
     // A session is filed under the date it STARTED, even if it runs past
     // midnight — an overnight shift is one shift, not split across two days.
-    date: s.clockIn ? format(new Date(s.clockIn.occurred_at), 'yyyy-MM-dd') : null,
+    //
+    // Jeff, 2026-10-02: a clock_out with nothing open (no s.clockIn — the
+    // "odd out-of-order anomaly" this function's own top comment already
+    // says it tolerates) used to fall through to `date: null` here, and
+    // groupSessionsIntoCells drops any session with no date — so instead of
+    // showing up as a "zero-length"/incomplete session like the comment
+    // promises, it silently vanished with no trace anywhere in the UI. Hit
+    // in practice editing Kiki's log: her only punch got its type flipped
+    // clock_in -> clock_out, and the new clock_in meant to replace it
+    // didn't end up saved (see AttendanceCellEditModal's save() for that
+    // half of the fix) — leaving exactly one orphaned clock_out, which made
+    // the entire day's box disappear from the table instead of showing an
+    // obviously-incomplete entry a manager could then go fix. Falling back
+    // to the clock_out's own date keeps an orphan like this visible (and
+    // editable) instead of silently erasing it from view.
+    date: s.clockIn ? format(new Date(s.clockIn.occurred_at), 'yyyy-MM-dd') : s.clockOut ? format(new Date(s.clockOut.occurred_at), 'yyyy-MM-dd') : null,
     minutes:
       s.clockIn && s.clockOut
         ? Math.max(0, Math.round((new Date(s.clockOut.occurred_at) - new Date(s.clockIn.occurred_at)) / 60000))

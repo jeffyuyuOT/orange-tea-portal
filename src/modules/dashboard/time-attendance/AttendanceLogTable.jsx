@@ -257,7 +257,12 @@ export default function AttendanceLogTable({
                     return (
                       <div key={idx} className="flex items-center justify-between text-sm text-gray-600">
                         <span>
-                          {format(new Date(s.clockIn.occurred_at), 'h:mm a')} –{' '}
+                          {/* Jeff, 2026-10-02: a clock_out with no matching clock_in
+                              (see pairEventsIntoSessions' 2026-10-02 comment in
+                              attendance.js) used to be invisible everywhere — now
+                              that it's kept instead of silently dropped, this has
+                              to render without crashing on a null s.clockIn too. */}
+                          {s.clockIn ? format(new Date(s.clockIn.occurred_at), 'h:mm a') : 'no clock-in recorded'} –{' '}
                           {s.clockOut ? format(new Date(s.clockOut.occurred_at), 'h:mm a') : 'still clocked in'}
                           {!!sessionEdits.length && (
                             <span className="ml-2 text-xs text-amber-600" title={editTitle(sessionEdits[0])}>

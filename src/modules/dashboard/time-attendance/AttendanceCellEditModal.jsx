@@ -163,6 +163,21 @@ export default function AttendanceCellEditModal({
       setError('Please enter a valid number of breaks (0 or more).')
       return
     }
+    // Jeff, 2026-10-02: a new row left with no time typed in used to be
+    // silently skipped at save time (the loop below only writes a new row
+    // when `r.time` is truthy) — no error, Save just quietly did nothing
+    // for it. Combined with editing away the cell's only other punch (e.g.
+    // flipping its one clock_in to clock_out, meaning to replace it with
+    // this new clock_in), that left the day with a single orphaned
+    // clock_out and nothing else, which used to make the whole day vanish
+    // from the table entirely (see attendance.js's pairEventsIntoSessions).
+    // Now a half-filled new row blocks Save with a clear message instead of
+    // silently discarding it — remove it with "Discard" if it wasn't meant
+    // to be kept.
+    if (showRows && rows.some((r) => !r.existing && !r.time)) {
+      setError('Please enter a time for the new clock in/out row, or remove it.')
+      return
+    }
     const rowsChanged =
       showRows &&
       rows.some(
