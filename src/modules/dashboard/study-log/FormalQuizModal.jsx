@@ -86,10 +86,12 @@ async function buildFormalQuizSet(profileId, storeId) {
   // Hot-serving variant (see QuickQuizModal.jsx's buildFormulaQuestions for
   // the same exclusion + rationale) — only an item's normal ingredient rows
   // become questions here. ---
-  const [{ data: ingredientRows }, { data: excludedRows }, { data: allQuantityRows }] = await Promise.all([
+  const [{ data: ingredientRows }, { data: excludedRows }, { data: allQuantityRows }, { data: sizedItemRows }] = await Promise.all([
     supabase
       .from('formula_item_ingredients')
-      .select('id, ingredient_id, quantity_text, is_hot, ingredient_master(name), formula_items!inner(id, name_en, name_zh, is_must_know)')
+      .select(
+        'id, ingredient_id, quantity_text, is_hot, size_id, group_label, ingredient_master(name), formula_items!inner(id, name_en, name_zh, is_must_know), drink_sizes(name)'
+      )
       .in('formula_item_id', memorizedIds)
       .not('ingredient_id', 'is', null),
     // Same admin-curated exclusion list Quick Quiz's buildFormulaQuestions
@@ -109,8 +111,24 @@ async function buildFormalQuizSet(profileId, storeId) {
       .not('quantity_text', 'is', null)
       .not('ingredient_id', 'is', null)
       .neq('quantity_text', ''),
+    // Jeff, 2026-10-02: "為什麼Formula fill-in-the-blank questions都沒有說
+    // size" — an item with sizes (M/L/...) records a SEPARATE quantity_text
+    // per size for the same ingredient (e.g. Lemon Black Tea's Lemon is 1
+    // at M but 1.3 at L), but this candidate list used to build its question
+    // text with no mention of which size it means, and could generate one
+    // candidate per size off the exact same question text — so the "correct"
+    // answer looked arbitrary/wrong when it was really just a different
+    // size's figure. Matches QuickQuizModal.jsx's buildFormulaQuestions,
+    // which already carries this same size_id/drink_sizes(name) fetch and
+    // sizedItemIds filter for exactly this reason.
+    supabase.from('formula_item_sizes').select('formula_item_id').in('formula_item_id', memorizedIds),
   ])
   const excludedIngredientIds = new Set((excludedRows ?? []).map((r) => r.ingredient_id))
+  // An item that offers sizes sometimes still carries older size_id = null
+  // ingredient rows left over from before sizing was added to it —
+  // duplicates of the real per-size rows, not a "same for every size" value.
+  // Same skip QuickQuizModal.jsx's buildFormulaQuestions already applies.
+  const sizedItemIds = new Set((sizedItemRows ?? []).map((r) => r.formula_item_id))
   const fillBlankCandidates = (ingredientRows ?? [])
     .filter(
       (r) =>
@@ -118,19 +136,32 @@ async function buildFormalQuizSet(profileId, storeId) {
         r.ingredient_master?.name &&
         !r.is_hot &&
         !excludedIngredientIds.has(r.ingredient_id) &&
-        r.formula_items?.is_must_know
+        r.formula_items?.is_must_know &&
+        !(sizedItemIds.has(r.formula_item_id) && !r.size_id)
     )
-    .map((r) => ({
-      type: 'fill_blank',
-      isGenerated: true,
-      localId: r.id,
-      ingredientId: r.ingredient_id,
-      quantityText: r.quantity_text.trim(),
-      question: `${r.formula_items.name_en}${r.formula_items.name_zh ? ` · ${r.formula_items.name_zh}` : ''} — how much ${r.ingredient_master.name}?`,
-      correctAnswer: r.quantity_text.trim(),
-      topTen: top10Ids.has(r.formula_items.id),
-      formulaItemId: r.formula_items.id,
-    }))
+    .map((r) => {
+      // Same disambiguating suffixes QuickQuizModal.jsx's buildFormulaQuestions
+      // already appends, for the same three reasons: which size (an item
+      // with sizes records a different quantity per size), which occurrence
+      // (the same ingredient can appear more than once under a different
+      // group_label, e.g. "Blender"), and Sugar specifically always meaning
+      // the recorded 100%/full-sugar figure, never a customer's requested
+      // sugar level.
+      const sizeSuffix = r.drink_sizes?.name ? ` (${r.drink_sizes.name})` : ''
+      const groupSuffix = r.group_label ? ` (${r.group_label})` : ''
+      const sugarSuffix = (r.ingredient_master.name ?? '').trim().toLowerCase() === 'sugar' ? ' (Full Sugar)' : ''
+      return {
+        type: 'fill_blank',
+        isGenerated: true,
+        localId: r.id,
+        ingredientId: r.ingredient_id,
+        quantityText: r.quantity_text.trim(),
+        question: `${r.formula_items.name_en}${r.formula_items.name_zh ? ` · ${r.formula_items.name_zh}` : ''} — how much ${r.ingredient_master.name}${groupSuffix}${sizeSuffix}${sugarSuffix}?`,
+        correctAnswer: r.quantity_text.trim(),
+        topTen: top10Ids.has(r.formula_items.id),
+        formulaItemId: r.formula_items.id,
+      }
+    })
   const realQuantityPool = {}
   ;(allQuantityRows ?? []).forEach((r) => {
     ;(realQuantityPool[r.ingredient_id] ??= new Set()).add(r.quantity_text)
