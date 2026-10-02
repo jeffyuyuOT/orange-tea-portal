@@ -212,7 +212,20 @@ export function AuthProvider({ children }) {
   // mark themselves as viewed, so the badge disappears immediately without
   // needing a full page reload.
   const refreshRosterUpdates = useCallback(async () => {
-    if (!profile?.id || !currentStoreId) {
+    // Jeff, 2026-10-02: "為什麼2d maker的捷徑圖示會有訊息提示的數字" — this
+    // (and hasFormulaUpdates/hasBulletinUpdates below) used to run for ANY
+    // profile with a currentStoreId, regardless of whether that role's
+    // sidebar can even reach My Roster/Formula/Bulletin at all — same gap
+    // hasTimeDiscrepancies already closed for itself (see its own
+    // 2026-09 comment: "a plain staff account has no business querying...
+    // a badge it'll never see anyway"). A role like qr_code_maker — a
+    // device account, not a person, with exactly one page in its sidebar —
+    // has no way to ever open My Roster and clear this, so it just
+    // accumulated forever and silently fed the app icon badge in
+    // AppShell.jsx. Gating this the same way hasTimeDiscrepancies already
+    // is stops that: a role that can't reach the page never contributes to
+    // its own badge.
+    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'roster_hub.my_roster')) {
       setRosterUpdates({ myRoster: false })
       return
     }
@@ -236,7 +249,7 @@ export function AuthProvider({ children }) {
     setRosterUpdates({
       myRoster: !!myLatest && (!viewState?.my_roster_viewed_at || myLatest > viewState.my_roster_viewed_at),
     })
-  }, [profile?.id, currentStoreId])
+  }, [profile, overrides, currentStoreId])
 
   useEffect(() => {
     refreshRosterUpdates()
@@ -247,13 +260,15 @@ export function AuthProvider({ children }) {
   // after someone opens an item (which marks it seen), so the badge clears
   // immediately without needing a full page reload.
   const refreshFormulaUpdates = useCallback(async () => {
-    if (!profile?.id || !currentStoreId) {
+    // Jeff, 2026-10-02: same gating as refreshRosterUpdates above and for
+    // the same reason — see that comment.
+    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'operations_training.formula')) {
       setHasFormulaUpdates(false)
       return
     }
     const unseen = await getUnseenFormulaItems(profile.id, currentStoreId)
     setHasFormulaUpdates(unseen.length > 0)
-  }, [profile?.id, currentStoreId])
+  }, [profile, overrides, currentStoreId])
 
   useEffect(() => {
     refreshFormulaUpdates()
@@ -265,7 +280,9 @@ export function AuthProvider({ children }) {
   // week opened), so the dot clears immediately without needing a full page
   // reload — same trigger points as refreshRosterUpdates/refreshFormulaUpdates.
   const refreshBulletinUpdates = useCallback(async () => {
-    if (!profile?.id || !currentStoreId) {
+    // Jeff, 2026-10-02: same gating as refreshRosterUpdates above and for
+    // the same reason — see that comment.
+    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'dashboard.bulletin')) {
       setHasBulletinUpdates(false)
       return
     }
@@ -335,7 +352,7 @@ export function AuthProvider({ children }) {
     })
 
     setHasBulletinUpdates(hasUnviewedAnnouncement || hasUnviewedComplaint || hasUnviewedRoster)
-  }, [profile?.id, currentStoreId])
+  }, [profile, overrides, currentStoreId])
 
   useEffect(() => {
     refreshBulletinUpdates()
