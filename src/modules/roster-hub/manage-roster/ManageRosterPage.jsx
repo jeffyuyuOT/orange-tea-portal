@@ -64,6 +64,17 @@ export default function ManageRosterPage() {
   const [loadedPeriodStatus, setLoadedPeriodStatus] = useState(null)
   const [clearedFromPublished, setClearedFromPublished] = useState(false)
   const [clearPublishConfirm, setClearPublishConfirm] = useState(null)
+  // Jeff, 2026-10-03: "已經publish的班表，只能用publish蓋過，不能用save(not
+  // publish讓它變成not publish)...按save (not publish)，要跳出警示視窗說此班
+  // 表已經發布，只能用publish去更改" — once a week is live (loadedPeriodStatus
+  // 'submitted'), Save (not published) is blocked outright, not just soft-
+  // warned: persist(status) always upserts roster_periods.status to whatever
+  // was clicked (see persist() below), so a plain Save on a published week
+  // would silently demote it back to an unpublished draft — this is a true
+  // block (an info popup with nothing to click past), unlike the understaffed
+  // warning above or the Clear-then-Submit confirm below, both of which are
+  // fine to save/publish through once acknowledged.
+  const [publishedDraftBlocked, setPublishedDraftBlocked] = useState(false)
   // Download template / Upload Excel / Export current grid used to be three
   // separate buttons crowding the toolbar — merged into one "Action"
   // dropdown at the right of the row (see the render below). `fileInputRef`
@@ -149,9 +160,12 @@ export default function ManageRosterPage() {
       // that way is excluded here entirely rather than only for one week.
       // qualified (profiles.qualified, migration 0049_staff_qualified.sql)
       // is what RosterEntryGrid uses to show a not-yet-Qualified staff
-      // member's name/shift time in red.
+      // member's name/shift time in red. training_journey_phase/
+      // has_master_title (Training Journey spec, point 6) are the same
+      // idea's successor — RosterEntryGrid reads them instead, under
+      // whichever Roster Name Display Format System Setting has chosen.
       .select(
-        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity)'
+        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity, training_journey_phase, has_master_title)'
       )
       .eq('store_id', currentStoreId)
       .order('roster_order')
@@ -575,13 +589,18 @@ export default function ManageRosterPage() {
     if (loadedPeriodStatus === 'submitted') setClearedFromPublished(true)
   }
 
-  // Save/Submit's actual entry point now — checks for the Clear-while-
-  // published case first (see clearGrid/clearedFromPublished above), since
-  // that's a "did you mean to do this" question about the SAVE ITSELF
-  // (overwriting a live published roster), separate from and upstream of
-  // the understaffed-slots warning further down, which is about staffing
-  // levels, not about publish-safety.
+  // Save/Submit's actual entry point now — the published-week block (just
+  // added) comes first since it's an outright block with nothing to confirm
+  // past, then the Clear-while-published case (see clearGrid/
+  // clearedFromPublished above), which is a "did you mean to do this"
+  // question about the SAVE ITSELF (overwriting a live published roster),
+  // separate from and upstream of the understaffed-slots warning further
+  // down, which is about staffing levels, not about publish-safety.
   function handleSaveOrSubmit(status) {
+    if (status === 'draft' && loadedPeriodStatus === 'submitted') {
+      setPublishedDraftBlocked(true)
+      return
+    }
     if (status === 'submitted' && clearedFromPublished) {
       setClearPublishConfirm({ status })
       return
@@ -617,68 +636,74 @@ export default function ManageRosterPage() {
     <div>
       <h1 className="mb-4 text-xl font-semibold text-gray-900">Manage Roster</h1>
 
-      {/* Jeff, 2026-10-01: "電腦版的...Save (not published)和Submit & Publish
-          按鈕移到action右邊，原本的View Staff's Availability跟Action往week
-          starting的日期那邊靠，都在同一行" — desktop (sm+) keeps every
-          control — Week starting, View Staff's Availability, Action, Save,
-          Submit — in one plain flex-wrap row (no more justify-between
-          pushing View Availability/Action off to the far right).
-          Mobile is its own explicit layout, per Jeff's follow-ups:
-          "手機板的Save和Submit按鈕則放在action右邊，跟action同一行" then
-          "手機板的Save...放在同一行，然後日期，View Staff's Availability
-          和Action有辦法放在同一行嗎，看是要縮小字還是有沒有辦法用圖示表示"
-          — so below `sm`, View Availability/Action swap their label for a
-          single icon (👥/⋯, full text still in the accessible name via
-          `title`) so all three of Week starting + View Availability +
-          Action fit on row one, and an invisible `basis-full sm:hidden`
-          spacer forces Save/Submit onto their own row two (shortened to
-          "Save"/"Submit" there too) instead of wrapping unpredictably
-          wherever the real button widths happen to run out of room. On
-          `sm` and up the spacer is just `hidden` (takes no space, forces
-          nothing), so Save/Submit fall right back in line after Action —
-          the one-row desktop layout above. */}
-      <div className="mb-4 flex flex-wrap items-end gap-2 sm:gap-3">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Week starting (Mon)</span>
-          <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
-        </label>
+      {/* Jeff, 2026-10-03: "View Staff's Availability跟Action 靠到最右邊。
+          Save (not published)跟Submit & Publish還有說明則往日期那邊靠" —
+          flips the single-row desktop layout from 2026-10-01 (which had
+          everything — date, View Availability, Action, Save, Submit, info —
+          in one plain left-aligned row): now two groups, Week starting +
+          Save + Submit + info on the left, View Availability + Action
+          pushed to the far right (`sm:justify-between` on the outer row,
+          each side its own inner flex group so either side can still wrap
+          internally without breaking the left/right split). Mobile keeps
+          its own simpler stacked behavior — View Availability/Action swap
+          to icon-only (👥/⋯, full text still in the accessible name via
+          `title`) and Save/Submit shorten to "Save"/"Submit", per Jeff's
+          earlier mobile-specific requests — it just now renders as two
+          flex-wrap groups that stack via the outer row wrapping, instead of
+          the old explicit spacer-forced two rows. */}
+      <div className="mb-4 flex flex-wrap items-end gap-2 sm:flex-nowrap sm:justify-between sm:gap-3">
+        <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Week starting (Mon)</span>
+            <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+          </label>
 
-        <Button
-          variant="secondary"
-          onClick={() => setAvailabilityModalOpen(true)}
-          disabled={!weekStart}
-          title="View Staff's Availability"
-          aria-label="View Staff's Availability"
-        >
-          <span className="sm:hidden" aria-hidden="true">👥</span>
-          <span className="hidden sm:inline">View Staff's Availability</span>
-        </Button>
-
-        {/* Jeff, 2026-10-01: "manage roster頁面裡的action按鈕下拉內容將
-            export current grid移除(因為hisotry裡可以做到相同的功能)，然後
-            新增-> last week, -> current week. -> next week放在最前面，下面
-            再放upload excel跟download template" — Export current grid
-            dropped (History already covers it — RosterHistoryPage.jsx's
-            own Export button); Last/Current/Next week added at the top as
-            quick jumps to those three calendar weeks (relative to TODAY,
-            not whatever week is currently loaded — for anything further
-            out, the Week starting date picker above is the general
-            answer, same as before). */}
-        <div className="relative" ref={actionMenuRef}>
-          <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)} title="Action" aria-label="Action">
-            <span className="sm:hidden" aria-hidden="true">⋯</span>
-            <span className="hidden sm:inline">Action ▾</span>
+          <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>
+            <span className="sm:hidden">Save</span>
+            <span className="hidden sm:inline">Save (not published)</span>
           </Button>
-          {actionMenuOpen && (
-            // Jeff, 2026-10-02 (screenshot): this dropdown used to be z-10,
-            // same as the grid's sticky day/date header below it (see
-            // RosterEntryGrid's 2026-10-01 "freeze header on scroll" change)
-            // — two siblings at the same z-index paint in DOM order, and the
-            // grid (mounted after this toolbar) came later, so its sticky
-            // header painted OVER this menu instead of under it. z-30 makes
-            // sure this transient dropdown always wins against anything
-            // sticky further down the page.
-            <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+          <Button disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('submitted')}>
+            <span className="sm:hidden">Submit</span>
+            <span className="hidden sm:inline">Submit & Publish</span>
+          </Button>
+          <button
+            type="button"
+            onClick={() => setShowInstructions(true)}
+            className="shrink-0 rounded-full border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:bg-gray-50 hover:text-brand-600"
+            title="How to fill in the grid"
+            aria-label="How to fill in the grid"
+          >
+            ℹ️
+          </button>
+        </div>
+
+        <div className="flex items-end gap-2 sm:gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => setAvailabilityModalOpen(true)}
+            disabled={!weekStart}
+            title="View Staff's Availability"
+            aria-label="View Staff's Availability"
+          >
+            <span className="sm:hidden" aria-hidden="true">👥</span>
+            <span className="hidden sm:inline">View Staff's Availability</span>
+          </Button>
+
+          {/* Jeff, 2026-10-02 (screenshot): this dropdown used to be z-10,
+              same as the grid's sticky day/date header below it (see
+              RosterEntryGrid's 2026-10-01 "freeze header on scroll" change)
+              — two siblings at the same z-index paint in DOM order, and the
+              grid (mounted after this toolbar) came later, so its sticky
+              header painted OVER this menu instead of under it. z-30 makes
+              sure this transient dropdown always wins against anything
+              sticky further down the page. */}
+          <div className="relative" ref={actionMenuRef}>
+            <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)} title="Action" aria-label="Action">
+              <span className="sm:hidden" aria-hidden="true">⋯</span>
+              <span className="hidden sm:inline">Action ▾</span>
+            </Button>
+            {actionMenuOpen && (
+              <div className="absolute right-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                 <button
                   type="button"
                   className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
@@ -748,36 +773,15 @@ export default function ManageRosterPage() {
                 </button>
               </div>
             )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
-          />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
+            />
+          </div>
         </div>
-
-        {/* Forces Save/Submit onto their own row on mobile only — see the
-            comment at the top of this toolbar for why. */}
-        <div className="basis-full sm:hidden" aria-hidden="true" />
-
-        <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>
-          <span className="sm:hidden">Save</span>
-          <span className="hidden sm:inline">Save (not published)</span>
-        </Button>
-        <Button disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('submitted')}>
-          <span className="sm:hidden">Submit</span>
-          <span className="hidden sm:inline">Submit & Publish</span>
-        </Button>
-        <button
-          type="button"
-          onClick={() => setShowInstructions(true)}
-          className="shrink-0 rounded-full border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:bg-gray-50 hover:text-brand-600"
-          title="How to fill in the grid"
-          aria-label="How to fill in the grid"
-        >
-          ℹ️
-        </button>
       </div>
 
       <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="How to fill in the grid">
@@ -862,6 +866,23 @@ export default function ManageRosterPage() {
             This week's roster was already published, and the grid was cleared since then. Publishing now will
             replace the live, already-published roster with {entries.length ? "what's currently on the grid" : 'an empty roster'}
             . Staff who can already see their published shifts for this week will see this change.
+          </p>
+        </Modal>
+      )}
+
+      {publishedDraftBlocked && (
+        <Modal
+          open
+          onClose={() => setPublishedDraftBlocked(false)}
+          title="This roster is already published"
+          footer={
+            <Button onClick={() => setPublishedDraftBlocked(false)}>OK</Button>
+          }
+        >
+          <p className="text-sm text-gray-700">
+            This week's roster has already been published — Save (not published) would turn it back into an
+            unpublished draft, which staff who can already see their published shifts wouldn't see reflected. To
+            change an already-published roster, use Submit & Publish instead.
           </p>
         </Modal>
       )}

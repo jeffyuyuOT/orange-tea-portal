@@ -1,7 +1,9 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
+import { supabase } from '../../../lib/supabaseClient'
 import { dayHours, rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 import { shiftConflictsWithAvailability, minutesToLabel } from '../../../lib/availability'
+import { loadRosterDisplaySettings, rosterTitleStyle } from '../../../lib/trainingJourney'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 
@@ -55,6 +57,22 @@ export default function RosterEntryGrid({
   // reverts or blocks the entry.
   const [conflictWarning, setConflictWarning] = useState(null)
 
+  // Jeff, 2026-10-02 (Training Journey spec, point 6): System Setting >
+  // Roster Name Display Format + the 6 phase definitions — same fetch-once
+  // pattern as RosterWeekTable.jsx (shared Bulletin/My Roster view), which
+  // this grid's own qualified-only red/default styling has always
+  // duplicated independently rather than sharing a component with. 'original'
+  // (the default) leaves every row below exactly as it already rendered.
+  const [displayFormat, setDisplayFormat] = useState('original')
+  const [phases, setPhases] = useState([])
+  useEffect(() => {
+    loadRosterDisplaySettings().then(setDisplayFormat)
+    supabase
+      .from('training_journey_phases')
+      .select('*')
+      .then(({ data }) => setPhases(data ?? []))
+  }, [])
+
   function checkConflict(row, date) {
     if (!row.profileId || !availabilityByProfile) return
     const entry = entries.find((e) => matches(row, e) && e.date === date)
@@ -93,6 +111,8 @@ export default function RosterEntryGrid({
       // Only real staff carry this concept; Pending staff/imported/manual
       // rows below never do.
       qualified: s.qualified === true,
+      training_journey_phase: s.training_journey_phase,
+      has_master_title: s.has_master_title,
     }))
     // Pending staff (Roster Hub > Setting > Roster Staff Order) always get
     // a row too, same as real staff — so a not-yet-formal hire can be
@@ -238,30 +258,64 @@ export default function RosterEntryGrid({
           then pins the header to the top of THAT region as the rows inside
           it scroll — so the day/date + S/E labels stay visible no matter
           how far down the staff list you scroll. */}
-      <div className="hidden max-h-[65vh] overflow-auto sm:block">
-        <table className="min-w-full border-collapse text-sm">
+      {/* Jeff, 2026-10-03: "將字體縮小一點，欄高縮窄一點(行寬也可以小一點，才
+          不會拉這麼長)，像這個excel一樣不要上下滑動螢幕可以看到全部的資訊" —
+          matched against a reference Excel screenshot: smaller text (text-sm
+          → text-xs throughout), tighter cell padding (py-1.5/py-1 → py-0.5).
+          max-h bumped from 65vh to 80vh on top of that shrinking — between
+          the two, a typical store's staff list now fits without the
+          vertical scroll Jeff was trying to avoid; the sticky header +
+          scroll are kept as a safety net rather than removed outright, for
+          a store with an unusually long staff list.
+          Column widths — first pass (an explicit `w-12` on just the S/E
+          header cells) came out too narrow once `text-xs`'s smaller font
+          met `border-collapse` table's auto layout: Jeff's follow-up
+          ("start跟end的行寬現在太窄了，數字都看不清楚...total hr跟WKD hr不需
+          要這麼寬") caught that Total hr/WKD hr had actually ballooned to
+          fill the leftover space instead, since nothing was constraining
+          them. Switched to an explicit `<colgroup>` + `table-fixed`, which
+          is what actually pins every column's width regardless of its
+          content (`border-collapse` table's default `table-layout: auto`
+          only ever treats declared widths as a hint, not a rule) — S/E
+          widened back up from that first pass's 48px to 64px (close to,
+          but a bit under, how wide they rendered before any of this —
+          Jeff's "跟以前差不多小一點點就好"), Total hr/WKD hr narrowed down
+          to 56px since neither needs room for more than ~5 characters. */}
+      <div className="hidden max-h-[80vh] overflow-auto sm:block">
+        <table className="min-w-full table-fixed border-collapse text-xs">
+          <colgroup>
+            <col className="w-28" />
+            {weekDates.map((d) => (
+              <Fragment key={d}>
+                <col className="w-16" />
+                <col className="w-16" />
+              </Fragment>
+            ))}
+            <col className="w-14" />
+            <col className="w-14" />
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-brand-50">
             <tr>
-              <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-left font-medium text-brand-700">
+              <th rowSpan={2} className="border border-brand-100 px-1.5 py-1 text-left font-medium text-brand-700">
                 Name
               </th>
               {weekDates.map((d) => (
-                <th key={d} colSpan={2} className="border border-brand-100 px-2 py-1 text-center font-medium text-brand-700">
+                <th key={d} colSpan={2} className="border border-brand-100 px-1 py-0.5 text-center font-medium text-brand-700">
                   {weekdayLabel(d)} {d.slice(5)}
                 </th>
               ))}
-              <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
+              <th rowSpan={2} className="border border-brand-100 px-1.5 py-1 text-center font-medium text-brand-700">
                 Total hr
               </th>
-              <th rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-brand-700">
+              <th rowSpan={2} className="border border-brand-100 px-1.5 py-1 text-center font-medium text-brand-700">
                 WKD hr
               </th>
             </tr>
             <tr>
               {weekDates.map((d) => (
                 <Fragment key={d}>
-                  <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">S</th>
-                  <th className="border border-brand-100 px-1 py-1 text-center text-xs font-medium text-brand-600">E</th>
+                  <th className="border border-brand-100 px-0.5 py-0.5 text-center text-[10px] font-medium text-brand-600">S</th>
+                  <th className="border border-brand-100 px-0.5 py-0.5 text-center text-[10px] font-medium text-brand-600">E</th>
                 </Fragment>
               ))}
             </tr>
@@ -281,16 +335,18 @@ export default function RosterEntryGrid({
                   total={total}
                   wkd={wkd}
                   onCheckConflict={checkConflict}
+                  displayFormat={displayFormat}
+                  phases={phases}
                 />
               )
             })}
           </tbody>
           <tfoot>
             <tr className="bg-brand-50 font-medium text-brand-800">
-              <td className="border border-brand-100 px-2 py-1.5" colSpan={15}>
+              <td className="border border-brand-100 px-1.5 py-1" colSpan={15}>
                 Total
               </td>
-              <td className="border border-brand-100 px-2 py-1.5 text-center">{grandTotal || ''}</td>
+              <td className="border border-brand-100 px-1.5 py-1 text-center">{grandTotal || ''}</td>
               <td className="border border-brand-100"></td>
             </tr>
           </tfoot>
@@ -334,6 +390,8 @@ export default function RosterEntryGrid({
                 total={total}
                 wkd={wkd}
                 onCheckConflict={checkConflict}
+                displayFormat={displayFormat}
+                phases={phases}
               />
             )
           })}
@@ -375,7 +433,7 @@ export default function RosterEntryGrid({
   )
 }
 
-function HourInput({ value, onChange, onBlur, disabled, className = '', title }) {
+function HourInput({ value, onChange, onBlur, disabled, className = '', style, title }) {
   return (
     <input
       type="number"
@@ -383,7 +441,8 @@ function HourInput({ value, onChange, onBlur, disabled, className = '', title })
       inputMode="decimal"
       disabled={disabled}
       title={title}
-      className={`input !py-1 text-center ${className}`}
+      className={`input !px-0.5 !py-0.5 text-center text-xs ${className}`}
+      style={style}
       value={value === '' || value == null ? '' : value}
       onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
       onBlur={onBlur}
@@ -391,7 +450,7 @@ function HourInput({ value, onChange, onBlur, disabled, className = '', title })
   )
 }
 
-function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict }) {
+function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -400,11 +459,14 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
   // Only real staff carry a Qualified state at all (Pending/imported/
   // manual rows never do) — not-yet-Qualified shows their name and shift
   // Start/End in red as a quick flag while a manager is building the week.
+  // Only actually used when displayFormat is 'original' — see titleStyle.
   const notQualified = row.kind === 'staff' && !row.qualified
+  const titleStyle = displayFormat !== 'original' && row.kind === 'staff' ? rosterTitleStyle(row, phases, displayFormat) : null
+  const colorStyle = titleStyle?.color ? { color: titleStyle.color } : undefined
   return (
     <>
       <tr>
-        <td className="border border-brand-100 px-2 py-1.5 font-medium text-gray-800">
+        <td className="border border-brand-100 px-1.5 py-1 font-medium text-gray-800">
           {/* ✕ lives right next to the name now (used to be all the way at
               the end of this very wide row, past 14 day columns + both
               totals — easy to lose track of which row it belonged to, and
@@ -414,12 +476,22 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
           <div className="flex items-center gap-1.5">
             <div className="min-w-0 flex-1">
               {row.profileId ? (
-                <span className={notQualified ? 'text-red-600' : undefined} title={notQualified ? 'Not yet Qualified' : undefined}>
+                <span
+                  className={displayFormat === 'original' && notQualified ? 'text-red-600' : undefined}
+                  style={colorStyle}
+                  title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : undefined}
+                >
                   {row.name || <span className="text-gray-400">Unnamed</span>}
+                  {titleStyle?.crown && (
+                    <span className="ml-1" title="Master">
+                      👑
+                    </span>
+                  )}
+                  {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}
                 </span>
               ) : (
                 <input
-                  className="input !py-1"
+                  className="input !px-1.5 !py-0.5 text-xs"
                   placeholder="Name"
                   value={row.name}
                   onChange={(e) => renameRow(row, e.target.value)}
@@ -435,43 +507,45 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
           const entry = findEntry(row, date)
           return (
             <Fragment key={date}>
-              <td className="border border-brand-100 px-1 py-1">
+              <td className="border border-brand-100 px-0.5 py-0.5">
                 <HourInput
                   value={entry?.startTime}
                   disabled={nameEmpty}
                   onChange={(v) => updateCell(row, date, { startTime: v })}
                   onBlur={() => onCheckConflict?.(row, date)}
-                  className={notQualified ? 'text-red-600 font-medium' : ''}
+                  className={displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}
+                  style={colorStyle}
                 />
               </td>
-              <td className="border border-brand-100 px-1 py-1">
+              <td className="border border-brand-100 px-0.5 py-0.5">
                 <HourInput
                   value={entry?.endTime}
                   disabled={nameEmpty}
                   onChange={(v) => updateCell(row, date, { endTime: v })}
                   onBlur={() => onCheckConflict?.(row, date)}
-                  className={notQualified ? 'text-red-600 font-medium' : ''}
+                  className={displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}
+                  style={colorStyle}
                 />
               </td>
             </Fragment>
           )
         })}
-        <td rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center font-medium text-gray-700">
+        <td rowSpan={2} className="border border-brand-100 px-1.5 py-1 text-center font-medium text-gray-700">
           {total || ''}
         </td>
-        <td rowSpan={2} className="border border-brand-100 px-2 py-1.5 text-center text-gray-500">
+        <td rowSpan={2} className="border border-brand-100 px-1.5 py-1 text-center text-gray-500">
           {wkd || ''}
         </td>
       </tr>
       <tr className="bg-gray-50/70">
-        <td className="border border-brand-100 px-2 py-1 text-xs italic text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
+        <td className="border border-brand-100 px-1.5 py-0.5 text-[10px] italic text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
           Break (½h)
         </td>
         {weekDates.map((date) => {
           const entry = findEntry(row, date)
           return (
             <Fragment key={date}>
-              <td className="border border-brand-100 px-1 py-1">
+              <td className="border border-brand-100 px-0.5 py-0.5">
                 <HourInput
                   value={entry?.breakHours}
                   disabled={nameEmpty}
@@ -494,13 +568,15 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
 // instead of two wide table rows. Wk/WKD totals still reflect the whole
 // week (computed the same way as desktop) so switching days doesn't lose
 // sight of the running total.
-function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict }) {
+function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
     ? "Remove from roster (until restored in Roster Hub > Setting > Roster Staff Order)"
     : "Clear this row's hours"
   const notQualified = row.kind === 'staff' && !row.qualified
+  const titleStyle = displayFormat !== 'original' && row.kind === 'staff' ? rosterTitleStyle(row, phases, displayFormat) : null
+  const colorStyle = titleStyle?.color ? { color: titleStyle.color } : undefined
   const entry = findEntry(row, date)
   // Jeff, 2026-10-02: "想辦法讓名字，S/E/B的資訊，刪除跟total work hr的資訊
   // 都放在同一行嗎，名字的字可以再縮小一點讓後面空間大一點" — Start/End/
@@ -521,10 +597,17 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
       <div className="min-w-0 flex-1">
         {row.profileId ? (
           <span
-            className={`block truncate text-xs font-medium ${notQualified ? 'text-red-600' : 'text-gray-800'}`}
-            title={notQualified ? 'Not yet Qualified' : row.name}
+            className={`block truncate text-xs font-medium ${displayFormat === 'original' && notQualified ? 'text-red-600' : 'text-gray-800'}`}
+            style={colorStyle}
+            title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : row.name}
           >
             {row.name || <span className="text-gray-400">Unnamed</span>}
+            {titleStyle?.crown && (
+              <span className="ml-1" title="Master">
+                👑
+              </span>
+            )}
+            {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}
           </span>
         ) : (
           <input
@@ -541,7 +624,8 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
         disabled={nameEmpty}
         onChange={(v) => updateCell(row, date, { startTime: v })}
         onBlur={() => onCheckConflict?.(row, date)}
-        className={`!w-11 shrink-0 !px-0.5 text-xs ${notQualified ? 'text-red-600 font-medium' : ''}`}
+        className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}`}
+        style={colorStyle}
       />
       <span className="shrink-0 text-[10px] font-medium text-gray-400">E</span>
       <HourInput
@@ -549,7 +633,8 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
         disabled={nameEmpty}
         onChange={(v) => updateCell(row, date, { endTime: v })}
         onBlur={() => onCheckConflict?.(row, date)}
-        className={`!w-11 shrink-0 !px-0.5 text-xs ${notQualified ? 'text-red-600 font-medium' : ''}`}
+        className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}`}
+        style={colorStyle}
       />
       <span className="shrink-0 text-[10px] font-medium text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
         B
