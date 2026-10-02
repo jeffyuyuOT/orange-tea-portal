@@ -18,7 +18,7 @@ import StaffStudyDetail from './StaffStudyDetail'
 const HOURS_WARNING_THRESHOLD = 70
 
 export default function LearningTrackerPage() {
-  const { currentStoreId } = useAuth()
+  const { profile, currentStoreId } = useAuth()
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -46,7 +46,22 @@ export default function LearningTrackerPage() {
           // Join store activity unchecked at this (additional) store means
           // they can still view it, but don't count as this store's staff
           // for Learning Tracker (migration 0064, isActiveStoreMember).
-          .filter((p) => p && !NON_PICKABLE_STAFF_ROLES.includes(p.role) && isActiveStoreMember(p, currentStoreId))
+          //
+          // Jeff, 2026-10-02: "develop可以出現在這些裡面，但只有develop自己
+          // 看的到，其他人看不到" — same self-only-visible treatment
+          // StaffTimeLogsPage.jsx already gives 'developer', and for the
+          // same reason (see its 2026-09-30 comment): 'developer' is
+          // deliberately NOT in NON_PICKABLE_STAFF_ROLES, since Learning
+          // Tracker is SUPPOSED to track a developer account as real staff
+          // when one works shifts — just not show it to anyone who isn't
+          // that developer themselves.
+          .filter(
+            (p) =>
+              p &&
+              !NON_PICKABLE_STAFF_ROLES.includes(p.role) &&
+              (p.role !== 'developer' || profile?.role === 'developer') &&
+              isActiveStoreMember(p, currentStoreId)
+          )
         // Re-sort by the same display name shown below, so the list order
         // matches what's actually on screen instead of each person's
         // (possibly different) raw first name.
@@ -57,7 +72,8 @@ export default function LearningTrackerPage() {
       })
   }
 
-  useEffect(load, [currentStoreId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [currentStoreId, profile?.role])
 
   // Re-fetch on the way back from a staff member's detail page — Qualified
   // may have just been granted or cancelled there (StaffStudyDetail.jsx),
