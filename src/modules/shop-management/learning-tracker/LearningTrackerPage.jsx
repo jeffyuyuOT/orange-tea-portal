@@ -123,6 +123,16 @@ export default function LearningTrackerPage() {
             // straight back without needing anything else recomputed.
             const hours = (hoursByProfile[s.id] ?? 0) / 60
             const title = phases.length ? currentTitle(s, phases) : null
+            // Jeff, 2026-10-03: "learning tracker的title顏色要跟著phase的
+            // 顏色" — the title text itself now takes on that phase's own
+            // admin-configured text_color (Admin Center > Training Journey
+            // > Phase Setting), same colors the Training Journey phase
+            // cards use. Master reads as Phase 6's color (has_master_title
+            // overrides the LABEL to "Master" in currentTitle(), but it's
+            // still Phase 6's tier). Phase 0 (Trainee — no phase row to
+            // match) keeps the plain gray this already had.
+            const titlePhaseNumber = s.has_master_title ? 6 : s.training_journey_phase ?? 0
+            const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
             return (
               <button
                 key={s.id}
@@ -136,7 +146,15 @@ export default function LearningTrackerPage() {
                   ) : (
                     <Badge color={hours >= HOURS_WARNING_THRESHOLD ? 'red' : 'gray'}>{hours.toFixed(1)}h worked</Badge>
                   )}
-                  {title && <span className="text-xs font-medium text-gray-400">{s.has_master_title && '👑 '}{title}</span>}
+                  {title && (
+                    <span
+                      className={`text-xs font-medium ${titleColor ? '' : 'text-gray-400'}`}
+                      style={titleColor ? { color: titleColor } : undefined}
+                    >
+                      {s.has_master_title && '👑 '}
+                      {title}
+                    </span>
+                  )}
                 </span>
                 <span className="text-gray-300">›</span>
               </button>

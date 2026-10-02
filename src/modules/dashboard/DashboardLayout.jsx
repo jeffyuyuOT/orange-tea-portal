@@ -18,12 +18,18 @@ export default function DashboardLayout() {
   const { profile, effectivePages, unreadMessageCount } = useAuth()
 
   // Jeff, 2026-10-02 (Training Journey spec, point 6): the current Training
-  // Journey title shown right next to the greeting — "Trainee" (phase 0,
-  // nobody's level-up yet) is deliberately NOT shown here, same spirit as
-  // the red-name "not yet Qualified" flag never cluttering a brand-new
-  // starter's own screen; everyone past that sees their title plainly, with
-  // a crown for Master. Phases barely ever change, so fetched once here
-  // rather than threaded through AuthContext.
+  // Journey title shown right next to the greeting. Phases barely ever
+  // change, so fetched once here rather than threaded through AuthContext.
+  //
+  // Jeff, 2026-10-03: "為什麼jeff test的my dashboard名字後面沒有顯示title，
+  // 是因為是trainee的關係嗎，trainee也要顯示" — yes, "Trainee" (phase 0) used
+  // to be deliberately hidden here; now it shows like every other title.
+  // Same request's other half: "my dashboard名字後面的title也要跟著phase的
+  // 顏色" — matches the same color treatment Learning Tracker's title just
+  // got: that phase's own admin-configured text_color (Phase Setting),
+  // Master reading as Phase 6's color. Phase 0/Trainee has no phase row to
+  // match (phases are only seeded 1-6), so it falls back to the plain gray
+  // this whole badge used to be.
   const [phases, setPhases] = useState([])
   useEffect(() => {
     supabase
@@ -32,15 +38,19 @@ export default function DashboardLayout() {
       .then(({ data }) => setPhases(data ?? []))
   }, [])
   const title = phases.length ? currentTitle(profile, phases) : null
-  const showTitle = title && title !== 'Trainee'
+  const titlePhaseNumber = profile?.has_master_title ? 6 : profile?.training_journey_phase ?? 0
+  const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
 
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold text-gray-900">
         Hi {profile?.first_name || profile?.email}
         <span aria-hidden> 👋</span>
-        {showTitle && (
-          <span className="ml-2 align-middle text-sm font-medium text-gray-400">
+        {title && (
+          <span
+            className={`ml-2 align-middle text-sm font-medium ${titleColor ? '' : 'text-gray-400'}`}
+            style={titleColor ? { color: titleColor } : undefined}
+          >
             ({profile?.has_master_title && <span aria-hidden>👑 </span>}
             {title})
           </span>
