@@ -4,6 +4,7 @@ import { exportBackup, restoreBackup } from '../../../lib/backup'
 import ImportFilePanel from './ImportFilePanel'
 import MenuExportPanel from './MenuExportPanel'
 import SidebarOrderPanel from './SidebarOrderPanel'
+import RosterDisplayFormatPanel from './RosterDisplayFormatPanel'
 
 export default function SystemSettingPage() {
   const [busy, setBusy] = useState(false)
@@ -51,6 +52,8 @@ export default function SystemSettingPage() {
       </section>
 
       <SidebarOrderPanel />
+
+      <RosterDisplayFormatPanel />
 
       <MenuExportPanel />
 

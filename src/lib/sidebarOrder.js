@@ -91,7 +91,14 @@ export function orderedPageEntries(sectionKey, order) {
 // group as a single unit rather than the three keys separately).
 export const PAGE_GROUPS = {
   shop_management: [
-    { key: 'training_centre', label: 'Training Centre', pages: ['quiz_bank', 'shop_training_database', 'training_code'] },
+    {
+      key: 'training_centre',
+      label: 'Training Centre',
+      // Jeff, 2026-10-02: 'training_journey_setting' joined this group the
+      // same way 'training_code' did — a fourth Training Centre tab, one
+      // more Sidebar row member rather than its own separate row.
+      pages: ['quiz_bank', 'shop_training_database', 'training_code', 'training_journey_setting'],
+    },
   ],
 }
 

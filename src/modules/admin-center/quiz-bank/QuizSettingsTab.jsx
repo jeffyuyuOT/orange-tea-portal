@@ -77,6 +77,20 @@ export default function QuizSettingsTab() {
   const [formalQuestionCount, setFormalQuestionCount] = useState(30)
   const [reminderMonths, setReminderMonths] = useState(3)
 
+  // Jeff, 2026-10-02 (Training Journey spec, point 10): Master Exam's own
+  // settings (master_quiz_settings table, migration 0091 — a true
+  // singleton, same shape as formal_quiz_settings). error_tolerance is how
+  // many NON-must-know questions can be missed and still pass — a missed
+  // must-know-linked question always fails regardless (see
+  // MasterExamModal.jsx/examBuilders.js). reminder_period_months is the
+  // Master title-defense cadence — deliberately separate from Formal Quiz's
+  // reminderMonths above, since a Master titleholder defends on their own
+  // schedule, not the Advanced one (recordMasterExamResult in
+  // trainingJourney.js).
+  const [masterQuestionCount, setMasterQuestionCount] = useState(30)
+  const [masterErrorTolerance, setMasterErrorTolerance] = useState(0)
+  const [masterReminderMonths, setMasterReminderMonths] = useState(3)
+
   // Quiz Bank block — one shared Importance Mix feeding BOTH quiz types'
   // pull from the curated question bank (Admin + Branch together).
   const [importanceRatio, setImportanceRatio] = useState({ 1: 50, 2: 30, 3: 20 })
@@ -94,7 +108,8 @@ export default function QuizSettingsTab() {
     Promise.all([
       supabase.from('quiz_settings').select('*').maybeSingle(),
       supabase.from('formal_quiz_settings').select('*').maybeSingle(),
-    ]).then(([{ data: quick }, { data: formal }]) => {
+      supabase.from('master_quiz_settings').select('*').maybeSingle(),
+    ]).then(([{ data: quick }, { data: formal }, { data: master }]) => {
       if (quick) {
         setQuickQuestionCount(quick.question_count)
         setReminderMonths(quick.reminder_period_months ?? 3)
@@ -102,6 +117,11 @@ export default function QuizSettingsTab() {
       if (formal) {
         setFormalQuestionCount(formal.question_count)
         setTop10Weight(formal.top10_fill_blank_weight ?? 3)
+      }
+      if (master) {
+        setMasterQuestionCount(master.question_count ?? 30)
+        setMasterErrorTolerance(master.error_tolerance ?? 0)
+        setMasterReminderMonths(master.reminder_period_months ?? 3)
       }
       // Either table's importance_ratio is the same shared value once this
       // has been saved at least once from this merged UI — prefer
@@ -121,7 +141,7 @@ export default function QuizSettingsTab() {
 
   async function save() {
     setSaving(true)
-    const [{ error: quickError }, { error: formalError }] = await Promise.all([
+    const [{ error: quickError }, { error: formalError }, { error: masterError }] = await Promise.all([
       supabase.from('quiz_settings').update({
         question_count: quickQuestionCount,
         importance_ratio: importanceRatio,
@@ -134,10 +154,16 @@ export default function QuizSettingsTab() {
         fill_in_blank_ratio: fillBlankRatio,
         top10_fill_blank_weight: top10Weight,
       }).eq('singleton', true),
+      supabase.from('master_quiz_settings').update({
+        question_count: masterQuestionCount,
+        error_tolerance: masterErrorTolerance,
+        reminder_period_months: masterReminderMonths,
+      }).eq('singleton', true),
     ])
     setSaving(false)
     if (quickError) alert(quickError.message)
     else if (formalError) alert(formalError.message)
+    else if (masterError) alert(masterError.message)
   }
 
   const importanceTotal = Number(importanceRatio[1]) + Number(importanceRatio[2]) + Number(importanceRatio[3])
@@ -197,6 +223,53 @@ export default function QuizSettingsTab() {
           <p className="mt-2 text-xs text-gray-400">
             If a staff member has no quiz attempt within this window, a reminder to take the quiz appears on the
             Bulletin Board — visible to that staff member, this store's manager, and admin.
+          </p>
+        </section>
+
+        {/* Master Exam — Training Journey spec point 10. Its own section,
+            separate from Formal Quiz's above, including its own reminder
+            cadence (the Master title-defense clock, distinct from Advanced's). */}
+        <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-indigo-700">🎓 Master Quiz</h3>
+          <div className="flex flex-wrap gap-4">
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Master Exam</span>
+              <input
+                type="number"
+                className="input"
+                value={masterQuestionCount}
+                onChange={(e) => setMasterQuestionCount(Number(e.target.value))}
+              />
+            </label>
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Error tolerance (non-must-know misses allowed)</span>
+              <input
+                type="number"
+                min={0}
+                className="input"
+                value={masterErrorTolerance}
+                onChange={(e) => setMasterErrorTolerance(Number(e.target.value))}
+              />
+            </label>
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Title defense cadence</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">Every</span>
+                <input
+                  type="number"
+                  min={1}
+                  className="input w-20"
+                  value={masterReminderMonths}
+                  onChange={(e) => setMasterReminderMonths(Number(e.target.value))}
+                />
+                <span className="text-sm text-gray-400">months</span>
+              </div>
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
+            Any missed question linked to a Must-Know item always fails the Master Exam, regardless of the error
+            tolerance above — tolerance only covers non-must-know misses. A Master titleholder's recurring title
+            defense runs on this cadence, separate from Formal Quiz's Advanced defense cadence above.
           </p>
         </section>
 

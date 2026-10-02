@@ -15,6 +15,11 @@ const TABS = [
   { key: 'shop_management.quiz_bank', to: '/shop-management/quiz-bank', label: 'Branch Quiz Bank' },
   { key: 'shop_management.shop_training_database', to: '/shop-management/shop-training-database', label: 'Shop Training Database' },
   { key: 'shop_management.training_code', to: '/shop-management/training-code', label: 'Training Code' },
+  // Jeff, 2026-10-02 (Training Journey spec, point 5): this store's own
+  // Must-Know shop training item → phase assignment — see
+  // TrainingJourneySettingPage.jsx's own comment for how this pairs with
+  // Admin Center's equivalent "Phase Item" tab for formula items.
+  { key: 'shop_management.training_journey_setting', to: '/shop-management/training-journey-setting', label: '🏆 Training Journey Setting' },
 ]
 
 export default function TrainingCentreLayout() {

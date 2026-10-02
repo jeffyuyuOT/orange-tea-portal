@@ -5,6 +5,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
+import { loadRosterDisplaySettings, rosterTitleStyle } from '../../../lib/trainingJourney'
 
 // Renders one week's schedule as a grid: staff down the side, weekdays
 // across the top. Used by both "My Roster" (filtered to one staff member)
@@ -28,6 +29,21 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
   // since that page is about THIS person's own shifts, not who's on the
   // roster in general.
   const [activeRoster, setActiveRoster] = useState([])
+
+  // Jeff, 2026-10-02 (Training Journey spec, point 6): System Setting >
+  // Roster Name Display Format + the 6 phase definitions — fetched once
+  // (these barely ever change), not re-fetched every time `period` changes.
+  // 'original' is the default and preserves today's exact qualified-only
+  // red/default behavior below untouched.
+  const [displayFormat, setDisplayFormat] = useState('original')
+  const [phases, setPhases] = useState([])
+  useEffect(() => {
+    loadRosterDisplaySettings().then(setDisplayFormat)
+    supabase
+      .from('training_journey_phases')
+      .select('*')
+      .then(({ data }) => setPhases(data ?? []))
+  }, [])
 
   useEffect(() => {
     // No published period for this week (e.g. next week's roster hasn't
@@ -80,9 +96,16 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         .select('id, display_name, roster_display_name, roster_order, hidden_from_roster')
         .eq('store_id', period.store_id),
       supabase.rpc('store_roster_profiles', { p_store_id: period.store_id }),
-    ]).then(([{ data }, { data: nameRows }, { data: pendingRows }, { data: profileRows }]) => {
+      // Jeff, 2026-10-02 (Training Journey spec, point 6): a second, equally
+      // narrow RPC (migration 0092) for the two Training Journey fields the
+      // title display modes below need — see store_roster_titles' own
+      // comment for why this is a separate function rather than two more
+      // columns bolted onto store_roster_profiles.
+      supabase.rpc('store_roster_titles', { p_store_id: period.store_id }),
+    ]).then(([{ data }, { data: nameRows }, { data: pendingRows }, { data: profileRows }, { data: titleRows }]) => {
       if (!active) return
-      const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]))
+      const titleById = new Map((titleRows ?? []).map((t) => [t.id, t]))
+      const profileById = new Map((profileRows ?? []).map((p) => [p.id, { ...p, ...titleById.get(p.id) }]))
       const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
       const orderByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_order]))
       const orderByPendingName = new Map((pendingRows ?? []).map((p) => [pendingRosterName(p).toLowerCase(), p.roster_order]))
@@ -118,6 +141,8 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
             name: rosterDisplayName({ ...r.profiles, roster_display_name: r.roster_display_name }),
             isStaff: true,
             qualified: r.profiles.qualified === true,
+            training_journey_phase: r.profiles.training_journey_phase,
+            has_master_title: r.profiles.has_master_title,
             order: r.roster_order,
           }))
         const activePending = (pendingRows ?? [])
@@ -163,6 +188,8 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         name: e.profiles ? rosterDisplayName(e.profiles) : e.staff_name_raw,
         isStaff: !!e.profile_id,
         qualified: e.profiles?.qualified === true,
+        training_journey_phase: e.profiles?.training_journey_phase,
+        has_master_title: e.profiles?.has_master_title,
         order: e.profile_id ? orderByProfile.get(e.profile_id) : orderByPendingName.get((e.staff_name_raw || '').toLowerCase()),
       },
     ])
@@ -209,18 +236,40 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
             // Not-yet-Qualified (profiles.qualified) real staff get their
             // name and shift time shown in red — same flag/reasoning as
             // Manage Roster's grid. Pending/imported/manual names
-            // (isStaff false) never carry this concept.
+            // (isStaff false) never carry this concept. Only actually used
+            // when displayFormat is 'original' — see titleStyle below for
+            // the two Training Journey title display modes.
             const notQualified = info.isStaff && !info.qualified
+            // Jeff, 2026-10-02 (Training Journey spec, point 6): under
+            // 'title_crown'/'title_no_crown', name/time color comes from
+            // this instead — null in 'original' mode, so the ?? fallbacks
+            // below just render exactly as they always have.
+            const titleStyle = displayFormat !== 'original' && info.isStaff ? rosterTitleStyle(info, phases, displayFormat) : null
+            const nameColorStyle = titleStyle?.color ? { color: titleStyle.color } : undefined
+            const timeClassName = `whitespace-nowrap ${
+              displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''
+            }`
             return (
               <tr key={key}>
                 <td className="sticky left-0 z-10 bg-white px-2 py-1.5 font-medium text-gray-700 sm:px-3 sm:py-2">
-                  <div className={notQualified ? 'text-red-600' : undefined} title={notQualified ? 'Not yet Qualified' : undefined}>
+                  <div
+                    className={displayFormat === 'original' && notQualified ? 'text-red-600' : undefined}
+                    style={nameColorStyle}
+                    title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : undefined}
+                  >
                     {info.name || 'Unassigned'}
+                    {titleStyle?.crown && (
+                      <span className="ml-1" title="Master">
+                        👑
+                      </span>
+                    )}
+                    {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}
                   </div>
                   {/* "Break" label lives once under the name (in red) instead of being
                       repeated in every day cell — each cell below then only needs to
                       show the count, per Jeff, since everyone already knows what it
-                      refers to and one break = 30 min. */}
+                      refers to and one break = 30 min. Stays red in every display
+                      format — never tied to qualified/title, per Jeff. */}
                   <div className="text-[11px] font-normal text-red-500 sm:text-xs">Break</div>
                 </td>
                 {days.map((d) => {
@@ -232,7 +281,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                     <td key={dayStr} className="px-2 py-1.5 text-gray-600 sm:px-3 sm:py-2">
                       {shift ? (
                         <>
-                          <div className={`whitespace-nowrap ${notQualified ? 'text-red-600 font-medium' : ''}`}>
+                          <div className={timeClassName} style={nameColorStyle}>
                             {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
                           </div>
                           {shift.break_half_hours ? (

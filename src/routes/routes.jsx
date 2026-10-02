@@ -36,6 +36,7 @@ import FileRepositoryPage from '../modules/admin-center/file-repository/FileRepo
 import UserManagementPage from '../modules/admin-center/user-management/UserManagementPage'
 import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
 import SystemSettingPage from '../modules/admin-center/system-setting/SystemSettingPage'
+import AdminTrainingJourneySettingPage from '../modules/admin-center/training-journey/AdminTrainingJourneySettingPage'
 
 import PayrollPage from '../modules/developer/payroll/PayrollPage'
 
@@ -52,6 +53,7 @@ import TrainingCentreLayout from '../modules/shop-management/training-centre/Tra
 import TrainingCentreQuizBankPage from '../modules/shop-management/training-centre/quiz-bank/QuizBankPage'
 import TrainingCentreShopTrainingDatabasePage from '../modules/shop-management/training-centre/shop-training-database/ShopTrainingDatabasePage'
 import TrainingCentreTrainingCodePage from '../modules/shop-management/training-centre/training-code/TrainingCodePage'
+import TrainingCentreTrainingJourneySettingPage from '../modules/shop-management/training-centre/training-journey-setting/TrainingJourneySettingPage'
 
 function guarded(pageKey, element) {
   return <RequirePage pageKey={pageKey}>{element}</RequirePage>
@@ -126,6 +128,10 @@ export default function AppRoutes() {
             element={guarded('shop_management.shop_training_database', <TrainingCentreShopTrainingDatabasePage />)}
           />
           <Route path="/shop-management/training-code" element={guarded('shop_management.training_code', <TrainingCentreTrainingCodePage />)} />
+          <Route
+            path="/shop-management/training-journey-setting"
+            element={guarded('shop_management.training_journey_setting', <TrainingCentreTrainingJourneySettingPage />)}
+          />
         </Route>
 
         <Route path="/shop-management/staff-time-logs" element={guarded('shop_management.staff_time_logs', <StaffTimeLogsPage />)} />
@@ -144,6 +150,10 @@ export default function AppRoutes() {
         <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
         <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />
         <Route path="/admin-center/system-setting" element={guarded('admin_center.system_setting', <SystemSettingPage />)} />
+        <Route
+          path="/admin-center/training-journey-setting"
+          element={guarded('admin_center.training_journey_setting', <AdminTrainingJourneySettingPage />)}
+        />
 
         <Route path="/developer-tools/payroll" element={guarded('developer_tools.payroll', <PayrollPage />)} />
 

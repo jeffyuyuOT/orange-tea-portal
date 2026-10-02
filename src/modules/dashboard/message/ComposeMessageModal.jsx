@@ -41,6 +41,15 @@ function nameOf(p) {
 // different store than the one they currently have selected must not have
 // their reply filed under whatever store they happened to be on; see the
 // longer comment on MessageDetailModal.jsx.
+// Jeff, 2026-10-03: "developer新增message時，寄件者選擇裡最上面有一個all選
+// 項，選擇all的話則會寄給所有分店所有user，但對方看到的寄件者會變成系統，用
+// 來發布系統訊息用" — a developer-only "All" option at the top of the To
+// list, for brand-new messages only (not Reply/Reply All/Forward — see
+// `canBroadcast` below). Checking it ignores the normal same-store
+// recipient picker entirely and sends to every active user at every store;
+// the message's sender_name is stamped as "System" instead of this
+// developer's own display name, so it reads to every recipient as an
+// official system announcement, not a personal message from that account.
 export default function ComposeMessageModal({ storeId, senderProfile, initial, onClose, onSent }) {
   const [subject, setSubject] = useState(initial?.subject ?? '')
   const [content, setContent] = useState(initial?.content ?? '')
@@ -53,6 +62,8 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
   // reason this store's user_stores row isn't found below.
   const [senderDisplayName, setSenderDisplayName] = useState(nameOf(senderProfile))
   const [sending, setSending] = useState(false)
+  const [sendToAll, setSendToAll] = useState(false)
+  const canBroadcast = senderProfile.role === 'developer' && !initial?.inReplyTo
 
   useEffect(() => {
     if (!storeId) return
@@ -82,14 +93,24 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
   }
 
   async function send() {
-    if (!subject.trim() || !recipientIds.length) return
+    if (!subject.trim() || (!sendToAll && !recipientIds.length)) return
     setSending(true)
+
+    // Broadcast mode ignores the same-store candidate picker entirely — the
+    // recipient set is every active user, every store, resolved fresh at
+    // send time rather than from whatever happened to be in `candidates`.
+    let finalRecipientIds = recipientIds
+    if (sendToAll) {
+      const { data: allProfiles } = await supabase.from('profiles').select('id').eq('is_active', true).neq('id', senderProfile.id)
+      finalRecipientIds = (allProfiles ?? []).map((p) => p.id)
+    }
+
     const { data: msg, error } = await supabase
       .from('messages')
       .insert({
         store_id: storeId,
         sender_id: senderProfile.id,
-        sender_name: senderDisplayName,
+        sender_name: sendToAll ? 'System' : senderDisplayName,
         subject: subject.trim(),
         content_html: content,
         in_reply_to: initial?.inReplyTo ?? null,
@@ -103,7 +124,7 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
     }
     const { error: recError } = await supabase
       .from('message_recipients')
-      .insert(recipientIds.map((id) => ({ message_id: msg.id, profile_id: id })))
+      .insert(finalRecipientIds.map((id) => ({ message_id: msg.id, profile_id: id })))
     setSending(false)
     if (recError) {
       alert(`Send failed: ${recError.message}`)
@@ -123,7 +144,7 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={send} disabled={sending || !subject.trim() || !recipientIds.length}>
+          <Button onClick={send} disabled={sending || !subject.trim() || (!sendToAll && !recipientIds.length)}>
             {sending ? 'Sending…' : 'Send'}
           </Button>
         </>
@@ -132,10 +153,21 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
       <div className="space-y-3">
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">To</span>
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2">
+          {canBroadcast && (
+            <label className="mb-1.5 flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 text-sm font-medium text-brand-700">
+              <input type="checkbox" checked={sendToAll} onChange={(e) => setSendToAll(e.target.checked)} />
+              📢 All — every store, every user (sent as "System")
+            </label>
+          )}
+          <div className={`max-h-40 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 ${sendToAll ? 'opacity-40' : ''}`}>
             {candidates.map((c) => (
               <label key={c.id} className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={recipientIds.includes(c.id)} onChange={() => toggleRecipient(c.id)} />
+                <input
+                  type="checkbox"
+                  checked={recipientIds.includes(c.id)}
+                  disabled={sendToAll}
+                  onChange={() => toggleRecipient(c.id)}
+                />
                 {nameOf(c)}
               </label>
             ))}

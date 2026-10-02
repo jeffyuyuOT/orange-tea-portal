@@ -7,6 +7,7 @@ import { rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { getWorkedMinutesByProfile } from '../../../lib/attendance'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
+import { currentTitle } from '../../../lib/trainingJourney'
 import StaffStudyDetail from './StaffStudyDetail'
 
 // Jeff, 2026-09: past this many hours worked, still unqualified, the hours
@@ -28,6 +29,18 @@ export default function LearningTrackerPage() {
   // batch query either way and Qualified can be toggled off again later
   // (StaffStudyDetail's cancelQualified) without a full list reload.
   const [hoursByProfile, setHoursByProfile] = useState({})
+  // Jeff, 2026-10-03: "learning tracker 名字後面顯示qualified or worked
+  // hour，再顯示title" — the Training Journey title shown after the
+  // existing Qualified/hours badge, same `currentTitle()` helper the
+  // dashboard greeting and roster coloring already use. Phases barely ever
+  // change, so fetched once here rather than per staff row.
+  const [phases, setPhases] = useState([])
+  useEffect(() => {
+    supabase
+      .from('training_journey_phases')
+      .select('*')
+      .then(({ data }) => setPhases(data ?? []))
+  }, [])
 
   function load() {
     if (!currentStoreId) return
@@ -109,6 +122,7 @@ export default function LearningTrackerPage() {
             // Qualified button in StaffStudyDetail) brings the hours badge
             // straight back without needing anything else recomputed.
             const hours = (hoursByProfile[s.id] ?? 0) / 60
+            const title = phases.length ? currentTitle(s, phases) : null
             return (
               <button
                 key={s.id}
@@ -122,6 +136,7 @@ export default function LearningTrackerPage() {
                   ) : (
                     <Badge color={hours >= HOURS_WARNING_THRESHOLD ? 'red' : 'gray'}>{hours.toFixed(1)}h worked</Badge>
                   )}
+                  {title && <span className="text-xs font-medium text-gray-400">{s.has_master_title && '👑 '}{title}</span>}
                 </span>
                 <span className="text-gray-300">›</span>
               </button>

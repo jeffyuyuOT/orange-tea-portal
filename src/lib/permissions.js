@@ -76,6 +76,12 @@ export const SECTIONS = {
       quiz_bank: 'Branch Quiz Bank',
       shop_training_database: 'Shop Training Database',
       training_code: 'Training Code',
+      // Jeff, 2026-10-02 (Training Journey spec, point 5): assigns this
+      // store's own Must-Know shop training items to a Training Journey
+      // phase — a fourth Training Centre tab, folded into the same
+      // "Training Centre" Sidebar row as the other three (see
+      // sidebarOrder.js's PAGE_GROUPS.shop_management entry).
+      training_journey_setting: 'Training Journey Setting',
       staff_time_logs: 'Staff Time Logs',
       // Not a real "manage this" page — just the rotating QR display meant
       // to sit on a phone in the store. Excluded from shop_manager's default
@@ -115,6 +121,11 @@ export const SECTIONS = {
       user_management: 'User Management',
       store_management: 'Store Management',
       system_setting: 'System Setting',
+      // Jeff, 2026-10-02 (Training Journey spec, point 5): assigns Must-Know
+      // formula items to a phase + edits each phase's color/hours/Level-Up
+      // Exam question count — admin/developer only, same exclusion
+      // treatment as every other Admin Center settings page below.
+      training_journey_setting: 'Training Journey Setting',
     },
   },
   // Hidden from everyone except the developer role itself — see
@@ -183,6 +194,7 @@ const ROLE_DEFAULTS = {
         'admin_center.user_management',
         'admin_center.store_management',
         'admin_center.system_setting',
+        'admin_center.training_journey_setting',
         'shop_management.qr_code',
         'developer_tools.payroll',
       ].includes(key)

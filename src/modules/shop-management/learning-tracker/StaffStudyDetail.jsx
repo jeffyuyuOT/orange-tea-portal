@@ -3,34 +3,46 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import StudyLogList from '../../dashboard/study-log/StudyLogList'
-import ProgressChartModal from '../../dashboard/study-log/ProgressChartModal'
 import StudySummaryModal from '../../dashboard/study-log/StudySummaryModal'
 import AttemptDetailModal from '../../dashboard/study-log/AttemptDetailModal'
+import TrainingJourneyPage from '../../dashboard/study-log/TrainingJourneyPage'
+import Modal from '../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Badge from '../../../components/ui/Badge'
+import Button from '../../../components/ui/Button'
 import { rosterDisplayName } from '../../../lib/excelRoster'
+import { startAdvancedDefenseClock } from '../../../lib/trainingJourney'
 
-const QUIZ_TYPE_LABEL = { quick: 'Quick Quiz', formal: 'Formal Quiz' }
+const QUIZ_TYPE_LABEL = {
+  quick: 'Quick Quiz',
+  formal: 'Formal Quiz',
+  level_up: 'Level-Up Exam',
+  master: 'Master Exam',
+  mock_formal: 'Mock Formal Quiz',
+  mock_master: 'Mock Master Exam',
+}
 
-// Jeff, 2026-09: "從learning tracker觀看某員工時，一樣將quiz history,
-// progress chart跟study summary放在performance的tab (跟從my study log進去
-//一樣)" — same second-level picker as StudyLogPage.jsx's own Performance
-// tab (My Dashboard > Study Log), so both the self-view and this manager
-// view organize the three the same way. Quiz History still renders as its
-// own custom list here (not the shared QuizHistoryList) because this view,
-// unlike the self-view, has the Pass checkbox/review flow (togglePass
-// below) — that's the one piece that can't just delegate to the shared
-// component.
-const PERFORMANCE_VIEWS = [
-  { key: 'history', label: '🧾 Quiz History' },
-  { key: 'chart', label: '📈 Progress chart' },
-  { key: 'summary', label: '📊 Study summary' },
+const TABS = [
+  { key: 'study_log', label: 'Study Log' },
+  { key: 'training_journey', label: '🏆 Training Journey' },
 ]
 
+// Jeff, 2026-10-02 (Training Journey spec, points 1-2, applied to the
+// manager view too): the old "Performance" tab (Quiz History / Progress
+// chart / Study summary) is gone here too — Progress chart is removed
+// entirely, and Quiz History / Study Summary are now two buttons next to
+// the staff member's name, each opening as a popup. Quiz History still
+// renders as its own custom list here (not the shared QuizHistoryList)
+// because this view has the manager-only Pass checkbox (togglePass below)
+// — that's the one piece that can't just delegate to the shared component.
+// This staff member's Training Journey progress now has its own tab here
+// too (isSelf=false — read-only, no exam-taking buttons: see
+// TrainingJourneyPage's own comment).
 export default function StaffStudyDetail({ staff, onBack }) {
   const { profile, currentStoreId } = useAuth()
-  const [tab, setTab] = useState('progress') // 'progress' | 'performance'
-  const [performanceView, setPerformanceView] = useState('history') // 'history' | 'chart' | 'summary'
+  const [tab, setTab] = useState('study_log')
+  const [showHistory, setShowHistory] = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
   const [attempts, setAttempts] = useState([])
   const [loading, setLoading] = useState(true)
   const [openAttempt, setOpenAttempt] = useState(null)
@@ -82,8 +94,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
   // Jeff, 2026-09-30: "然後formal考試manager在審核的時候也只會check menu
   // item跟shop training並跳出警示說明哪裡還沒memorized。沒有被勾取menu
   // item的飲料等於非必要背記的飲料，但study log的勾選還是保留" (the flag
-  // was renamed the same day, before shipping, to "Must-Know Items" and
-  // extended to Shop Training too — see below) -- deliberately a SEPARATE
+  // was renamed the same day, before shipping, to "Must-Know Items") -- deliberately a SEPARATE
   // function from visibleFormulaItems() above (not just that one filtered)
   // since markAllCurrentItemsMemorized() ("Mark as Qualified") still
   // snapshots every visible item as memorized, must-know or not — only the
@@ -102,14 +113,6 @@ export default function StaffStudyDetail({ staff, onBack }) {
   // Quiz Pass. Shop Training items don't carry a name_zh, so they're shaped
   // the same as a formula item (name_en/name_zh) purely so the warning
   // message below can list both kinds with the one .map() it already had.
-  //
-  // Jeff, 2026-09-30 (same-day revision): "shop training的部分也要有
-  // Must-Know Items勾選選項" -- Shop Training items now carry their own
-  // is_must_know flag (migration 0082) too, so this check is narrowed the
-  // same way the drink side already is: only must-know Shop Training items
-  // count as required here (a non-must-know one still keeps its own Study
-  // Log "Memorized" self-tracking checkbox, just isn't required for
-  // approval), mirroring the drink side exactly.
   async function getUnmemorizedItems() {
     const [mustKnowItems, { data: progressRows }, { data: trainingItems }, { data: trainingProgressRows }] = await Promise.all([
       visibleMustKnowItems(),
@@ -136,15 +139,6 @@ export default function StaffStudyDetail({ staff, onBack }) {
   // permanent lock: the staff member can still un-tick individual items
   // afterward in Study Log, and any formula added later still needs its
   // own manual tick, same as anyone else.
-  //
-  // Jeff, 2026-09 (later): a Formal Quiz Pass used to trigger this too, but
-  // that silently overwrote study_progress to make it LOOK consistent with
-  // the Pass — if a manager overrode the "hasn't ticked Memorized for every
-  // item" warning below, everything that staff member hadn't actually
-  // memorized got force-marked memorized anyway. Passing the quiz should
-  // grant Qualified without rewriting what Study Log says they've actually
-  // learned, so togglePass below no longer calls this — only the explicit
-  // "Mark as Qualified" shortcut does.
   async function markAllCurrentItemsMemorized() {
     const visibleItems = await visibleFormulaItems()
     if (!visibleItems.length) return
@@ -165,10 +159,6 @@ export default function StaffStudyDetail({ staff, onBack }) {
     // 0049) — only grant, never revoke, from here: unchecking one attempt's
     // Pass (e.g. fixing a mis-click) shouldn't silently cancel Qualified —
     // that's a deliberate, confirmed action of its own (cancelQualified).
-    // Jeff, 2026-09: this used to hard-block the Pass if any item wasn't
-    // memorized yet — now it's a warning a manager can override, since a
-    // staff member may know every drink but not yet have learned opening
-    // duties (or similar), and a manager may still want to qualify them.
     if (attempt.quiz_type === 'formal' && checked && !qualified) {
       const unmemorized = await getUnmemorizedItems()
       if (
@@ -199,12 +189,29 @@ export default function StaffStudyDetail({ staff, onBack }) {
       setQualified(true)
       await supabase
         .from('profiles')
-        .update({ qualified: true, qualified_at: new Date().toISOString(), qualified_by: profile.id })
+        .update({
+          qualified: true,
+          qualified_at: new Date().toISOString(),
+          qualified_by: profile.id,
+          // Jeff, 2026-10-03: "目前mark qualified的員工就有advanced title" —
+          // qualified has always MEANT "holds at least Advanced" (see this
+          // column's own comment in migration 0091), so the title system
+          // (Learning Tracker/dashboard/roster) needs to agree: bump the
+          // Training Journey phase up to 5 right here too, not just the
+          // defense clock, in case this staff member reached Qualified via
+          // Formal Quiz before ever doing a Phase 1-5 Level-Up Exam. Only
+          // bumps up, never down — someone who already reached Phase 5 (or
+          // beyond, Master) via Level-Up keeps whatever they've already got.
+          ...((staff.training_journey_phase ?? 0) < 5 ? { training_journey_phase: 5 } : {}),
+        })
         .eq('id', staff.id)
       // No markAllCurrentItemsMemorized() here — see the comment on that
       // function above. Passing grants Qualified only; overriding the
       // unmemorized-items warning no longer rewrites study_progress, so
       // Study Log keeps showing what this staff member has actually ticked.
+      // Training Journey spec point 7: this is the moment the Advanced
+      // title-defense clock starts (3 months from today).
+      await startAdvancedDefenseClock(staff.id)
     }
   }
 
@@ -222,9 +229,20 @@ export default function StaffStudyDetail({ staff, onBack }) {
     setQualified(true)
     await supabase
       .from('profiles')
-      .update({ qualified: true, qualified_at: new Date().toISOString(), qualified_by: profile.id })
+      .update({
+        qualified: true,
+        qualified_at: new Date().toISOString(),
+        qualified_by: profile.id,
+        // See the same comment on togglePass above — Qualified means at
+        // least Advanced, so the title has to agree even when granted this
+        // direct way, bypassing any Level-Up Exam entirely.
+        ...((staff.training_journey_phase ?? 0) < 5 ? { training_journey_phase: 5 } : {}),
+      })
       .eq('id', staff.id)
     await markAllCurrentItemsMemorized()
+    // Training Journey spec point 7: starts the Advanced title-defense
+    // clock here too, same as the Formal Quiz Pass path above.
+    await startAdvancedDefenseClock(staff.id)
   }
 
   async function cancelQualified() {
@@ -238,7 +256,20 @@ export default function StaffStudyDetail({ staff, onBack }) {
     setQualified(false)
     await supabase
       .from('profiles')
-      .update({ qualified: false, qualified_at: new Date().toISOString(), qualified_by: profile.id })
+      .update({
+        qualified: false,
+        qualified_at: new Date().toISOString(),
+        qualified_by: profile.id,
+        // Mirrors the 3-strike disqualify reset (trainingJourney.js's
+        // recordFormalDefenseResult) — cancelling Qualified this direct way
+        // is the same end state as losing a title defense: no longer
+        // holding Advanced, so the title/defense-clock fields need to drop
+        // back in step, not just the qualified flag.
+        ...((staff.training_journey_phase ?? 0) >= 5 ? { training_journey_phase: 4 } : {}),
+        has_master_title: false,
+        title_defense_due_at: null,
+        title_defense_attempts_used: 0,
+      })
       .eq('id', staff.id)
   }
 
@@ -247,62 +278,62 @@ export default function StaffStudyDetail({ staff, onBack }) {
       <button onClick={onBack} className="mb-3 text-sm font-medium text-brand-600 hover:underline">
         ← All staff
       </button>
-      <h1 className="mb-4 flex items-center gap-2 text-xl font-semibold text-gray-900">
-        {rosterDisplayName(staff)}
-        {qualified ? (
-          <>
-            <Badge color="green">Qualified</Badge>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="flex items-center gap-2 text-xl font-semibold text-gray-900">
+          {rosterDisplayName(staff)}
+          {qualified ? (
+            <>
+              <Badge color="green">Qualified</Badge>
+              <button
+                onClick={cancelQualified}
+                className="text-xs font-medium text-red-500 hover:underline"
+                title="Cancel Qualified status"
+              >
+                Cancel Qualified
+              </button>
+            </>
+          ) : (
             <button
-              onClick={cancelQualified}
-              className="text-xs font-medium text-red-500 hover:underline"
-              title="Cancel Qualified status"
+              onClick={markQualified}
+              className="text-xs font-medium text-brand-600 hover:underline"
+              title="Mark as Qualified directly, without a Formal Quiz review"
             >
-              Cancel Qualified
+              Mark as Qualified
             </button>
-          </>
-        ) : (
-          <button
-            onClick={markQualified}
-            className="text-xs font-medium text-brand-600 hover:underline"
-            title="Mark as Qualified directly, without a Formal Quiz review"
-          >
-            Mark as Qualified
-          </button>
-        )}
-      </h1>
+          )}
+        </h1>
+        <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1">
+          <Button className="!px-3 !py-1.5 text-xs" variant="secondary" onClick={() => setShowHistory(true)}>
+            🧾 Quiz History
+          </Button>
+          <Button className="!px-3 !py-1.5 text-xs" variant="secondary" onClick={() => setShowSummary(true)}>
+            📊 Study Summary
+          </Button>
+        </div>
+      </div>
 
-      <div className="mb-4 inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
-        {[
-          { key: 'progress', label: 'Learning & Progress' },
-          { key: 'performance', label: 'Performance' },
-        ].map((t) => (
+      <div className="mb-4 flex gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1">
+        {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === t.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'}`}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              tab === t.key ? 'bg-white text-brand-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      {tab === 'progress' ? (
-        <StudyLogList key={`${staff.id}-${progressVersion}`} profileId={staff.id} qualified={qualified} />
+      {tab === 'training_journey' ? (
+        <TrainingJourneyPage profileId={staff.id} isSelf={false} />
       ) : (
-        <div>
-          <div className="mb-4 flex w-fit items-center gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1">
-            {PERFORMANCE_VIEWS.map((v) => (
-              <button
-                key={v.key}
-                onClick={() => setPerformanceView(v.key)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium ${
-                  performanceView === v.key ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'
-                }`}
-              >
-                {v.label}
-              </button>
-            ))}
-          </div>
+        <StudyLogList key={`${staff.id}-${progressVersion}`} profileId={staff.id} qualified={qualified} />
+      )}
+
+      {showHistory && (
+        <Modal open onClose={() => setShowHistory(false)} wide title="🧾 Quiz History">
           {loading ? (
             <LoadingSpinner />
           ) : !attempts.length ? (
@@ -312,19 +343,22 @@ export default function StaffStudyDetail({ staff, onBack }) {
               {attempts.map((a) => (
                 <div key={a.id} className="flex items-center justify-between px-4 py-2.5">
                   <button onClick={() => setOpenAttempt(a)} className="flex flex-1 items-center gap-2 text-left">
-                    <Badge color={a.quiz_type === 'formal' ? 'brand' : 'gray'}>{QUIZ_TYPE_LABEL[a.quiz_type] ?? 'Quick Quiz'}</Badge>
+                    <Badge color={a.quiz_type === 'formal' || a.quiz_type === 'master' || a.quiz_type === 'level_up' ? 'brand' : 'gray'}>
+                      {QUIZ_TYPE_LABEL[a.quiz_type] ?? 'Quick Quiz'}
+                    </Badge>
                     <span className="text-sm text-gray-700">{new Date(a.taken_at).toLocaleString()}</span>
                     <span className="text-sm font-medium text-brand-600">
                       {a.correct_count} / {a.total_questions}
                     </span>
                   </button>
                   {/* Passing a Formal Quiz isn't automatic from the SCORE — a
-                      manager/admin reviews the attempt (Quiz History › click in
-                      to see every answer) and ticks this themselves — UNLESS
-                      this staff member is already Qualified, in which case
-                      FormalQuizModal.jsx ticks this automatically at submit time
-                      and no review is needed (see migration 0049 / the
-                      Qualified badge above). */}
+                      manager/admin reviews the attempt (click in to see every
+                      answer) and ticks this themselves — UNLESS this staff
+                      member is already Qualified, in which case the quiz
+                      flow ticks this automatically at submit time and no
+                      review is needed (see migration 0049 / the Qualified
+                      badge above). Level-Up, Master, and Mock attempts
+                      self-grade and never need a manager tick here. */}
                   {a.quiz_type === 'formal' && (
                     <label className="flex shrink-0 items-center gap-1.5 text-sm text-gray-600">
                       <input type="checkbox" checked={!!a.passed} onChange={(e) => togglePass(a, e.target.checked)} />
@@ -335,9 +369,8 @@ export default function StaffStudyDetail({ staff, onBack }) {
               ))}
             </div>
           )}
-        </div>
+        </Modal>
       )}
-
       {openAttempt && (
         <AttemptDetailModal
           attempt={openAttempt}
@@ -345,16 +378,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
           quizTypeLabel={QUIZ_TYPE_LABEL[openAttempt.quiz_type] ?? 'Quick Quiz'}
         />
       )}
-      {/* Same Progress chart / Study summary modals as "My Dashboard > Study
-          Log" (StudyLogPage.jsx) — this is a manager/admin looking at one
-          specific staff member's own data instead of their own, so both
-          take `staff.id`, not the logged-in profile's id. */}
-      {performanceView === 'chart' && tab === 'performance' && (
-        <ProgressChartModal profileId={staff.id} onClose={() => setPerformanceView('history')} />
-      )}
-      {performanceView === 'summary' && tab === 'performance' && (
-        <StudySummaryModal profileId={staff.id} onClose={() => setPerformanceView('history')} />
-      )}
+      {showSummary && <StudySummaryModal profileId={staff.id} onClose={() => setShowSummary(false)} />}
     </div>
   )
 }
