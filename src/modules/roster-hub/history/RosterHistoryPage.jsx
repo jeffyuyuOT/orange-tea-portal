@@ -53,7 +53,11 @@ export default function RosterHistoryPage() {
       supabase
         .from('user_stores')
         .select(
-          'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity)'
+          // `qualified` added 2026-10-03 — Jeff wants an unqualified staff
+          // member's name+shift times shown in red on the exported sheet
+          // (exportRosterGrid/buildStyledSheet in excelRoster.js), same red
+          // flag RosterWeekTable/RosterEntryGrid already use on screen.
+          'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity, qualified)'
         )
         .eq('store_id', currentStoreId)
         .order('roster_order'),
@@ -87,7 +91,7 @@ export default function RosterHistoryPage() {
       endTime: timeToDecimal(r.end_time),
       breakHours: r.break_half_hours ?? '',
     }))
-    exportRosterGrid(storeName, staffList, weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
+    await exportRosterGrid(storeName, staffList, weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
   }
 
   // roster_entries.roster_period_id is `on delete cascade` (0001_init.sql),

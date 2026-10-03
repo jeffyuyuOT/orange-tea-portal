@@ -206,53 +206,192 @@ export function buildReconcilePlan(rawNames, known) {
   })
 }
 
-// Builds the full row set (header + one Shift/Break row pair per person +
-// a grand-total footer) for a store's week, from the flat `entries` array.
-// `staff` should be every active staff member for the store (shown even
-// with zero shifts, same as the manager's own template); any entry with no
-// matching profile (an ad-hoc/casual name typed straight into the grid)
-// gets its own row too.
-function buildGridRows(staff, weekDates, entries) {
-  const [row1, row2] = buildHeaderRows(weekDates)
-  const rows = [row1, row2]
+// ---- styled export (ExcelJS) ----------------------------------------------
+// Jeff, 2026-10-03: "roster history匯出班表...break次數是合併儲存格並且數字
+// 是紅色的，還沒qualified的員工名字跟時間是紅色的，每一個員工之間是雙橫線
+// 隔開" — wants History's exported workbook to visually match the sheet he
+// already builds by hand in Excel: Break's day cells merged (one number per
+// day actually worked, not per S/E column), Break numbers in red, an
+// unqualified staff member's whole name+shift-times row in red too, and a
+// double ruled line separating each staff member's 2-row block from the
+// next. None of that is possible with the plain `xlsx` package used
+// everywhere else in this file (reading an uploaded file, and the blank
+// template download) — SheetJS's free/community build can only write
+// values, column widths and merges, never cell colors or custom borders
+// (that's SheetJS Pro, a paid add-on). ExcelJS is a separate, actively
+// maintained library that supports all of this directly and ships a
+// browser build (its package.json's own "browser" field points Vite at it
+// automatically, no extra config) — used here ONLY for these two "already
+// a finished report, not meant to be re-uploaded" exports. The working
+// round-trip pair (downloadRosterTemplate's blank template / parseRosterGrid's
+// upload reader, both used by Manage Roster) deliberately stays on plain
+// `xlsx`, unstyled and in the original single-Name-column layout, since
+// changing that shape risks the upload-side column/merge-propagation logic
+// above (findDayColumns, the Name-column merge guard, etc.) that was
+// already hard-won against Jeff's own real-world files.
+const STYLED_DAY_LABELS = DAY_LABELS
+const STYLED_NAME_COL = 1
+const STYLED_BREAK_LABEL_COL = 2
+const STYLED_FIRST_DAY_COL = 3
+const STYLED_TOTAL_COL = STYLED_FIRST_DAY_COL + 14 // 17
+const STYLED_WKD_COL = STYLED_TOTAL_COL + 1 // 18
+
+const RED_FONT = { argb: 'FFCC0000' }
+const GRID_BORDER = { style: 'thin', color: { argb: 'FFBFBFBF' } }
+const HEADER_RULE = { style: 'thick', color: { argb: 'FF000000' } }
+const PERSON_RULE = { style: 'double', color: { argb: 'FF000000' } }
+
+function styledBorder(cell, bottom) {
+  cell.border = { top: GRID_BORDER, left: GRID_BORDER, right: GRID_BORDER, bottom: bottom ?? GRID_BORDER }
+}
+
+// ExcelJS itself is loaded on demand (dynamic import, below) rather than a
+// static top-level one — it's a sizeable library (zip/style handling on
+// top of the spreadsheet writer) that only two admin/manager-only buttons
+// ever need (History's "Export" and "Export multiple stores"), so bundling
+// it into the app's main chunk would make every visitor download it on
+// every page load just to make those two sheets possible. Loading it only
+// when someone actually clicks Export also kept the main chunk under
+// vite-plugin-pwa's 2 MiB default precache ceiling — a static import here
+// pushed it past that and failed the Cloudflare build outright (same
+// "build failed, nothing deploys" failure mode as the missing-file import
+// earlier today, just from bundle size instead of a missing module).
+async function loadExcelJS() {
+  const mod = await import('exceljs')
+  return mod.default ?? mod
+}
+
+// Builds one styled worksheet (header + one Shift/Break row pair per
+// person) directly against an ExcelJS workbook — the styled-export sibling
+// of buildHeaderRows/buildGridRows above, sharing their day-label/column
+// conventions but not their array-of-arrays shape (ExcelJS addresses cells
+// and merges directly). `staff` should be every active staff member for the
+// store (shown even with zero shifts); any entry with no matching profile
+// (an ad-hoc/casual name typed straight into Manage Roster) gets its own
+// row too, same as the plain export.
+function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
+  const sheet = workbook.addWorksheet((storeName || 'Roster').slice(0, 31))
+
+  sheet.mergeCells(1, STYLED_NAME_COL, 2, STYLED_BREAK_LABEL_COL)
+  sheet.getCell(1, STYLED_NAME_COL).value = 'Name'
+  sheet.mergeCells(1, STYLED_TOTAL_COL, 2, STYLED_TOTAL_COL)
+  sheet.getCell(1, STYLED_TOTAL_COL).value = 'Total hr'
+  sheet.mergeCells(1, STYLED_WKD_COL, 2, STYLED_WKD_COL)
+  sheet.getCell(1, STYLED_WKD_COL).value = 'WKD hr'
+  weekDates.forEach((d, i) => {
+    const c = STYLED_FIRST_DAY_COL + i * 2
+    sheet.mergeCells(1, c, 1, c + 1)
+    sheet.getCell(1, c).value = `${STYLED_DAY_LABELS[i]} ${format(parseISO(d), 'd-MMM')}`
+    sheet.getCell(2, c).value = 'S'
+    sheet.getCell(2, c + 1).value = 'E'
+  })
+  for (let c = STYLED_NAME_COL; c <= STYLED_WKD_COL; c++) {
+    for (let r = 1; r <= 2; r++) {
+      const cell = sheet.getCell(r, c)
+      cell.font = { bold: true }
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+      styledBorder(cell, r === 2 ? HEADER_RULE : GRID_BORDER)
+    }
+  }
+  sheet.getCell(1, STYLED_NAME_COL).alignment = { vertical: 'middle', horizontal: 'center' }
 
   const extraNames = Array.from(new Set(entries.filter((e) => !e.profileId && e.staffName).map((e) => e.staffName)))
   const people = [
-    ...staff.map((s) => ({ id: s.id, name: rosterDisplayName(s) })),
-    ...extraNames.map((name) => ({ id: '', name })),
+    ...staff.map((s) => ({ id: s.id, name: rosterDisplayName(s), qualified: s.qualified })),
+    ...extraNames.map((name) => ({ id: '', name, qualified: true })),
   ]
 
-  let grandTotal = 0
-  people.forEach(({ id, name }) => {
-    const shiftRow = Array.from({ length: LAST_COL + 1 }, () => '')
-    const breakRow = Array.from({ length: LAST_COL + 1 }, () => '')
-    shiftRow[NAME_COL] = name
-    breakRow[NAME_COL] = 'Break (½h units)'
+  let row = 3
+  people.forEach(({ id, name, qualified }) => {
+    const shiftRow = row
+    const breakRow = row + 1
+    // Staff on the roster default to qualified unless the profile says
+    // otherwise (`qualified === false`) — an ad-hoc/casual name above has
+    // no profile at all, so it never gets flagged red just for being new.
+    const unqualified = qualified === false
+
+    sheet.mergeCells(shiftRow, STYLED_NAME_COL, breakRow, STYLED_NAME_COL)
+    const nameCell = sheet.getCell(shiftRow, STYLED_NAME_COL)
+    nameCell.value = name
+    nameCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+    if (unqualified) nameCell.font = { color: RED_FONT }
+
+    const breakLabelCell = sheet.getCell(breakRow, STYLED_BREAK_LABEL_COL)
+    breakLabelCell.value = 'Break'
+    breakLabelCell.font = { color: RED_FONT }
+    breakLabelCell.alignment = { vertical: 'middle', horizontal: 'left' }
+
     let total = 0
     let wkd = 0
     weekDates.forEach((date, i) => {
       const entry = entries.find((e) => (id ? e.profileId === id : e.staffName === name) && e.date === date)
-      if (!entry) return
-      const c = FIRST_DAY_COL + i * 2
-      shiftRow[c] = entry.startTime === '' || entry.startTime == null ? '' : entry.startTime
-      shiftRow[c + 1] = entry.endTime === '' || entry.endTime == null ? '' : entry.endTime
-      breakRow[c] = entry.breakHours === '' || entry.breakHours == null ? '' : entry.breakHours
-      const h = dayHours(entry)
-      total += h
-      if (i === 5 || i === 6) wkd += h
+      const c = STYLED_FIRST_DAY_COL + i * 2
+      if (entry) {
+        const startCell = sheet.getCell(shiftRow, c)
+        const endCell = sheet.getCell(shiftRow, c + 1)
+        startCell.value = entry.startTime === '' || entry.startTime == null ? null : entry.startTime
+        endCell.value = entry.endTime === '' || entry.endTime == null ? null : entry.endTime
+        startCell.alignment = { horizontal: 'center' }
+        endCell.alignment = { horizontal: 'center' }
+        if (unqualified) {
+          startCell.font = { color: RED_FONT }
+          endCell.font = { color: RED_FONT }
+        }
+        if (entry.breakHours !== '' && entry.breakHours != null) {
+          sheet.mergeCells(breakRow, c, breakRow, c + 1)
+          const breakCell = sheet.getCell(breakRow, c)
+          breakCell.value = entry.breakHours
+          breakCell.font = { color: RED_FONT }
+          breakCell.alignment = { vertical: 'middle', horizontal: 'center' }
+        }
+        const h = dayHours(entry)
+        total += h
+        if (i === 5 || i === 6) wkd += h
+      }
     })
-    shiftRow[TOTAL_COL] = total ? round2(total) : ''
-    shiftRow[WKD_COL] = wkd ? round2(wkd) : ''
-    grandTotal += total
-    rows.push(shiftRow, breakRow)
+
+    sheet.mergeCells(shiftRow, STYLED_TOTAL_COL, breakRow, STYLED_TOTAL_COL)
+    sheet.mergeCells(shiftRow, STYLED_WKD_COL, breakRow, STYLED_WKD_COL)
+    sheet.getCell(shiftRow, STYLED_TOTAL_COL).value = total ? round2(total) : null
+    sheet.getCell(shiftRow, STYLED_WKD_COL).value = wkd ? round2(wkd) : null
+    sheet.getCell(shiftRow, STYLED_TOTAL_COL).alignment = { vertical: 'middle', horizontal: 'center' }
+    sheet.getCell(shiftRow, STYLED_WKD_COL).alignment = { vertical: 'middle', horizontal: 'center' }
+
+    for (let c = STYLED_NAME_COL; c <= STYLED_WKD_COL; c++) {
+      styledBorder(sheet.getCell(shiftRow, c))
+      // The double rule belongs on every cell in the LAST row of this
+      // person's block, so it reads as one continuous line under them —
+      // not just under whichever day column happened to have a merge.
+      styledBorder(sheet.getCell(breakRow, c), PERSON_RULE)
+    }
+
+    row += 2
   })
 
-  const totalRow = Array.from({ length: LAST_COL + 1 }, () => '')
-  totalRow[NAME_COL] = 'Total'
-  totalRow[TOTAL_COL] = round2(grandTotal)
-  rows.push(totalRow)
+  sheet.getColumn(STYLED_NAME_COL).width = 14
+  sheet.getColumn(STYLED_BREAK_LABEL_COL).width = 7
+  for (let c = STYLED_FIRST_DAY_COL; c < STYLED_TOTAL_COL; c++) sheet.getColumn(c).width = 6.5
+  sheet.getColumn(STYLED_TOTAL_COL).width = 9
+  sheet.getColumn(STYLED_WKD_COL).width = 9
+  sheet.views = [{ state: 'frozen', ySplit: 2 }]
+}
 
-  return rows
+// ExcelJS has no writeFile() of its own (it's Node/browser-agnostic) — this
+// is the browser-side equivalent of XLSX.writeFile for a workbook built
+// above: render to a buffer, then the standard Blob-link-click download
+// trick, same as every other client-side "download this file" spot in the
+// app already uses for things like storage exports.
+async function downloadWorkbook(workbook, filename) {
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 // ---- template download ---------------------------------------------------
@@ -598,27 +737,25 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
 
 // ---- export ---------------------------------------------------------------
 // Exports the current (already-computed) grid — real numbers, not
-// formulas, since the app has already done the arithmetic.
-export function exportRosterGrid(storeName, staff, weekDates, entries, filename) {
-  const rows = buildGridRows(staff, weekDates, entries)
-  const sheet = XLSX.utils.aoa_to_sheet(rows)
-  sheet['!merges'] = headerMerges()
-  sheet['!cols'] = gridCols()
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, sheet, (storeName || 'Roster').slice(0, 31))
-  XLSX.writeFile(wb, filename)
+// formulas, since the app has already done the arithmetic. Styled per
+// Jeff's spec (buildStyledSheet above): merged per-day Break cells in red,
+// an unqualified staff member's name+shift times in red, a double rule
+// between each person's block. Now async (ExcelJS's own writeBuffer is
+// promise-based) — both call sites already `await` their export call.
+export async function exportRosterGrid(storeName, staff, weekDates, entries, filename) {
+  const ExcelJS = await loadExcelJS()
+  const workbook = new ExcelJS.Workbook()
+  buildStyledSheet(workbook, storeName, staff, weekDates, entries)
+  await downloadWorkbook(workbook, filename)
 }
 
-// One sheet per store (admin multi-store export). Each entry in
-// `storeSheets` is { storeName, staff, weekDates, entries }.
-export function exportMultiStoreWorkbook(storeSheets, filename) {
-  const wb = XLSX.utils.book_new()
+// One sheet per store (admin multi-store export), same styling as above.
+// Each entry in `storeSheets` is { storeName, staff, weekDates, entries }.
+export async function exportMultiStoreWorkbook(storeSheets, filename) {
+  const ExcelJS = await loadExcelJS()
+  const workbook = new ExcelJS.Workbook()
   storeSheets.forEach(({ storeName, staff, weekDates, entries }) => {
-    const rows = buildGridRows(staff, weekDates, entries)
-    const sheet = XLSX.utils.aoa_to_sheet(rows)
-    sheet['!merges'] = headerMerges()
-    sheet['!cols'] = gridCols()
-    XLSX.utils.book_append_sheet(wb, sheet, (storeName || 'Store').slice(0, 31))
+    buildStyledSheet(workbook, storeName, staff, weekDates, entries)
   })
-  XLSX.writeFile(wb, filename)
+  await downloadWorkbook(workbook, filename)
 }

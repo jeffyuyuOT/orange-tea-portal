@@ -40,7 +40,9 @@ export default function MultiStoreExportModal({ onClose }) {
         supabase
           .from('user_stores')
           .select(
-            'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity)'
+            // `qualified` added 2026-10-03 — see RosterHistoryPage.jsx's
+            // matching comment; same red-flag styling in the exported sheet.
+            'profile_id, roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, is_active, role, primary_store_id, join_store_activity, qualified)'
           )
           .eq('store_id', storeId)
           .order('roster_order'),
@@ -79,7 +81,7 @@ export default function MultiStoreExportModal({ onClose }) {
       }
       storeSheets.push({ storeName: store?.name ?? storeId, staff: staffList, weekDates, entries })
     }
-    exportMultiStoreWorkbook(storeSheets, `roster-${weekStart}-all-stores.xlsx`)
+    await exportMultiStoreWorkbook(storeSheets, `roster-${weekStart}-all-stores.xlsx`)
     setBusy(false)
     onClose()
   }
