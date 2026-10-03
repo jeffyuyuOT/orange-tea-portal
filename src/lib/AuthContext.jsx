@@ -116,9 +116,29 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  // Jeff, 2026-10-04: "為什麼staff的左邊分頁順序沒有跟隨系統設置?" — this used
+  // to fire unconditionally on mount, before supabase.auth had finished
+  // restoring the session from storage (an async step) on a fresh page
+  // load / PWA cold start. Firing that early meant the request went out
+  // with no Authorization bearer attached yet, so the RLS policy on
+  // app_sidebar_order (auth.role() = 'authenticated') saw it as anonymous
+  // and matched zero rows — not a thrown error, just an empty result — so
+  // fetchSidebarOrder() resolved "successfully" with `data: null`, which
+  // reconcileSidebarOrder(null) turns into SECTIONS' own literal default
+  // order, with nothing to say anything went wrong and nothing to retry
+  // (the 2026-10-01 fix above only covers a THROWN error — this path never
+  // throws one, so it never hit that retry at all). Admin never noticed
+  // because SidebarOrderPanel's own save() calls refreshSidebarOrder()
+  // again well into an already-authenticated session every time an admin
+  // re-orders something and checks the result — a plain staff account
+  // opening the app fresh is exactly the case that was racing. Waiting for
+  // `session` to actually resolve before firing this at all closes that
+  // window; re-running whenever `session` changes (logging in as a
+  // different person, a refreshed token) keeps it from ever going stale.
   useEffect(() => {
+    if (!session) return
     refreshSidebarOrder()
-  }, [refreshSidebarOrder])
+  }, [session, refreshSidebarOrder])
 
   const loadProfileData = useCallback(async (userId) => {
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
