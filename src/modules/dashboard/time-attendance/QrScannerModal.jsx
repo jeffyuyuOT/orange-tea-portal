@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import jsQR from 'jsqr'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import { cameraAccessErrorMessage } from '../../../lib/cameraError'
 
 // Live in-page camera scan — same getUserMedia + <video> approach as
 // CameraCaptureModal (staying inside the page/tab, never handing off to a
@@ -47,7 +48,7 @@ export default function QrScannerModal({
         }
         rafRef.current = requestAnimationFrame(tick)
       })
-      .catch((err) => setError(err?.message || 'Could not access the camera.'))
+      .catch((err) => setError(cameraAccessErrorMessage(err)))
 
     function tick() {
       const video = videoRef.current

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from './Modal'
 import Button from './Button'
+import { cameraAccessErrorMessage } from '../../lib/cameraError'
 
 // A live in-page camera capture — getUserMedia + a <video> preview + a
 // canvas snapshot — instead of a plain <input type="file" capture>, which
@@ -36,7 +37,7 @@ export default function CameraCaptureModal({ onCapture, onClose }) {
           videoRef.current.play().catch(() => {})
         }
       })
-      .catch((err) => setError(err?.message || 'Could not access the camera.'))
+      .catch((err) => setError(cameraAccessErrorMessage(err)))
     return () => {
       cancelled = true
       streamRef.current?.getTracks().forEach((t) => t.stop())
