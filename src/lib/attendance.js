@@ -18,6 +18,57 @@ export const QR_REFRESH_MS = 15000
 // small business.
 export const QR_FRESHNESS_MS = QR_REFRESH_MS + 5000
 
+// Jeff, 2026-10-03: "toowong員工要clock in/out掃手機上的2d code，出現錯誤
+// 訊息，但電腦版的2d code(跟手機同帳號)卻可以" — the SAME account's badge
+// scanned fine from a desktop browser but failed from their phone, which
+// rules out anything account/permissions-related. Every freshness check
+// below used to compare `parsed.ts` (baked in using whichever device
+// GENERATED the code's own `new Date()`) against `Date.now()` on whichever
+// device SCANS it — two different devices' raw system clocks, with nothing
+// to keep them in sync. A phone with a drifted or wrong-timezone clock (not
+// rare, especially Android) bakes in a timestamp that looks expired — or
+// not-yet-valid — the instant a correctly-clocked device checks it, even
+// though the code was freshly on screen. Anchoring both sides to the
+// SERVER's clock instead (via the `Date` response header any HTTP call
+// already returns) cancels out skew on whichever device is actually wrong,
+// rather than only working when both happen to agree.
+let serverClockOffsetMs = 0
+let serverClockOffsetFetchedAt = 0
+const SERVER_CLOCK_REFRESH_MS = 5 * 60 * 1000 // clock drift is slow; no need to re-check often
+
+async function refreshServerClockOffset() {
+  try {
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/health`)
+    const dateHeader = res.headers.get('date')
+    if (dateHeader) {
+      const serverMs = new Date(dateHeader).getTime()
+      if (Number.isFinite(serverMs)) {
+        serverClockOffsetMs = serverMs - Date.now()
+        serverClockOffsetFetchedAt = Date.now()
+      }
+    }
+  } catch {
+    // best-effort — keep whatever offset (possibly still 0) was last known
+    // rather than breaking QR generation/scanning over a network hiccup
+  }
+}
+
+// Kick off an initial fetch as soon as this module loads (both the badge
+// side — MyStaffIdModal/QrCodeDisplayPage's own store code — and the
+// scanning side import from here), so the offset is usually already known
+// by the time anyone opens My Staff ID or the 2D Code Maker.
+refreshServerClockOffset()
+
+// Best-effort "now", corrected for THIS device's clock skew against the
+// server. Synchronous (buildQrPayload/buildStaffIdPayload are called from
+// RotatingQrDisplay's draw() on a plain setInterval, not awaited) — uses
+// whatever offset is already cached and fires a background refresh if it's
+// gone stale, rather than blocking the current draw on a network round trip.
+function correctedNow() {
+  if (Date.now() - serverClockOffsetFetchedAt > SERVER_CLOCK_REFRESH_MS) refreshServerClockOffset()
+  return new Date(Date.now() + serverClockOffsetMs)
+}
+
 // `type` tags which of the two kinds of rotating QR this is (see
 // buildStaffIdPayload below for the other one) — without it, a Staff ID
 // code and a store code both happen to be small JSON objects with a `ts`,
@@ -28,7 +79,7 @@ export const QR_FRESHNESS_MS = QR_REFRESH_MS + 5000
 // reject anything else outright, so a code can only ever be validated by
 // the scanner it was actually meant for.
 export function buildQrPayload(store) {
-  return JSON.stringify({ type: 'store_clock', storeId: store.id, storeName: store.name, ts: new Date().toISOString() })
+  return JSON.stringify({ type: 'store_clock', storeId: store.id, storeName: store.name, ts: correctedNow().toISOString() })
 }
 
 // Returns the parsed { storeId, storeName, ts } or null if the scanned code
@@ -41,7 +92,7 @@ export function parseAndValidateQrPayload(raw) {
     return null
   }
   if (parsed?.type !== 'store_clock' || !parsed?.storeId || !parsed?.ts) return null
-  const age = Date.now() - new Date(parsed.ts).getTime()
+  const age = correctedNow().getTime() - new Date(parsed.ts).getTime()
   if (!Number.isFinite(age) || age < -5000 || age > QR_FRESHNESS_MS) return null
   return parsed
 }
@@ -62,7 +113,7 @@ export function buildStaffIdPayload(profile, store) {
     name: `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim(),
     storeId: store?.id ?? null,
     storeName: store?.name ?? null,
-    ts: new Date().toISOString(),
+    ts: correctedNow().toISOString(),
   })
 }
 
@@ -78,7 +129,7 @@ export function parseAndValidateStaffIdPayload(raw) {
     return null
   }
   if (parsed?.type !== 'staff_id' || !parsed?.profileId || !parsed?.name || !parsed?.ts) return null
-  const age = Date.now() - new Date(parsed.ts).getTime()
+  const age = correctedNow().getTime() - new Date(parsed.ts).getTime()
   if (!Number.isFinite(age) || age < -5000 || age > QR_FRESHNESS_MS) return null
   return parsed
 }

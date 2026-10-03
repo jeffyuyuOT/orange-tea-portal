@@ -39,7 +39,7 @@ export default function StudySummaryModal({ profileId, onClose }) {
       // same rule StudyLogList's `qualified` prop and the Progress Chart use.
       // Note: this only ever auto-completed FORMULA items (see
       // StaffStudyDetail.jsx's markAllCurrentItemsMemorized), never Shop
-      // Training, so it's applied to the drink side of the Must-Know row
+      // Training, so it's applied to the formula side of the Must-Know row
       // below but not the Shop Training side.
       const isQualified = !!profileRow?.qualified
       const memorizedIds = new Set((progress ?? []).map((p) => p.formula_item_id))
@@ -48,7 +48,10 @@ export default function StudySummaryModal({ profileId, onClose }) {
 
       const drinkItems = (items ?? []).filter((i) => i.group_key === 'drink')
       const top10Items = drinkItems.filter((i) => i.top_10)
-      const mustKnowFormulaItems = drinkItems.filter((i) => i.is_must_know)
+      // Jeff, 2026-10-03: "Tea, topping跟others也要有must-know item標示" —
+      // is_must_know is no longer drink-only, so this now covers every
+      // group_key's items, not just drinks (top_10 above stays drink-only).
+      const mustKnowFormulaItems = (items ?? []).filter((i) => i.is_must_know)
       const mustKnowTrainingItems = (trainingItems ?? []).filter((i) => i.is_must_know)
       const mustKnowTotal = mustKnowFormulaItems.length + mustKnowTrainingItems.length
       const mustKnowMemorized =

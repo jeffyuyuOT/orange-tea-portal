@@ -182,14 +182,17 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   }, [items, group, categoryId])
 
   // The new top-level "⭐ Must-Know Items" tab (GROUPS, first entry) — spans
-  // every drink group (is_must_know is drink-only, migration 0081's
-  // constraint) merged with Shop Training's own must-know items (migration
-  // 0082), rendered together below as one combined list.
+  // EVERY formula group (not drink-only; Jeff, 2026-10-03: "Tea, topping跟
+  // others也要有must-know item標示" dropped migration 0081's drink-only
+  // constraint on is_must_know — top_10 stays drink-only, unaffected) merged
+  // with Shop Training's own must-know items (migration 0082), rendered
+  // together below as one combined list.
   // Jeff, 2026-10-02: "must-know item分類裡(formula跟study log都是)，同時是
-  // top10的item要排在上面" — a drink that's both Must Know and Top 10 sorts
-  // to the top of this combined top-level tab too. Shop Training items have
-  // no Top 10 concept at all (drink-only), so mustKnowTrainingItems below is
-  // untouched — they just stay after, in their existing sort_order.
+  // top10的item要排在上面" — an item that's both Must Know and Top 10 (only
+  // possible for a drink, since Top 10 stays drink-only) sorts to the top of
+  // this combined top-level tab too. Shop Training items have no Top 10
+  // concept at all, so mustKnowTrainingItems below is untouched — they just
+  // stay after, in their existing sort_order.
   const mustKnowFormulaItems = useMemo(
     () => [...items.filter((i) => i.is_must_know)].sort((a, b) => (b.top_10 ? 1 : 0) - (a.top_10 ? 1 : 0)),
     [items]

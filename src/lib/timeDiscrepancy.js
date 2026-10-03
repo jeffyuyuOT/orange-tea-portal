@@ -1,6 +1,6 @@
 import { addDays, format } from 'date-fns'
 import { supabase } from './supabaseClient'
-import { pairEventsIntoSessions, dailyTotals } from './attendance'
+import { pairEventsIntoSessions, dailyTotals, breakMinutesFromHalfHours } from './attendance'
 
 // Jeff, 2026-09: "staff time logs如果有員工的time logs算出的時間跟班表上算
 // 出來的時間的有出入15mins以上，該員名字會顯示提示" — decided via
@@ -86,7 +86,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
   // date can begin up to 6 days before it.
   const periodsFrom = format(addDays(new Date(fromDate), -6), 'yyyy-MM-dd')
 
-  const [{ data: periodRows }, { data: eventRows }, { data: changeRows }] = await Promise.all([
+  const [{ data: periodRows }, { data: eventRows }, { data: changeRows }, { data: breakRows }] = await Promise.all([
     supabase
       .from('roster_periods')
       .select('id')
@@ -106,6 +106,24 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       .eq('store_id', storeId)
       .in('profile_id', profileIds)
       .gte('changed_at', `${fromDate}T00:00:00`),
+    // Jeff, 2026-10-03: "編輯attendance logs時如果有加入break...但在跟班表
+    // 檢查出入時並沒有把休息時間扣掉" — Attendance Logs' own "Total" already
+    // nets a day's logged break out of the raw clocked duration (see
+    // attendance_day_breaks / breakMinutesFromHalfHours), but this check was
+    // still comparing the RAW clocked total (totalsByProfile below, built
+    // straight off attendance_events with no knowledge of breaks at all)
+    // against the roster's own break-netted scheduledNetMinutes — so a
+    // perfectly matching day with a logged break always looked "behind" by
+    // exactly the break's length. Fetched here the same way Attendance Logs
+    // itself reads it, so this check and that screen can never disagree on
+    // what a day's actual worked time nets out to.
+    supabase
+      .from('attendance_day_breaks')
+      .select('profile_id, event_date, break_half_hours')
+      .eq('store_id', storeId)
+      .in('profile_id', profileIds)
+      .gte('event_date', fromDate)
+      .lte('event_date', today),
   ])
 
   const periodIds = (periodRows ?? []).map((p) => p.id)
@@ -137,6 +155,11 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
     openDatesByProfile.set(profileId, openDates)
   })
 
+  const breakMinutesByProfileDate = new Map() // `${profileId}|${date}` -> minutes to net out
+  ;(breakRows ?? []).forEach((b) => {
+    breakMinutesByProfileDate.set(`${b.profile_id}|${b.event_date}`, breakMinutesFromHalfHours(b.break_half_hours))
+  })
+
   const latestAttendanceByProfile = new Map()
   ;(eventRows ?? []).forEach((e) => {
     const cur = latestAttendanceByProfile.get(e.profile_id) ?? ''
@@ -160,7 +183,9 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
     const scheduledMinutes = scheduledNetMinutes(entry)
     if (scheduledMinutes == null) continue
 
-    const actualMinutes = totalsByProfile.get(entry.profile_id)?.[entry.work_date] ?? 0
+    const rawActualMinutes = totalsByProfile.get(entry.profile_id)?.[entry.work_date] ?? 0
+    const breakMinutes = breakMinutesByProfileDate.get(`${entry.profile_id}|${entry.work_date}`) ?? 0
+    const actualMinutes = Math.max(0, rawActualMinutes - breakMinutes)
     const diffMinutes = actualMinutes - scheduledMinutes
     if (Math.abs(diffMinutes) < DISCREPANCY_THRESHOLD_MINUTES) continue
 
