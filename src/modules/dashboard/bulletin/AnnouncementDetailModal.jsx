@@ -135,12 +135,26 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     // here rather than by whichever list opened this modal, so it's covered
     // no matter the entry point (the main feed, or the separate "⭐
     // Important Announcements" picker).
+    //
+    // Jeff, 2026-10-03: a staff tester's "Store Announcement" kept showing
+    // New even after opening it — announcement_reads had zero rows for that
+    // account despite the table/RLS being fine (and the identical pattern
+    // on roster_period_views working for the same account), so the most
+    // likely explanation is this call silently failing or silently not
+    // firing (e.g. `profile` not loaded yet on first mount — it wasn't in
+    // this effect's own dependency list, below) with nothing logged either
+    // way. Added `profile?.id` to the deps (so a late-loading profile still
+    // triggers this) and error logging (so a real failure next time shows
+    // up in the console instead of just silently leaving the badge stuck).
     if (profile?.id) {
       supabase
         .from('announcement_reads')
         .upsert({ profile_id: profile.id, announcement_id: announcementId, read_at: new Date().toISOString() }, { onConflict: 'profile_id,announcement_id' })
+        .then(({ error }) => {
+          if (error) console.error('Failed to mark announcement as read:', error)
+        })
     }
-  }, [announcementId, isNew]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [announcementId, isNew, profile?.id])
 
   function toggleStore(id) {
     setSelectedStoreIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
@@ -191,11 +205,15 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             .insert({ announcement_id: data.id, action: 'created', actor_id: profile.id, actor_name: actorName })
           // The poster has obviously already "seen" their own post — mark it
           // read for them so it doesn't show up flagged NEW on their own
-          // Bulletin Board.
-          await supabase.from('announcement_reads').upsert(
+          // Bulletin Board. Jeff, 2026-10-03: this and the two other
+          // announcement_reads writes in this file used to swallow any
+          // write error silently (no `{ error }` check) — now logged, same
+          // as the mark-as-read effect above.
+          const { error: readError } = await supabase.from('announcement_reads').upsert(
             { profile_id: profile.id, announcement_id: data.id },
             { onConflict: 'profile_id,announcement_id', ignoreDuplicates: true }
           )
+          if (readError) console.error('Failed to mark announcement as read:', readError)
         }
       } else {
         const { error } = await supabase
@@ -212,9 +230,10 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
         // exist and needs its read_at bumped past the new updated_at, or
         // this same edit would otherwise show up flagged Update on the
         // editor's own Bulletin Board).
-        await supabase
+        const { error: readError } = await supabase
           .from('announcement_reads')
           .upsert({ profile_id: profile.id, announcement_id: announcementId, read_at: new Date().toISOString() }, { onConflict: 'profile_id,announcement_id' })
+        if (readError) console.error('Failed to mark announcement as read:', readError)
       }
       onSaved()
     } finally {

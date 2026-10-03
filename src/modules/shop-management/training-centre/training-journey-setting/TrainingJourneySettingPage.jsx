@@ -2,12 +2,20 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 import { useAuth } from '../../../../lib/AuthContext'
 import { EmptyState } from '../../../../components/ui/LoadingSpinner'
+import Modal from '../../../../components/ui/Modal'
+import Button from '../../../../components/ui/Button'
 
 const PHASE_OPTIONS = [1, 2, 3, 4, 5]
 // Jeff, 2026-10-03: same filter row added to Admin Center's Phase Item tab
-// (PhaseItemTab.jsx) — see its comment for why Phase 6 is included even
-// though no item can actually be assigned it.
-const FILTER_OPTIONS = ['all', 'unassigned', 1, 2, 3, 4, 5, 6]
+// (PhaseItemTab.jsx) — see its comment. Phase 6/7 aren't in this row
+// either; they each have their own sub-tab below, same as Admin Center's.
+const FILTER_OPTIONS = ['all', 'unassigned', 1, 2, 3, 4, 5]
+
+const VIEWS = [
+  { key: 'mustknow', label: 'Must-Know Items (Phase 1–5)' },
+  { key: 'phase6', label: 'Phase 6 (Expert)' },
+  { key: 'phase7', label: 'Phase 7 (Master)' },
+]
 
 // Jeff, 2026-10-02 (Training Journey spec, point 5): the shop-level half of
 // Training Journey Setting — assigns THIS store's own ⭐ Must-Know shop
@@ -17,7 +25,43 @@ const FILTER_OPTIONS = ['all', 'unassigned', 1, 2, 3, 4, 5, 6]
 // own <h1> — renders under TrainingCentreLayout's shared heading + tab bar,
 // same as this bar's other three tabs. Switch stores (header picker) to
 // edit another store's assignments.
+//
+// Jeff, 2026-10-03 (Expert/Master split, point 2, plus same-day follow-up):
+// two more sub-tabs, "Phase 6 (Expert)" and "Phase 7 (Master)", mirror
+// Admin Center's PhaseItemTab.jsx exactly — assign NON-Must-Know shop
+// training items (this store's) into Phase 6 or Phase 7's pool via a
+// dedicated "Add Item" picker that only ever offers items not yet assigned
+// to any phase; the Must-Know dropdown above never offers Phase 6/7. See
+// that file's comment for the full rationale — identical here, just scoped
+// to `currentStoreId`.
 export default function TrainingJourneySettingPage() {
+  const [view, setView] = useState('mustknow')
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {VIEWS.map((v) => (
+          <button
+            key={v.key}
+            onClick={() => setView(v.key)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              view === v.key ? 'border-brand-400 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {view === 'mustknow' ? (
+        <MustKnowPhaseList />
+      ) : (
+        <PhaseItemPicker phaseNumber={view === 'phase6' ? 6 : 7} phaseLabel={view === 'phase6' ? 'Phase 6 (Expert)' : 'Phase 7 (Master)'} />
+      )}
+    </div>
+  )
+}
+
+function MustKnowPhaseList() {
   const { currentStoreId } = useAuth()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -130,5 +174,134 @@ function ItemList({ items, onChange, showPhase }) {
         </div>
       ))}
     </div>
+  )
+}
+
+// Phase 6 (Expert) / Phase 7 (Master) pool for this store — non-Must-Know
+// shop training items that have been checked into this exact phase via the
+// "+ Add Item" picker below. Mirrors PhaseItemTab.jsx's PhaseItemPicker
+// exactly, scoped to currentStoreId.
+function PhaseItemPicker({ phaseNumber, phaseLabel }) {
+  const { currentStoreId } = useAuth()
+  const [phaseItems, setPhaseItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showAdd, setShowAdd] = useState(false)
+
+  async function load() {
+    if (!currentStoreId) return
+    setLoading(true)
+    const { data } = await supabase
+      .from('shop_training_items')
+      .select('id, title')
+      .eq('store_id', currentStoreId)
+      .eq('is_must_know', false)
+      .eq('training_journey_phase', phaseNumber)
+      .order('title')
+    setPhaseItems(data ?? [])
+    setLoading(false)
+  }
+  useEffect(() => {
+    load()
+  }, [currentStoreId, phaseNumber]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function removeFromPhase(item) {
+    await supabase.from('shop_training_items').update({ training_journey_phase: null }).eq('id', item.id)
+    load()
+  }
+
+  return (
+    <div>
+      <p className="mb-4 text-sm text-gray-500">
+        Items checked in here join {phaseLabel}'s item pool and X-of-Y checklist for this store, on everyone's
+        Training Journey tab. Only items with no phase assigned at all show up in "+ Add Item" below — an item
+        already in Phase 6 or Phase 7 isn't offered again until it's removed from whichever one it's in. Switch
+        stores above to edit another store's Phase 6/7 items.
+      </p>
+      <div className="mb-3 flex justify-end">
+        <Button onClick={() => setShowAdd(true)}>+ Add Item</Button>
+      </div>
+      {loading ? null : !phaseItems.length ? (
+        <EmptyState label={`No items added to ${phaseLabel} yet — click "+ Add Item" to check some in.`} />
+      ) : (
+        <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+          {phaseItems.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
+              <span className="text-sm text-gray-800">{item.title}</span>
+              <Button variant="danger" className="px-2.5" title={`Remove from ${phaseLabel}`} aria-label={`Remove from ${phaseLabel}`} onClick={() => removeFromPhase(item)}>
+                ✕
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {showAdd && (
+        <AddPhaseItemModal
+          storeId={currentStoreId}
+          phaseNumber={phaseNumber}
+          phaseLabel={phaseLabel}
+          onClose={() => {
+            setShowAdd(false)
+            load()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function AddPhaseItemModal({ storeId, phaseNumber, phaseLabel, onClose }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  async function load() {
+    if (!storeId) return
+    setLoading(true)
+    // Jeff, 2026-10-03: only items with NO phase assigned anywhere yet —
+    // once an item is checked into Phase 6 or Phase 7 it disappears from
+    // this list (both of them), rather than staying listed with a checkbox
+    // that could be toggled back and forth here. Removing an item from its
+    // phase (✕ on the main list) is what makes it reappear.
+    const { data } = await supabase
+      .from('shop_training_items')
+      .select('id, title')
+      .eq('store_id', storeId)
+      .eq('is_must_know', false)
+      .is('training_journey_phase', null)
+      .order('title')
+    setItems(data ?? [])
+    setLoading(false)
+  }
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId])
+
+  async function add(item) {
+    setItems((prev) => prev.filter((i) => i.id !== item.id))
+    await supabase.from('shop_training_items').update({ training_journey_phase: phaseNumber }).eq('id', item.id)
+  }
+
+  return (
+    <Modal open onClose={onClose} wide title={`Add Items to ${phaseLabel}`}>
+      <p className="mb-3 text-sm text-gray-500">
+        Every non-Must-Know shop training item for this store not yet assigned to any phase. Check an item to add
+        it to {phaseLabel}.
+      </p>
+      {loading ? null : !items.length ? (
+        <EmptyState label="No unassigned items found." />
+      ) : (
+        <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+          {items.map((item) => (
+            <label key={item.id} className="flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0">
+              <input type="checkbox" onChange={(e) => e.target.checked && add(item)} />
+              {item.title}
+            </label>
+          ))}
+        </div>
+      )}
+      <Button className="mt-4 w-full" onClick={onClose}>
+        Done
+      </Button>
+    </Modal>
   )
 }

@@ -13,15 +13,43 @@ import {
 } from '../../../lib/trainingJourney'
 import LevelUpExamModal from './LevelUpExamModal'
 import FormalExamModal from './FormalExamModal'
+import ExpertExamModal from './ExpertExamModal'
 import MasterExamModal from './MasterExamModal'
 
-// Jeff, 2026-10-02 (Training Journey spec, points 3-4, 9): the 6-phase
-// gamified training view. `profileId` is whose journey is shown;
-// `isSelf=false` (viewed from Shop Management > Learning Tracker) hides
-// every exam-taking button — exams are something a staff member sits
-// themselves, never something a manager triggers on their behalf — but the
-// phase breakdown, item checklist (shared with Study Log — ticking here
-// ticks there too) and title/warning banners are otherwise identical.
+// Jeff, 2026-10-02 (Training Journey spec, points 3-4, 9): the gamified
+// training view. `profileId` is whose journey is shown; `isSelf=false`
+// (viewed from Shop Management > Learning Tracker) hides every exam-taking
+// button — exams are something a staff member sits themselves, never
+// something a manager triggers on their behalf — but the phase breakdown,
+// item checklist (shared with Study Log — ticking here ticks there too)
+// and title/warning banners are otherwise identical.
+//
+// Jeff, 2026-10-03 (Expert/Master split, points 1-4): phases 1-5 still fill
+// by hours worked + a Level-Up Exam each, exactly as before. What used to
+// be a single "Phase 6 (Master)" item-count tier is now TWO item-count
+// tiers stacked on top of the hours-driven ladder: Phase 6 "Expert" and
+// Phase 7 "Master", each its own pool of non-must-know items explicitly
+// checked in via its own "Add Item" picker (Admin/shop Training Journey
+// Setting — see PhaseItemTab.jsx / TrainingJourneySettingPage.jsx). A green
+// "qualified" divider sits between Phase 6 and Phase 5, since passing the
+// Formal Exam (becoming qualified/Advanced) is the gate that unlocks Phase
+// 6+ in the first place. Clicking "View items" on the Phase 6/7 cards pops
+// a standalone modal with a checklist (shared with Study Log, same upsert
+// as the Phase 1-5 inline checklist) instead of expanding inline. Titles
+// are now sequential — Expert before Master — so the Master Exam button
+// requires has_expert_title first, and the title-defense cascade is
+// 3-tiered (Advanced → Expert → Master) based on whichever title is
+// currently held.
+//
+// Jeff, 2026-10-03 (follow-up, same day): "exper跟master phase裡view item
+// 是看專屬於這個Phase的商品" — Phase 6/7's item pool (and the "X out of Y"
+// below) is each phase's OWN exclusively-assigned items only, not a
+// cumulative 1-6 or "every item" pool like the first Expert/Master split
+// pass had — see trainingJourney.js's loadTrainingJourneyData. Also per
+// that follow-up, "所有phase區塊中間都要顯示X out of Y" — every phase card
+// (1-7), not just 6/7, now shows a prominent centered "X out of Y items
+// memorized" line, using the same items list that phase's own checklist
+// already uses (itemsByPhase[n] for 1-5, the phase's own pool for 6/7).
 //
 // Jeff, 2026-10-03: "如果現在要push command，但user(除了developer)看到
 // training journey頁面會顯示coming soon" — the feature's still being tested
@@ -39,8 +67,10 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   const [data, setData] = useState(null)
   const [targetProfile, setTargetProfile] = useState(null)
   const [openPhaseItems, setOpenPhaseItems] = useState(null)
+  const [itemsModalPhase, setItemsModalPhase] = useState(null) // null | 6 | 7
   const [levelUpPhase, setLevelUpPhase] = useState(null)
   const [showFormal, setShowFormal] = useState(null) // null | { isDefense }
+  const [showExpert, setShowExpert] = useState(null) // null | { isDefense }
   const [showMaster, setShowMaster] = useState(null) // null | { isDefense }
   const [congrats, setCongrats] = useState(null)
 
@@ -54,7 +84,9 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
       loadTrainingJourneyData(profileId, currentStoreId),
       supabase
         .from('profiles')
-        .select('qualified, qualified_at, training_journey_phase, has_master_title, master_title_earned_at, title_defense_due_at, title_defense_attempts_used')
+        .select(
+          'qualified, qualified_at, training_journey_phase, has_expert_title, expert_title_earned_at, has_master_title, master_title_earned_at, title_defense_due_at, title_defense_attempts_used'
+        )
         .eq('id', profileId)
         .single(),
     ])
@@ -88,12 +120,13 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
 
   if (loading || !data || !targetProfile) return <LoadingSpinner />
 
-  const { phases, itemsByPhase, phaseSixTotal, phaseSixMemorized, hoursWorked } = data
+  const { phases, itemsByPhase, phaseSixItems, phaseSixTotal, phaseSixMemorized, phaseSevenItems, phaseSevenTotal, phaseSevenMemorized, hoursWorked } = data
   const fractions = phaseFillFractions(phases, hoursWorked)
   const filledPhase = highestFilledPhase(fractions)
   const currentPhase = targetProfile.training_journey_phase ?? 0
   const title = currentTitle(targetProfile, phases)
   const phase6 = phases.find((p) => p.phase_number === 6)
+  const phase7 = phases.find((p) => p.phase_number === 7)
 
   // "落後的item數就是計算工作時數填滿的phase還沒勾選的item數" — only the
   // IMMEDIATE next phase matters, since exams must be passed in order.
@@ -113,8 +146,12 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   // retaking the exam that restores the title.
   const previouslyLostTitle = !targetProfile.qualified && !!targetProfile.qualified_at
 
+  // Three-tiered defense: whichever title is currently held is the one
+  // being defended — Master > Expert > Advanced, since a holder of a
+  // higher title is never also mid-defending a lower one.
   const defenseDue = isDefenseDue(targetProfile)
-  const showFormalDefenseBanner = isSelf && targetProfile.qualified && !targetProfile.has_master_title && defenseDue
+  const showFormalDefenseBanner = isSelf && targetProfile.qualified && !targetProfile.has_expert_title && !targetProfile.has_master_title && defenseDue
+  const showExpertDefenseBanner = isSelf && targetProfile.has_expert_title && !targetProfile.has_master_title && defenseDue
   const showMasterDefenseBanner = isSelf && targetProfile.has_master_title && defenseDue
 
   function phaseCanLevelUp(phaseNumber) {
@@ -126,7 +163,18 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
 
   const showFormalInitial = isSelf && currentPhase >= 5 && !targetProfile.qualified
   const phase6Complete = phaseSixTotal > 0 && phaseSixMemorized === phaseSixTotal
-  const showMasterVoluntary = isSelf && targetProfile.qualified && !targetProfile.has_master_title && phase6Complete
+  const phase7Complete = phaseSevenTotal > 0 && phaseSevenMemorized === phaseSevenTotal
+  const showExpertVoluntary = isSelf && targetProfile.qualified && !targetProfile.has_expert_title && phase6Complete
+  // Master requires Expert first — strict sequential progression through
+  // the three title tiers, same as Expert requires Advanced (qualified)
+  // first.
+  const showMasterVoluntary = isSelf && targetProfile.has_expert_title && !targetProfile.has_master_title && phase7Complete
+
+  function defendTopTitle() {
+    if (targetProfile.has_master_title) setShowMaster({ isDefense: true })
+    else if (targetProfile.has_expert_title) setShowExpert({ isDefense: true })
+    else setShowFormal({ isDefense: true })
+  }
 
   return (
     <div
@@ -137,13 +185,13 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
         <div>
           <p className="text-xs text-gray-400">Current title</p>
           <p className="text-lg font-semibold text-gray-900">
-            {targetProfile.has_master_title ? '👑 ' : ''}
+            {targetProfile.has_master_title ? '👑 ' : targetProfile.has_expert_title ? '🏅 ' : ''}
             {title}
           </p>
         </div>
         {isSelf && defenseDue && (
-          <Button variant="secondary" onClick={() => (targetProfile.has_master_title ? setShowMaster({ isDefense: true }) : setShowFormal({ isDefense: true }))}>
-            {targetProfile.has_master_title ? 'Defend Master Title' : 'Defend Advanced Title'}
+          <Button variant="secondary" onClick={defendTopTitle}>
+            {targetProfile.has_master_title ? 'Defend Master Title' : targetProfile.has_expert_title ? 'Defend Expert Title' : 'Defend Advanced Title'}
           </Button>
         )}
       </div>
@@ -165,32 +213,37 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
           ⚠️ Your Advanced title defense is due{targetProfile.title_defense_attempts_used ? ` — ${targetProfile.title_defense_attempts_used} of 3 attempts used` : ''}.
         </div>
       )}
+      {showExpertDefenseBanner && (
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          ⚠️ Your Expert title defense is due — tick every Phase 6 item as Memorized if you haven't already, then retake the Expert Exam.
+        </div>
+      )}
       {showMasterDefenseBanner && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ⚠️ Your Master title defense is due — tick every Phase 6 item as Memorized if you haven't already, then retake the Master Exam.
+          ⚠️ Your Master title defense is due — tick every Phase 7 item as Memorized if you haven't already, then retake the Master Exam.
         </div>
       )}
 
       {/* Jeff, 2026-10-02: "工作小時填補phase的顏色再明顯一點，Phase 1放最下
           面，phase 6放在上面，這樣才有一直往上填補的感覺" — rendered
-          top-to-bottom in DESCENDING phase order (6..1), so the column
-          reads like a tower/thermometer filling upward — Phase 6 (the
-          summit) sits at the top of the page, Phase 1 (the floor) at the
-          bottom. Phase 6 renders through this same loop (fraction = % of
-          all items memorized) rather than being a visually separate block.
-          Every card's own frame is a thick border in that phase's own
-          text_color, unconditionally, so the row of six still reads as
-          "phase 1 / 2 / 3…" at a glance even when a card is mid-way through
+          top-to-bottom in DESCENDING phase order, so the column reads like
+          a tower/thermometer filling upward — the highest tier sits at the
+          top of the page, Phase 1 (the floor) at the bottom.
+          Jeff, 2026-10-03 (Expert/Master split): Phase 7 (Master) now sits
+          at the very top, Phase 6 (Expert) just below it, then a green
+          "qualified" divider, then Phases 5..1 (hours-driven) below that.
+          Phases 6 and 7 both render through this same loop (fraction = % of
+          their own item pool memorized) rather than being visually separate
+          blocks. Every card's own frame is a thick border in that phase's
+          own text_color, unconditionally, so the column still reads as
+          "phase 7 / 6 / 5…" at a glance even when a card is mid-way through
           filling.
-          Jeff, 2026-10-03 (point 4): reworked the fill itself for phases
-          1-5 (hours-driven; phase 6 is item-completion-driven and keeps its
-          own look below). NOT YET passed that phase's Level-Up Exam: the
-          hours-worked fraction fills the card from the bottom in solid
-          ORANGE at 50% opacity — "要有感覺phase區塊被佔領感覺，但顏色不要太
-          深影響閱讀內容" — no border-top line on the fill anymore (the
-          previous phase-colored edge), since the orange block itself is
-          now the obvious signal. ALREADY passed: the whole card fills with
-          that phase's OWN color instead — "如果通過level up exam，則該
+          Phases 1-5 (hours-driven): NOT YET passed that phase's Level-Up
+          Exam — the hours-worked fraction fills the card from the bottom in
+          solid ORANGE at 50% opacity — "要有感覺phase區塊被佔領感覺，但顏色
+          不要太深影響閱讀內容" — no border-top line on the fill (the orange
+          block itself is the signal). ALREADY passed: the whole card fills
+          with that phase's OWN color instead — "如果通過level up exam，則該
           phase色塊變回自己的顏色". A Qualified staff member has
           currentPhase>=5, so every one of phases 1-5 is "passed" and shows
           its own color (考試都過了). A staff member disqualified after
@@ -201,100 +254,149 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
           "advanced phase變回全橘色(工作小時超過...)，沒有超過的話則回照原
           本填補計算" — both cases fall out of the same fraction/passed
           logic below, no special-casing needed. */}
-      {[6, 5, 4, 3, 2, 1].map((phaseNumber) => {
-        const p = phaseNumber === 6 ? phase6 : phases.find((ph) => ph.phase_number === phaseNumber)
+      {[7, 6, 5, 4, 3, 2, 1].map((phaseNumber) => {
+        const p = phaseNumber === 7 ? phase7 : phaseNumber === 6 ? phase6 : phases.find((ph) => ph.phase_number === phaseNumber)
         if (!p) return null
-        const fraction = phaseNumber === 6 ? (phaseSixTotal > 0 ? phaseSixMemorized / phaseSixTotal : 0) : fractions[phaseNumber] ?? 0
-        const items = phaseNumber <= 5 ? itemsByPhase[phaseNumber] ?? [] : null
+        const fraction =
+          phaseNumber === 7
+            ? phaseSevenTotal > 0
+              ? phaseSevenMemorized / phaseSevenTotal
+              : 0
+            : phaseNumber === 6
+              ? phaseSixTotal > 0
+                ? phaseSixMemorized / phaseSixTotal
+                : 0
+              : fractions[phaseNumber] ?? 0
+        const items = phaseNumber <= 5 ? itemsByPhase[phaseNumber] ?? [] : phaseNumber === 6 ? phaseSixItems : phaseSevenItems
         const passed = phaseNumber <= 5 && currentPhase >= phaseNumber
         const canLevelUp = phaseNumber <= 5 && phaseCanLevelUp(phaseNumber)
+        const complete = phaseNumber === 6 ? phase6Complete : phaseNumber === 7 ? phase7Complete : false
 
         return (
-          <div
-            key={phaseNumber}
-            className="relative overflow-hidden rounded-xl bg-white"
-            style={{ border: `3px solid ${p.text_color}` }}
-          >
-            {phaseNumber <= 5 ? (
-              passed ? (
-                <div className="absolute bottom-0 left-0 h-full w-full" style={{ background: p.bg_color, filter: 'saturate(1.8) brightness(0.96)' }} />
+          <div key={phaseNumber}>
+            <div className="relative overflow-hidden rounded-xl bg-white" style={{ border: `3px solid ${p.text_color}` }}>
+              {phaseNumber <= 5 ? (
+                passed ? (
+                  <div className="absolute bottom-0 left-0 h-full w-full" style={{ background: p.bg_color, filter: 'saturate(1.8) brightness(0.96)' }} />
+                ) : (
+                  <div
+                    className="absolute bottom-0 left-0 w-full transition-all duration-500"
+                    style={{ height: `${Math.round(fraction * 100)}%`, background: '#F97316', opacity: 0.5 }}
+                  />
+                )
               ) : (
                 <div
                   className="absolute bottom-0 left-0 w-full transition-all duration-500"
-                  style={{ height: `${Math.round(fraction * 100)}%`, background: '#F97316', opacity: 0.5 }}
+                  style={{
+                    height: `${Math.round(fraction * 100)}%`,
+                    background: p.bg_color,
+                    filter: 'saturate(2.4) brightness(0.94)',
+                    borderTop: `3px solid ${p.text_color}`,
+                  }}
                 />
-              )
-            ) : (
-              <div
-                className="absolute bottom-0 left-0 w-full transition-all duration-500"
-                style={{
-                  height: `${Math.round(fraction * 100)}%`,
-                  background: p.bg_color,
-                  filter: 'saturate(2.4) brightness(0.94)',
-                  borderTop: `3px solid ${p.text_color}`,
-                }}
-              />
-            )}
-            <div className="relative z-10 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold" style={{ color: p.text_color }}>
-                  Phase {phaseNumber}: {p.label} {passed && '✓'}
+              )}
+              <div className="relative z-10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold" style={{ color: p.text_color }}>
+                    Phase {phaseNumber}: {p.label} {(passed || complete) && '✓'}
+                  </p>
+                  {phaseNumber <= 5 && <p className="text-xs text-gray-500">{Math.round(fraction * 100)}% hours filled</p>}
+                </div>
+                {/* Jeff, 2026-10-03 (follow-up): "所有phase區塊中間都要顯示X
+                    out of Y" — every phase, not just 6/7, shows this same
+                    prominent centered line now; X/Y both come from `items`,
+                    which is already scoped to exactly this phase's own
+                    pool above (itemsByPhase[n] for 1-5, the phase's own
+                    exclusive pool for 6/7). */}
+                <p className="mt-1 text-center text-sm font-semibold text-gray-700">
+                  {items.filter((i) => i.memorized).length} out of {items.length} items memorized
                 </p>
-                <p className="text-xs text-gray-500">
-                  {phaseNumber <= 5
-                    ? `${Math.round(fraction * 100)}% hours filled · ${items.filter((i) => i.memorized).length}/${items.length} memorized`
-                    : `${phaseSixMemorized} out of ${phaseSixTotal} items memorized`}
-                </p>
+
+                {phaseNumber <= 5 && (
+                  <>
+                    <button
+                      className="mt-2 text-xs font-medium text-brand-600 hover:underline"
+                      onClick={() => setOpenPhaseItems(openPhaseItems === phaseNumber ? null : phaseNumber)}
+                    >
+                      {openPhaseItems === phaseNumber ? 'Hide items' : `View items (${items.length})`}
+                    </button>
+                    {openPhaseItems === phaseNumber && (
+                      <div className="mt-2 space-y-1 rounded-lg bg-white/70 p-2">
+                        {items.length === 0 ? (
+                          <p className="text-xs text-gray-400">No items assigned to this phase yet.</p>
+                        ) : (
+                          items.map((i) => (
+                            <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 text-sm text-gray-700">
+                              <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
+                              {i.label}
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    )}
+                    {canLevelUp && (
+                      <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setLevelUpPhase(phaseNumber)}>
+                        🎯 Take Level-Up Exam
+                      </Button>
+                    )}
+                  </>
+                )}
+
+                {(phaseNumber === 6 || phaseNumber === 7) && (
+                  <>
+                    <button
+                      className="mt-2 text-xs font-medium text-brand-600 hover:underline"
+                      onClick={() => setItemsModalPhase(phaseNumber)}
+                    >
+                      View items ({items.length})
+                    </button>
+                    {phaseNumber === 6 && showExpertVoluntary && (
+                      <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setShowExpert({ isDefense: false })}>
+                        🏅 Take Expert Exam
+                      </Button>
+                    )}
+                    {phaseNumber === 7 && showMasterVoluntary && (
+                      <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setShowMaster({ isDefense: false })}>
+                        🏆 Take Master Exam
+                      </Button>
+                    )}
+                  </>
+                )}
               </div>
-
-              {phaseNumber <= 5 && (
-                <>
-                  <button
-                    className="mt-2 text-xs font-medium text-brand-600 hover:underline"
-                    onClick={() => setOpenPhaseItems(openPhaseItems === phaseNumber ? null : phaseNumber)}
-                  >
-                    {openPhaseItems === phaseNumber ? 'Hide items' : `View items (${items.length})`}
-                  </button>
-                  {openPhaseItems === phaseNumber && (
-                    <div className="mt-2 space-y-1 rounded-lg bg-white/70 p-2">
-                      {items.length === 0 ? (
-                        <p className="text-xs text-gray-400">No items assigned to this phase yet.</p>
-                      ) : (
-                        items.map((i) => (
-                          <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 text-sm text-gray-700">
-                            <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
-                            {i.label}
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  )}
-                  {canLevelUp && (
-                    <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setLevelUpPhase(phaseNumber)}>
-                      🎯 Take Level-Up Exam
-                    </Button>
-                  )}
-                </>
-              )}
-
-              {phaseNumber === 6 && (
-                <>
-                  {showFormalInitial && (
-                    <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setShowFormal({ isDefense: false })}>
-                      📝 Take Formal Exam
-                    </Button>
-                  )}
-                  {showMasterVoluntary && (
-                    <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setShowMaster({ isDefense: false })}>
-                      🏆 Take Master Exam
-                    </Button>
-                  )}
-                </>
-              )}
             </div>
+
+            {phaseNumber === 6 && (
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-3 rounded-full border-2 border-green-400 bg-green-50 px-4 py-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-green-700">
+                  {targetProfile.qualified ? '✅ Qualified' : '🔒 Not Yet Qualified'}
+                </span>
+                {showFormalInitial && (
+                  <Button className="!px-3 !py-1 text-xs" onClick={() => setShowFormal({ isDefense: false })}>
+                    📝 Take Formal Exam
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )
       })}
+
+      {itemsModalPhase && (
+        <Modal open onClose={() => setItemsModalPhase(null)} title={`Phase ${itemsModalPhase} Items`}>
+          <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+            {(itemsModalPhase === 6 ? phaseSixItems : phaseSevenItems).length === 0 ? (
+              <p className="text-xs text-gray-400">No items yet.</p>
+            ) : (
+              (itemsModalPhase === 6 ? phaseSixItems : phaseSevenItems).map((i) => (
+                <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0">
+                  <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
+                  {i.label}
+                </label>
+              ))
+            )}
+          </div>
+        </Modal>
+      )}
 
       {levelUpPhase && (
         <LevelUpExamModal
@@ -314,6 +416,16 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
           isDefense={showFormal.isDefense}
           onClose={() => setShowFormal(null)}
           onResult={() => reload()}
+        />
+      )}
+      {showExpert && (
+        <ExpertExamModal
+          isDefense={showExpert.isDefense}
+          onClose={() => setShowExpert(null)}
+          onResult={({ passed }) => {
+            if (passed && !showExpert.isDefense) setCongrats('Expert')
+            reload()
+          }}
         />
       )}
       {showMaster && (
