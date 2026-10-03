@@ -82,11 +82,16 @@ export default function QuizSettingsTab() {
   // singleton, same shape as formal_quiz_settings). error_tolerance is how
   // many NON-must-know questions can be missed and still pass — a missed
   // must-know-linked question always fails regardless (see
-  // MasterExamModal.jsx/examBuilders.js). reminder_period_months is the
-  // Master title-defense cadence — deliberately separate from Formal Quiz's
-  // reminderMonths above, since a Master titleholder defends on their own
-  // schedule, not the Advanced one (recordMasterExamResult in
-  // trainingJourney.js).
+  // MasterExamModal.jsx/ExpertExamModal.jsx/examBuilders.js).
+  // reminder_period_months is the title-defense cadence — deliberately
+  // separate from Formal Quiz's reminderMonths above, since Expert/Master
+  // titleholders defend on their own schedule, not the Advanced one
+  // (recordExpertExamResult/recordMasterExamResult in trainingJourney.js).
+  // Jeff, 2026-10-03 (Expert/Master split, point 3): "出題是從phase 1-6
+  // 勾選的item出題，邏輯設定都跟master exam一樣" — Expert reuses this exact
+  // same settings row rather than getting its own, so the state/field names
+  // below stay "master" (no schema change) while the labels rendered below
+  // read "Expert/Master" throughout.
   const [masterQuestionCount, setMasterQuestionCount] = useState(30)
   const [masterErrorTolerance, setMasterErrorTolerance] = useState(0)
   const [masterReminderMonths, setMasterReminderMonths] = useState(3)
@@ -226,14 +231,22 @@ export default function QuizSettingsTab() {
           </p>
         </section>
 
-        {/* Master Exam — Training Journey spec point 10. Its own section,
+        {/* Expert/Master Exam — Training Journey spec point 10, relabeled
+            2026-10-03 for the Expert/Master split (point 3): "Master exam
+            的敘述都改成Expert/Master exam" — Expert and Master share this
+            exact same settings row (question count / error tolerance /
+            defense cadence, still against master_quiz_settings — no new
+            settings row, since Expert's exam logic is a direct clone of
+            Master's per Jeff's spec), so the labels read "Expert/Master"
+            throughout rather than duplicating the section. Its own section,
             separate from Formal Quiz's above, including its own reminder
-            cadence (the Master title-defense clock, distinct from Advanced's). */}
+            cadence (the Expert/Master title-defense clock, distinct from
+            Advanced's). */}
         <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-          <h3 className="mb-3 text-sm font-semibold text-indigo-700">🎓 Master Quiz</h3>
+          <h3 className="mb-3 text-sm font-semibold text-indigo-700">🎓 Expert/Master Quiz</h3>
           <div className="flex flex-wrap gap-4">
             <label className="block max-w-xs">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Master Exam</span>
+              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Expert/Master Exam</span>
               <input
                 type="number"
                 className="input"
@@ -267,9 +280,9 @@ export default function QuizSettingsTab() {
             </label>
           </div>
           <p className="mt-2 text-xs text-gray-400">
-            Any missed question linked to a Must-Know item always fails the Master Exam, regardless of the error
-            tolerance above — tolerance only covers non-must-know misses. A Master titleholder's recurring title
-            defense runs on this cadence, separate from Formal Quiz's Advanced defense cadence above.
+            Any missed question linked to a Must-Know item always fails the Expert or Master Exam, regardless of
+            the error tolerance above — tolerance only covers non-must-know misses. An Expert or Master titleholder's
+            recurring title defense runs on this cadence, separate from Formal Quiz's Advanced defense cadence above.
           </p>
         </section>
 

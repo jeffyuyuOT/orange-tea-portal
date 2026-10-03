@@ -482,9 +482,9 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : undefined}
                 >
                   {row.name || <span className="text-gray-400">Unnamed</span>}
-                  {titleStyle?.crown && (
-                    <span className="ml-1" title="Master">
-                      👑
+                  {titleStyle?.icon && (
+                    <span className="ml-1" title={titleStyle.icon === '👑' ? 'Master' : 'Expert'}>
+                      {titleStyle.icon}
                     </span>
                   )}
                   {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}
@@ -602,9 +602,9 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
             title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : row.name}
           >
             {row.name || <span className="text-gray-400">Unnamed</span>}
-            {titleStyle?.crown && (
-              <span className="ml-1" title="Master">
-                👑
+            {titleStyle?.icon && (
+              <span className="ml-1" title={titleStyle.icon === '👑' ? 'Master' : 'Expert'}>
+                {titleStyle.icon}
               </span>
             )}
             {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}

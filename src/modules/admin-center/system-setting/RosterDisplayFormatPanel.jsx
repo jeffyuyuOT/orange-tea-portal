@@ -14,12 +14,12 @@ const OPTIONS = [
     value: 'title_crown',
     label: 'Title mode, with crown',
     description:
-      'Name/shift time colored by Training Journey phase (Phase 1–4 each in their own color; Advanced and Master both default/black, to avoid clutter) — Master gets a 👑.',
+      'Name/shift time colored by Training Journey phase (Phase 1–4 each in their own color; Advanced, Expert and Master all default/black, to avoid clutter) — Master gets a 👑, Expert gets a 🏅.',
   },
   {
     value: 'title_no_crown',
     label: 'Title mode, no crown',
-    description: 'Same phase coloring as above, but without the 👑 — a Master titleholder then reads identically to Advanced.',
+    description: 'Same phase coloring as above, but without the 👑/🏅 — Master and Expert titleholders then read identically to Advanced.',
   },
 ]
 

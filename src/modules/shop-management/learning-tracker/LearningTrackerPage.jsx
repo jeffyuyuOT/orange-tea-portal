@@ -127,11 +127,13 @@ export default function LearningTrackerPage() {
             // 顏色" — the title text itself now takes on that phase's own
             // admin-configured text_color (Admin Center > Training Journey
             // > Phase Setting), same colors the Training Journey phase
-            // cards use. Master reads as Phase 6's color (has_master_title
-            // overrides the LABEL to "Master" in currentTitle(), but it's
-            // still Phase 6's tier). Phase 0 (Trainee — no phase row to
-            // match) keeps the plain gray this already had.
-            const titlePhaseNumber = s.has_master_title ? 6 : s.training_journey_phase ?? 0
+            // cards use. Phase 0 (Trainee — no phase row to match) keeps
+            // the plain gray this already had.
+            //
+            // Jeff, 2026-10-03 (Expert/Master split, point 4): Master now
+            // reads as Phase 7's color (was Phase 6, before the split),
+            // Expert reads as Phase 6's own color.
+            const titlePhaseNumber = s.has_master_title ? 7 : s.has_expert_title ? 6 : s.training_journey_phase ?? 0
             const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
             return (
               <button
@@ -151,7 +153,7 @@ export default function LearningTrackerPage() {
                       className={`text-xs font-medium ${titleColor ? '' : 'text-gray-400'}`}
                       style={titleColor ? { color: titleColor } : undefined}
                     >
-                      {s.has_master_title && '👑 '}
+                      {s.has_master_title ? '👑 ' : s.has_expert_title ? '🏅 ' : ''}
                       {title}
                     </span>
                   )}

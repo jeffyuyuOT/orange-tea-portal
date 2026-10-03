@@ -26,7 +26,7 @@ import { gradeQuestion } from '../../../lib/quizGrading'
 const MODES = [
   { key: 'quick', label: '🧠 Quick Quiz', hint: 'From whatever you\'ve ticked "Memorized" so far.' },
   { key: 'mock_formal', label: '📝 Mock Formal Quiz', hint: "Practice run of the real Formal Exam's question set — doesn't affect your title." },
-  { key: 'mock_master', label: '🏆 Mock Master Exam', hint: "Practice run of the real Master Exam's question set — doesn't affect your title." },
+  { key: 'mock_master', label: '🏆 Mock Expert/Master Exam', hint: "Practice run of the real Master Exam's question set — doesn't affect your title." },
 ]
 
 function shuffle(arr) {
@@ -258,7 +258,7 @@ export default function TakeAQuizModal({ onClose, onCompleted }) {
     setSubmitting(false)
   }
 
-  const title = mode === 'quick' ? 'Quick Quiz' : mode === 'mock_formal' ? 'Mock Formal Quiz' : mode === 'mock_master' ? 'Mock Master Exam' : 'Take a Quiz'
+  const title = mode === 'quick' ? 'Quick Quiz' : mode === 'mock_formal' ? 'Mock Formal Quiz' : mode === 'mock_master' ? 'Mock Expert/Master Exam' : 'Take a Quiz'
 
   return (
     <Modal open onClose={onClose} wide title={title}>

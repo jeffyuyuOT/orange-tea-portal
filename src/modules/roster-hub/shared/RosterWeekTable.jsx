@@ -97,11 +97,21 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         .eq('store_id', period.store_id),
       supabase.rpc('store_roster_profiles', { p_store_id: period.store_id }),
       // Jeff, 2026-10-02 (Training Journey spec, point 6): a second, equally
-      // narrow RPC (migration 0092) for the two Training Journey fields the
-      // title display modes below need — see store_roster_titles' own
-      // comment for why this is a separate function rather than two more
-      // columns bolted onto store_roster_profiles.
-      supabase.rpc('store_roster_titles', { p_store_id: period.store_id }),
+      // narrow RPC for the Training Journey fields the title display modes
+      // below need — see store_roster_titles_v2's own comment for why this
+      // is a separate function rather than columns bolted onto
+      // store_roster_profiles.
+      //
+      // Jeff, 2026-10-03 (Expert/Master split, point 4): switched from the
+      // original store_roster_titles to store_roster_titles_v2 — a plain
+      // CREATE OR REPLACE couldn't widen the first function's return shape
+      // to add has_expert_title (Postgres requires DROP FUNCTION first to
+      // change a function's OUT columns, and this codebase's standing rule
+      // is to never drop a live function), so a new function with the full
+      // {training_journey_phase, has_expert_title, has_master_title} shape
+      // was added instead; the original store_roster_titles is unused now
+      // but left in place rather than dropped.
+      supabase.rpc('store_roster_titles_v2', { p_store_id: period.store_id }),
     ]).then(([{ data }, { data: nameRows }, { data: pendingRows }, { data: profileRows }, { data: titleRows }]) => {
       if (!active) return
       const titleById = new Map((titleRows ?? []).map((t) => [t.id, t]))
@@ -142,6 +152,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
             isStaff: true,
             qualified: r.profiles.qualified === true,
             training_journey_phase: r.profiles.training_journey_phase,
+            has_expert_title: r.profiles.has_expert_title,
             has_master_title: r.profiles.has_master_title,
             order: r.roster_order,
           }))
@@ -189,6 +200,7 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
         isStaff: !!e.profile_id,
         qualified: e.profiles?.qualified === true,
         training_journey_phase: e.profiles?.training_journey_phase,
+        has_expert_title: e.profiles?.has_expert_title,
         has_master_title: e.profiles?.has_master_title,
         order: e.profile_id ? orderByProfile.get(e.profile_id) : orderByPendingName.get((e.staff_name_raw || '').toLowerCase()),
       },
@@ -258,9 +270,9 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                     title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : undefined}
                   >
                     {info.name || 'Unassigned'}
-                    {titleStyle?.crown && (
-                      <span className="ml-1" title="Master">
-                        👑
+                    {titleStyle?.icon && (
+                      <span className="ml-1" title={titleStyle.icon === '👑' ? 'Master' : 'Expert'}>
+                        {titleStyle.icon}
                       </span>
                     )}
                     {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}

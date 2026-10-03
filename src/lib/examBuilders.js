@@ -251,3 +251,54 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
   const questions = shuffle(tagged).slice(0, questionCount)
   return { questions, reason: null }
 }
+
+// Expert Exam question set — shared by the real Expert Exam (initial +
+// title-defense re-sit, both self-graded) AND, later, any Mock Expert mode.
+// Unlike Master (which draws from EVERY active/visible item), Jeff's spec
+// for Expert is narrower: "出題是從phase 1-6勾選的item出題" — only items
+// that have been assigned into phase 1-6 (must-know items assigned via the
+// normal 1-5 dropdown, PLUS whichever non-must-know items were checked into
+// phase 6 via the dedicated Add Item picker) are eligible. "邏輯設定都跟
+// master exam一樣" — same settings/grading logic as Master, so this reuses
+// master_quiz_settings (question_count/error_tolerance) and the same
+// isMustKnow-miss-always-fails rule; it's a sibling of buildMasterExamQuestionSet
+// with a narrower item pool, not a new settings row.
+export async function buildExpertExamQuestionSet(storeId) {
+  const [{ data: formulaItemRows }, { data: drinkStoreRows }, { data: trainingItemRows }, { data: settings }] = await Promise.all([
+    supabase.from('formula_items').select('id, is_must_know, training_journey_phase').eq('is_active', true),
+    supabase.from('formula_item_stores').select('*'),
+    storeId
+      ? supabase.from('shop_training_items').select('id, is_must_know, training_journey_phase').eq('store_id', storeId)
+      : Promise.resolve({ data: [] }),
+    supabase.from('master_quiz_settings').select('*').maybeSingle(),
+  ])
+  const visibleFormulaItems = filterVisibleForStore(formulaItemRows ?? [], drinkStoreRows ?? [], 'formula_item_id', storeId)
+  const phaseSixFormulaItems = visibleFormulaItems.filter((i) => i.training_journey_phase && i.training_journey_phase <= 6)
+  const mustKnowFormulaIds = new Set(phaseSixFormulaItems.filter((i) => i.is_must_know).map((i) => i.id))
+  const visibleFormulaIdSet = new Set(phaseSixFormulaItems.map((i) => i.id))
+  const phaseSixTrainingItems = (trainingItemRows ?? []).filter((i) => i.training_journey_phase && i.training_journey_phase <= 6)
+  const mustKnowTrainingIds = new Set(phaseSixTrainingItems.filter((i) => i.is_must_know).map((i) => i.id))
+  const trainingIdSet = new Set(phaseSixTrainingItems.map((i) => i.id))
+
+  const questionCount = settings?.question_count ?? 30
+  const errorTolerance = settings?.error_tolerance ?? 0
+
+  if (!visibleFormulaIdSet.size && !trainingIdSet.size) return { questions: [], reason: 'no_questions', errorTolerance }
+
+  const { data: candidateQuestions } = await supabase.from('quiz_questions').select('*').or(`store_id.is.null,store_id.eq.${storeId}`)
+  const filtered = (candidateQuestions ?? []).filter((q) => {
+    if (q.formula_item_id) return visibleFormulaIdSet.has(q.formula_item_id)
+    if (q.shop_training_item_id) return trainingIdSet.has(q.shop_training_item_id)
+    return true
+  })
+  if (!filtered.length) return { questions: [], reason: 'no_questions', errorTolerance }
+
+  const tagged = filtered.map((q) => ({
+    ...q,
+    localId: q.id,
+    type: q.question_type === 'multi' ? 'multi' : q.question_type === 'fill_blank' ? 'fill_blank' : 'choice',
+    isMustKnow: q.formula_item_id ? mustKnowFormulaIds.has(q.formula_item_id) : q.shop_training_item_id ? mustKnowTrainingIds.has(q.shop_training_item_id) : false,
+  }))
+  const questions = shuffle(tagged).slice(0, questionCount)
+  return { questions, reason: null, errorTolerance }
+}
