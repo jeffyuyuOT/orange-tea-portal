@@ -61,6 +61,35 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
     return raw.replace(/\D/g, '').slice(0, 2)
   }
 
+  // Jeff, 2026-10-03: a staff tester typed "20" into the hour box meaning
+  // 8:00 PM in 24-hour notation — this field is 12-hour (1-12) + a separate
+  // AM/PM dropdown, so "20" was simply out of range. commit() correctly
+  // treated that as "not filled in" (same as an empty box), but nothing on
+  // screen showed WHY — the hour box kept displaying "20" with no error
+  // until Save, which then rejected the whole row with a generic "enter a
+  // time" message that didn't explain what was wrong with a box that
+  // visibly had something typed in it. Once the second digit completes a
+  // 24-hour-style hour (13-23, or 00 for midnight), auto-convert it to its
+  // 12-hour equivalent AND flip AM/PM to match, rather than silently
+  // discarding what was typed — "20" becomes hour "8" with PM selected, so
+  // the box visibly shows what it understood. Only fires once both digits
+  // are in (`raw.length === 2`) so it never interferes with typing "08" or
+  // "09" one digit at a time.
+  function normalizeTypedHour(raw) {
+    if (raw.length !== 2) return { displayHour: raw, forcedAmpm: null }
+    const n = Number(raw)
+    if (n === 0) return { displayHour: '12', forcedAmpm: 'AM' }
+    if (n >= 13 && n <= 23) return { displayHour: String(n - 12), forcedAmpm: 'PM' }
+    return { displayHour: raw, forcedAmpm: null }
+  }
+
+  // Anything left over after that conversion (24-99) is genuinely invalid,
+  // same for a typed minute over 59 — a red border now flags it immediately
+  // instead of leaving the box looking "filled in" until a later Save
+  // attempt fails with no visible explanation.
+  const hourInvalid = hour !== '' && (Number(hour) < 1 || Number(hour) > 12)
+  const minuteInvalid = minute !== '' && Number(minute) > 59
+
   return (
     <div className={`flex items-center gap-1 ${className}`}>
       <input
@@ -70,12 +99,14 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="hh"
         disabled={disabled}
-        className="input w-12 !py-1.5 text-center"
+        className={`input w-12 !py-1.5 text-center ${hourInvalid ? 'border-red-400' : ''}`}
         value={hour}
         onChange={(e) => {
-          const v = digitsOnly(e.target.value)
-          setHour(v)
-          commit(v, minute, ampm)
+          const { displayHour, forcedAmpm } = normalizeTypedHour(digitsOnly(e.target.value))
+          const nextAmpm = forcedAmpm ?? ampm
+          setHour(displayHour)
+          if (forcedAmpm) setAmpm(forcedAmpm)
+          commit(displayHour, minute, nextAmpm)
         }}
       />
       <span className="text-gray-400">:</span>
@@ -86,7 +117,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="mm"
         disabled={disabled}
-        className="input w-12 !py-1.5 text-center"
+        className={`input w-12 !py-1.5 text-center ${minuteInvalid ? 'border-red-400' : ''}`}
         value={minute}
         onChange={(e) => {
           const v = digitsOnly(e.target.value)

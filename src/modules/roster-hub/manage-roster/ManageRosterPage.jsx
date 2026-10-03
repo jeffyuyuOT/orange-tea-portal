@@ -721,7 +721,24 @@ export default function ManageRosterPage() {
               <span className="hidden sm:inline">Action ▾</span>
             </Button>
             {actionMenuOpen && (
-              <div className="absolute right-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              /* Jeff, 2026-10-03 (screenshot): "點三個點跳出動作視窗還是會
+                  超過手機視窗" — on mobile this toolbar's two halves
+                  (date/Save/Submit, then Availability/Action) wrap onto
+                  their own lines (sm:flex-nowrap/sm:justify-between above
+                  only kick in at sm+), so below sm the Action button no
+                  longer sits at the screen's right edge the way it does on
+                  desktop — it can end up anywhere left-of-center depending
+                  on how much wrapped. Anchoring this fixed-208px-wide menu
+                  with `right-0` (flush to the BUTTON's own right edge,
+                  which desktop relies on to stay flush with the actual
+                  screen edge) then pulled it leftward past the left edge of
+                  a narrow phone screen instead, clipping its first ~80px
+                  off-screen. `left-0` on mobile opens it rightward from the
+                  button instead — plenty of room in that direction at that
+                  width — and `sm:right-0` restores the original anchor at
+                  sm+, where the button genuinely is flush with the screen's
+                  right edge again. */
+              <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
                 <button
                   type="button"
                   className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"

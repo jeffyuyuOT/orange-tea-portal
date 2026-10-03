@@ -27,6 +27,46 @@ function cellKey(date, storeId) {
   return `${date}|${storeId}`
 }
 
+// Jeff, 2026-10-03: "edit attendance的edit by xxx後面顯示一個information
+// 小圖示，點擊會顯示原因，現在是鼠標移到跳出，但手機板不支援，所以統一用小
+// 圖示" — the saved reason (e.note) used to only surface via the browser's
+// native `title` tooltip (hover-only, so it never worked on a touch
+// screen). Same ℹ️ click-to-reveal pattern ManageRosterPage's own info icon
+// already uses, just sized for an inline "edit at …" line instead of a
+// toolbar — a small popover anchored under the icon, open/closed per
+// instance, dismissed by tapping/clicking anywhere else (the fixed
+// full-screen backdrop below it, same trick used for Action-menu-style
+// dropdowns elsewhere in this app). Renders nothing when there's no reason
+// saved for that edit (same as the old `title` attribute showing nothing).
+function EditReasonIcon({ note }) {
+  const [open, setOpen] = useState(false)
+  if (!note) return null
+  return (
+    <span className="relative inline-block align-middle">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[11px] leading-none text-amber-600 hover:text-amber-800"
+        aria-label="Show reason for this edit"
+        title="Show reason for this edit"
+      >
+        ℹ️
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-5 z-20 w-56 rounded-lg border border-gray-200 bg-white p-2 text-xs font-normal normal-case text-gray-700 shadow-lg">
+            {note}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 // Shared by a person's own "Attendance Logs" tab (My Dashboard > Time &
 // Attendance, canEdit always false — nobody edits their own punches) and
 // Shop Management > Staff Time Logs (a manager/admin picks an employee;
@@ -260,8 +300,9 @@ export default function AttendanceLogTable({
                           {s.clockIn ? format(new Date(s.clockIn.occurred_at), 'h:mm a') : 'no clock-in recorded'} –{' '}
                           {s.clockOut ? format(new Date(s.clockOut.occurred_at), 'h:mm a') : 'still clocked in'}
                           {!!sessionEdits.length && (
-                            <span className="ml-2 text-xs text-amber-600" title={editTitle(sessionEdits[0])}>
+                            <span className="ml-2 text-xs text-amber-600">
                               {editNote(sessionEdits[0])}
+                              <EditReasonIcon note={editTitle(sessionEdits[0])} />
                             </span>
                           )}
                         </span>
@@ -270,9 +311,10 @@ export default function AttendanceLogTable({
                     )
                   })}
                   {unmatchedEdits.map((e) => (
-                    <div key={e.id} className="text-xs text-amber-600" title={editTitle(e)}>
+                    <div key={e.id} className="text-xs text-amber-600">
                       Deleted {e.before_event_type === 'clock_in' ? 'clock in' : 'clock out'} at{' '}
                       {e.before_occurred_at ? format(new Date(e.before_occurred_at), 'h:mm a') : '—'} ({editNote(e)})
+                      <EditReasonIcon note={editTitle(e)} />
                     </div>
                   ))}
                   {/* Jeff, 2026-10-02: "Break x1寫在所有log in/out時間的最下
@@ -288,8 +330,9 @@ export default function AttendanceLogTable({
                     <div className="flex items-center justify-between text-sm text-gray-600">
                       <span>
                         Break {formatBreakUnits(breakRow.break_half_hours)}
-                        <span className="ml-2 text-xs text-amber-600" title={editTitle(breakRow)}>
+                        <span className="ml-2 text-xs text-amber-600">
                           {editNote(breakRow)}
+                          <EditReasonIcon note={editTitle(breakRow)} />
                         </span>
                       </span>
                       <span className="text-gray-400">−{formatMinutes(breakMinutes)}</span>
