@@ -36,24 +36,46 @@ export default function LeaveScheduleTab() {
     // roster_display_name is per-store — fetch it for this store separately
     // and fold it onto each leave request's profile, since leave_requests
     // itself only ever belongs to one store anyway.
+    //
+    // Jeff, 2026-10-04: "用staff看leave schedule看其他人名字是unknown" — this
+    // used to embed `profiles(first_name,last_name)` straight onto the
+    // leave_requests query. That embed is gated by `profiles`' OWN select
+    // RLS ("read own or same-store profiles" only actually allows your own
+    // row, or any row if you're admin/shop_manager — a plain staff account
+    // gets null for every colleague), so a staff viewer saw every OTHER
+    // person's name come back null → rosterDisplayName's fallback below →
+    // "Unknown", even though they're allowed to see the leave_requests rows
+    // themselves (same-store read policy, unrelated to profiles' RLS).
+    // Exact same root cause RosterWeekTable.jsx had for the Bulletin/My
+    // Roster view (migration 0077_roster_colleague_visibility.sql) — fixed
+    // the same way, with that migration's existing store_roster_profiles()
+    // RPC (SECURITY DEFINER, scoped to "does the caller have access to
+    // this store", not to profiles' own RLS) instead of widening that
+    // table's RLS, since profiles also carries real PII no colleague should
+    // ever read a row of.
     Promise.all([
       supabase
         .from('leave_requests')
-        .select('*, profiles(first_name,last_name)')
+        .select('*')
         .eq('store_id', currentStoreId)
         .eq('status', 'active')
         .lt('start_at', monthEndExclusive.toISOString())
         .gt('end_at', monthStart.toISOString())
         .order('start_at'),
       supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', currentStoreId),
-    ]).then(([{ data, error }, { data: nameRows }]) => {
+      supabase.rpc('store_roster_profiles', { p_store_id: currentStoreId }),
+    ]).then(([{ data, error }, { data: nameRows }, { data: profileRows }]) => {
       if (error) console.error('load leave schedule failed', error)
       const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
+      const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]))
       setLeaves(
-        (data ?? []).map((l) => ({
-          ...l,
-          profiles: l.profiles ? { ...l.profiles, roster_display_name: nameByProfile.get(l.profile_id) } : l.profiles,
-        }))
+        (data ?? []).map((l) => {
+          const p = profileById.get(l.profile_id)
+          return {
+            ...l,
+            profiles: p ? { ...p, roster_display_name: nameByProfile.get(l.profile_id) } : null,
+          }
+        })
       )
       setLoading(false)
     })
