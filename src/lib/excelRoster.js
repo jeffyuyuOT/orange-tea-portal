@@ -237,12 +237,39 @@ const STYLED_TOTAL_COL = STYLED_FIRST_DAY_COL + 14 // 17
 const STYLED_WKD_COL = STYLED_TOTAL_COL + 1 // 18
 
 const RED_FONT = { argb: 'FFCC0000' }
-const GRID_BORDER = { style: 'thin', color: { argb: 'FFBFBFBF' } }
+// Jeff, 2026-10-04: "班表最外框粗線，行之間也要有線" — this was already
+// drawing a line on every cell's every side (styledBorder below runs for
+// every row regardless of data), just in a pale gray that barely showed up
+// next to Jeff's own hand-drawn reference's solid black grid — so this
+// switches the everyday grid line to solid black (same style, just a
+// visible color) and OUTER_RULE (new) is laid over the table's four outer
+// edges afterwards for the thicker frame his hand-drawn version has.
+const GRID_BORDER = { style: 'thin', color: { argb: 'FF000000' } }
 const HEADER_RULE = { style: 'thick', color: { argb: 'FF000000' } }
 const PERSON_RULE = { style: 'double', color: { argb: 'FF000000' } }
+const OUTER_RULE = { style: 'thick', color: { argb: 'FF000000' } }
 
 function styledBorder(cell, bottom) {
   cell.border = { top: GRID_BORDER, left: GRID_BORDER, right: GRID_BORDER, bottom: bottom ?? GRID_BORDER }
+}
+
+// Re-draws just the table's four outer edges in OUTER_RULE, on top of
+// whatever styledBorder already put on each cell — only the one side facing
+// outward on each edge cell changes; the inner sides (and every interior
+// line) stay exactly as the per-row/per-person logic already set them.
+function applyOuterFrame(sheet, firstRow, lastRow, firstCol, lastCol) {
+  for (let c = firstCol; c <= lastCol; c++) {
+    const topCell = sheet.getCell(firstRow, c)
+    topCell.border = { ...topCell.border, top: OUTER_RULE }
+    const bottomCell = sheet.getCell(lastRow, c)
+    bottomCell.border = { ...bottomCell.border, bottom: OUTER_RULE }
+  }
+  for (let r = firstRow; r <= lastRow; r++) {
+    const leftCell = sheet.getCell(r, firstCol)
+    leftCell.border = { ...leftCell.border, left: OUTER_RULE }
+    const rightCell = sheet.getCell(r, lastCol)
+    rightCell.border = { ...rightCell.border, right: OUTER_RULE }
+  }
 }
 
 // ExcelJS itself is loaded on demand (dynamic import, below) rather than a
@@ -367,6 +394,12 @@ function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
 
     row += 2
   })
+
+  // The thick frame around the whole table, per Jeff's "最外框粗線" — laid
+  // down last so it overrides just the outward-facing side of each edge
+  // cell without disturbing any interior line (header rule, person rule,
+  // or the everyday grid) already drawn above.
+  applyOuterFrame(sheet, 1, row - 1, STYLED_NAME_COL, STYLED_WKD_COL)
 
   sheet.getColumn(STYLED_NAME_COL).width = 14
   sheet.getColumn(STYLED_BREAK_LABEL_COL).width = 7

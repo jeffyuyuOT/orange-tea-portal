@@ -289,9 +289,17 @@ export default function RosterWeekTable({ period, onlyProfileId }) {
                   const shift = entries.find(
                     (e) => (e.profile_id ?? e.staff_name_raw) === key && e.work_date === dayStr
                   )
+                  // Jeff, 2026-10-04: an ad-hoc/casual name with no hours at
+                  // all for the whole week now gets a single placeholder
+                  // roster_entries row (ManageRosterPage.jsx's doPersist)
+                  // just so the name itself survives into the DB — it's
+                  // null start/end, not a real shift, so it renders exactly
+                  // like any other day with no shift (the "—" below) rather
+                  // than a blank time range.
+                  const hasShift = shift && (shift.start_time || shift.end_time)
                   return (
                     <td key={dayStr} className="px-2 py-1.5 text-gray-600 sm:px-3 sm:py-2">
-                      {shift ? (
+                      {hasShift ? (
                         <>
                           <div className={timeClassName} style={nameColorStyle}>
                             {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}

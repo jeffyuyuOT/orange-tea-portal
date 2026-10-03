@@ -190,6 +190,11 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
                       ⭐
                     </span>
                   )}
+                  {item.must_appear_in_exam && (
+                    <span className="ml-1.5 text-brand-500" title="Must Appear in Exam">
+                      📌
+                    </span>
+                  )}
                 </button>
                 {!topTen && (
                   <div className="flex items-center gap-2">

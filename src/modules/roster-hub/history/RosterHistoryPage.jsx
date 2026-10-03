@@ -12,6 +12,21 @@ import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import MultiStoreExportModal from './MultiStoreExportModal'
 
+const MONTH_OPTIONS = [
+  { value: '01', label: 'January' },
+  { value: '02', label: 'February' },
+  { value: '03', label: 'March' },
+  { value: '04', label: 'April' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'June' },
+  { value: '07', label: 'July' },
+  { value: '08', label: 'August' },
+  { value: '09', label: 'September' },
+  { value: '10', label: 'October' },
+  { value: '11', label: 'November' },
+  { value: '12', label: 'December' },
+]
+
 export default function RosterHistoryPage() {
   const { currentStoreId, profile, accessibleStores } = useAuth()
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
@@ -27,6 +42,19 @@ export default function RosterHistoryPage() {
   // shifts for it, a draft just gets a plain "are you sure".
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  // Jeff, 2026-10-04: "bulletin的roaster會停留一個月即會移除。但在roster hub
+  // history的會保留。history新增年份跟月份篩選" — Bulletin's feed already
+  // only ever shows roster postings from the last month (BulletinPage.jsx's
+  // `oneMonthAgo` query filter), while History here has always queried
+  // every period for the store with no date bound at all, so it already
+  // keeps everything — nothing to change there. Since History is where all
+  // of that older history actually lives, though, it needs its own way to
+  // navigate it: Year/Month dropdowns, both defaulting to "All" (no filter
+  // applied, today's exact behavior unchanged for anyone who never touches
+  // them). Filtered client-side off `week_start_date` (already loaded, no
+  // extra query) rather than refetching per selection.
+  const [yearFilter, setYearFilter] = useState('all')
+  const [monthFilter, setMonthFilter] = useState('all')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -110,6 +138,15 @@ export default function RosterHistoryPage() {
     setDeleteTarget(null)
   }
 
+  // Descending so the most recent year is first in the dropdown.
+  const availableYears = [...new Set(periods.map((p) => p.week_start_date?.slice(0, 4)).filter(Boolean))].sort((a, b) => b.localeCompare(a))
+  const filteredPeriods = periods.filter(
+    (p) =>
+      (yearFilter === 'all' || p.week_start_date?.slice(0, 4) === yearFilter) &&
+      (monthFilter === 'all' || p.week_start_date?.slice(5, 7) === monthFilter)
+  )
+  const filtersActive = yearFilter !== 'all' || monthFilter !== 'all'
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -127,13 +164,48 @@ export default function RosterHistoryPage() {
         )}
       </div>
 
+      {!loading && periods.length > 0 && (
+        <div className="mb-3 flex items-center gap-2">
+          <select className="input w-auto" value={yearFilter} onChange={(e) => setYearFilter(e.target.value)}>
+            <option value="all">All years</option>
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          <select className="input w-auto" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}>
+            <option value="all">All months</option>
+            {MONTH_OPTIONS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setYearFilter('all')
+                setMonthFilter('all')
+              }}
+              className="text-xs text-brand-600 hover:underline"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <LoadingSpinner />
       ) : !periods.length ? (
         <EmptyState label="No roster history yet." />
+      ) : !filteredPeriods.length ? (
+        <EmptyState label="No roster history for the selected year/month." />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {periods.map((p) => (
+          {filteredPeriods.map((p) => (
             <div key={p.id} className="flex items-center justify-between px-4 py-3">
               <div>
                 <div className="flex items-center gap-2">

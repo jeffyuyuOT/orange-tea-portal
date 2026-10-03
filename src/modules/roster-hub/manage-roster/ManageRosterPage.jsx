@@ -483,8 +483,36 @@ export default function ManageRosterPage() {
           break_half_hours: e.breakHours === '' || e.breakHours == null ? null : e.breakHours,
           notes: e.notes || null,
         }))
-      if (rows.length) {
-        const { error: entriesError } = await supabase.from('roster_entries').insert(rows)
+      // Jeff, 2026-10-04: "export roster有在班表上的名字就算沒有時間也要
+      // 匯出" — a real staff member always shows up in History/export
+      // regardless of hours (they come from the separate staff list, not
+      // from roster_entries), but a CASUAL/ad-hoc name typed straight onto
+      // this grid (addRow/rename in RosterEntryGrid.jsx — no profile_id of
+      // its own) only exists at all via a roster_entries row. If every one
+      // of their S/E cells was still blank, the filter above dropped them
+      // completely — zero rows ever written — so that name couldn't be
+      // reconstructed from the DB on the next load, on Bulletin's Roster
+      // tab, or in History's export (all three read a no-profile name
+      // straight off staff_name_raw). One placeholder row (null times, so
+      // dayHours()/Total hr still read it as 0, not a phantom shift) per
+      // such name keeps it alive the same way a real staff member already
+      // is, without writing anything for a name that DID get real hours.
+      const namedRows = new Set(rows.filter((r) => !r.profile_id).map((r) => r.staff_name_raw))
+      const adHocPlaceholders = [...new Set(finalEntries.filter((e) => !e.profileId && e.staffName).map((e) => e.staffName))]
+        .filter((name) => !namedRows.has(name))
+        .map((name) => ({
+          roster_period_id: period.id,
+          profile_id: null,
+          staff_name_raw: name,
+          work_date: weekStart,
+          start_time: null,
+          end_time: null,
+          break_half_hours: null,
+          notes: null,
+        }))
+      const allRows = [...rows, ...adHocPlaceholders]
+      if (allRows.length) {
+        const { error: entriesError } = await supabase.from('roster_entries').insert(allRows)
         if (entriesError) throw entriesError
       }
 

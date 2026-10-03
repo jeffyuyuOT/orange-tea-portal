@@ -274,13 +274,27 @@ function DayEditor({ label, day, onChange }) {
       {day.mode === 'custom' && (
         <div className="flex flex-1 flex-col gap-1.5">
           {(day.windows ?? []).map((w, i) => (
-            <div key={i} className="flex items-center gap-1.5">
+            // Jeff, 2026-10-04: "手機版my availability填寫specific time的時候
+            // 時間會卡在螢幕外面" — each TimeOfDaySelect is 3 fixed-width
+            // selects (hour/minute/AM-PM) side by side, and a start+end pair
+            // plus the "–" and remove button never fit in one line on a
+            // phone — this whole row used to be a single non-wrapping flex
+            // line, so the end-time picker just ran off the right edge of
+            // the screen with no way to reach it. flex-wrap here, plus
+            // grouping "– end-time ✕" into one nested flex item, lets that
+            // whole group drop to its own line under the start time instead
+            // of being clipped — the dash never ends up orphaned alone on a
+            // line by itself. Desktop is unaffected since everything still
+            // fits on one line there.
+            <div key={i} className="flex flex-wrap items-center gap-1.5">
               <TimeOfDaySelect value={w.start} onChange={(t) => updateWindow(i, { start: t })} />
-              <span className="text-gray-400">–</span>
-              <TimeOfDaySelect value={w.end} onChange={(t) => updateWindow(i, { end: t })} />
-              <button type="button" className="px-1.5 text-gray-400 hover:text-red-500" onClick={() => removeWindow(i)} aria-label="Remove time range">
-                ✕
-              </button>
+              <div className="flex items-center gap-1.5">
+                <span className="text-gray-400">–</span>
+                <TimeOfDaySelect value={w.end} onChange={(t) => updateWindow(i, { end: t })} />
+                <button type="button" className="px-1.5 text-gray-400 hover:text-red-500" onClick={() => removeWindow(i)} aria-label="Remove time range">
+                  ✕
+                </button>
+              </div>
             </div>
           ))}
           <button type="button" className="self-start text-xs font-medium text-brand-600 hover:text-brand-700" onClick={addWindow}>

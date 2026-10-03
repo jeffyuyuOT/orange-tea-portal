@@ -85,6 +85,14 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   // constraint); Jeff, 2026-10-03: "Tea, topping跟others也要有must-know
   // item標示" -- opened up to every group_key (top_10 stays drink-only).
   const [mustKnow, setMustKnow] = useState(item.is_must_know ?? false)
+  // Jeff, 2026-10-04 (migration 0093): a third, independent flag — unlike
+  // Must Know Item (which gates memorization requirements/fill-in-the-blank
+  // eligibility), this guarantees a question linked to this item a slot in
+  // the Formal Exam and the Expert/Master Exam instead of leaving it to the
+  // random draw every exam builder otherwise does (see examBuilders.js's
+  // splitForced()). Deliberately NOT wired into the Level-Up Exam — Jeff's
+  // request only named Formal/Expert/Master.
+  const [mustAppear, setMustAppear] = useState(item.must_appear_in_exam ?? false)
   const [activeHot, setActiveHot] = useState(false) // which ingredient set is showing: false = Iced/Cold, true = Hot
   const [ingredients, setIngredients] = useState([])
   const [annotations, setAnnotations] = useState([]) // small notes shown just above/below the table on the Formula page
@@ -373,6 +381,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         has_hot_version: isDrink ? hasHotVersion : false,
         top_10: isDrink ? topTen : false,
         is_must_know: mustKnow,
+        must_appear_in_exam: mustAppear,
       }
       if (isNew) {
         const { data, error } = await supabase
@@ -517,6 +526,14 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
             <span className="text-xs font-normal text-gray-400">
               — sorts above non-must-know items and gets a ⭐ tag; required for Quiz fill-in-the-blank and the
               Formal Quiz memorization check (a non-must-know item stays optional to memorize)
+            </span>
+          </label>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <input type="checkbox" checked={mustAppear} onChange={(e) => setMustAppear(e.target.checked)} />
+            📌 Must Appear in Exam
+            <span className="text-xs font-normal text-gray-400">
+              — guarantees a question about this item in the Formal Exam and the Expert/Master Exam (not the
+              Level-Up Exam)
             </span>
           </label>
 

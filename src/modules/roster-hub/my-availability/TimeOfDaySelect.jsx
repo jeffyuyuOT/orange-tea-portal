@@ -21,8 +21,14 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
   }
 
   return (
+    // Jeff, 2026-10-04: "手機版my availability填寫specific time的時候時間會
+    // 卡在螢幕外面" — these three selects at their old fixed widths
+    // (w-16/w-16/w-24) made a start+end pair too wide to fit a phone screen
+    // at all; a touch narrower on mobile (still comfortably tappable) gives
+    // MyAvailabilityPage's row-wrap fix less work to do and keeps a single
+    // start–end pair on one line on more phones. Unchanged from `sm` up.
     <div className={`flex items-center gap-1 ${className}`}>
-      <select className="input !w-16 !py-1.5" value={hour12} onChange={(e) => set({ hour12: Number(e.target.value) })}>
+      <select className="input !w-14 !py-1.5 sm:!w-16" value={hour12} onChange={(e) => set({ hour12: Number(e.target.value) })}>
         {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
           <option key={h} value={h}>
             {h}
@@ -30,14 +36,14 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
         ))}
       </select>
       <span className="text-gray-400">:</span>
-      <select className="input !w-16 !py-1.5" value={minute} onChange={(e) => set({ minute: e.target.value })}>
+      <select className="input !w-14 !py-1.5 sm:!w-16" value={minute} onChange={(e) => set({ minute: e.target.value })}>
         {MINUTE_OPTIONS.map((m) => (
           <option key={m} value={m}>
             {m}
           </option>
         ))}
       </select>
-      <select className="input !w-24 !py-1.5" value={ampm} onChange={(e) => set({ ampm: e.target.value })}>
+      <select className="input !w-20 !py-1.5 sm:!w-24" value={ampm} onChange={(e) => set({ ampm: e.target.value })}>
         <option value="AM">AM</option>
         <option value="PM">PM</option>
       </select>
