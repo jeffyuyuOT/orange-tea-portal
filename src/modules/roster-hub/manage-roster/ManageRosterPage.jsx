@@ -164,8 +164,10 @@ export default function ManageRosterPage() {
       // has_master_title (Training Journey spec, point 6) are the same
       // idea's successor — RosterEntryGrid reads them instead, under
       // whichever Roster Name Display Format System Setting has chosen.
+      // has_expert_title (Expert/Master split, point 4) joins them so
+      // rosterTitleStyle() can tell Expert apart from Master/in-progress.
       .select(
-        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity, training_journey_phase, has_master_title)'
+        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity, training_journey_phase, has_expert_title, has_master_title)'
       )
       .eq('store_id', currentStoreId)
       .order('roster_order')
@@ -655,7 +657,23 @@ export default function ManageRosterPage() {
         <div className="flex flex-wrap items-end gap-2 sm:gap-3">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-500">Week starting (Mon)</span>
-            <input type="date" className="input" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+            {/* Jeff, 2026-10-03 (screenshot): "選Week starting (Mon)一定要選
+                禮拜一，如果是選其他天的話系統要自動跳到那個禮拜的禮拜一" — the
+                date input itself can't be restricted to Mondays only (native
+                <input type="date"> has no day-of-week filter), so instead any
+                date picked here snaps forward to thisWeekStart() of THAT
+                date — same Monday-start helper the "Current week"/"Last
+                week"/"Next week" Action items below already use — rather
+                than loading whatever non-Monday day was actually clicked. */}
+            <input
+              type="date"
+              className="input"
+              value={weekStart}
+              onChange={(e) => {
+                if (!e.target.value) return
+                setWeekStart(thisWeekStart(parseISO(e.target.value)))
+              }}
+            />
           </label>
 
           <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>

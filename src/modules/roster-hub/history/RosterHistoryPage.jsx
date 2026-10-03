@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
+import Modal from '../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { exportRosterGrid, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
@@ -17,6 +18,15 @@ export default function RosterHistoryPage() {
   const [periods, setPeriods] = useState([])
   const [loading, setLoading] = useState(true)
   const [showMultiExport, setShowMultiExport] = useState(false)
+  // Jeff, 2026-10-03: "history的紀錄新增刪除選項，如果是已經publish的要刪除
+  //前會跳出警告圖示確認" — a Delete option on each saved/published week.
+  // `deleteTarget` is whichever period row the manager just clicked Delete
+  // on (null when the confirm popup is closed); its own `status` decides
+  // which confirm copy renders below — a submitted (already-published) week
+  // gets the strong ⚠️ warning since staff may already have seen their
+  // shifts for it, a draft just gets a plain "are you sure".
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -80,6 +90,22 @@ export default function RosterHistoryPage() {
     exportRosterGrid(storeName, staffList, weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
   }
 
+  // roster_entries.roster_period_id is `on delete cascade` (0001_init.sql),
+  // so deleting the roster_periods row alone is enough — no separate
+  // roster_entries cleanup needed here.
+  async function confirmDelete() {
+    const period = deleteTarget
+    setDeleting(true)
+    const { error } = await supabase.from('roster_periods').delete().eq('id', period.id)
+    setDeleting(false)
+    if (error) {
+      alert(`Delete failed: ${error.message}`)
+      return
+    }
+    setPeriods((prev) => prev.filter((p) => p.id !== period.id))
+    setDeleteTarget(null)
+  }
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -123,6 +149,9 @@ export default function RosterHistoryPage() {
                 <Button variant="secondary" onClick={() => exportPeriod(p)}>
                   Export
                 </Button>
+                <Button variant="danger" onClick={() => setDeleteTarget(p)}>
+                  Delete
+                </Button>
               </div>
             </div>
           ))}
@@ -130,6 +159,44 @@ export default function RosterHistoryPage() {
       )}
 
       {showMultiExport && <MultiStoreExportModal onClose={() => setShowMultiExport(false)} />}
+
+      {/* Jeff, 2026-10-03: a submitted (already-published) week gets the
+          strong ⚠️ warning copy — staff may have already seen their shifts
+          for it — while a draft gets a plain confirm; both share this same
+          modal, just different title/body/icon below. */}
+      {deleteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteTarget(null)}
+          title={deleteTarget.status === 'submitted' ? 'Delete a published roster?' : 'Delete this draft?'}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete'}
+              </Button>
+            </>
+          }
+        >
+          {deleteTarget.status === 'submitted' ? (
+            <div className="flex gap-3">
+              <span className="text-3xl" aria-hidden="true">⚠️</span>
+              <p className="text-sm text-gray-700">
+                This roster for <strong>{deleteTarget.week_start_date} → {deleteTarget.week_end_date}</strong> was
+                already published — staff may have already seen their shifts for this week. Deleting it permanently
+                removes the whole week's roster and cannot be undone. This does not notify staff of the removal.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-700">
+              Permanently delete the draft roster for <strong>{deleteTarget.week_start_date} → {deleteTarget.week_end_date}</strong>?
+              This cannot be undone.
+            </p>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }
