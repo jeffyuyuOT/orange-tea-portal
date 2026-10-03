@@ -146,12 +146,62 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     // way. Added `profile?.id` to the deps (so a late-loading profile still
     // triggers this) and error logging (so a real failure next time shows
     // up in the console instead of just silently leaving the badge stuck).
+    // Separately found while chasing the same report: announcement_reads had
+    // an INSERT policy and a SELECT policy for a profile's own rows, but no
+    // UPDATE policy — so re-upserting an ALREADY-read row (reopening the
+    // same announcement a second time, or the "Update" badge's
+    // re-read-after-edit case) hit the upsert's ON CONFLICT...DO UPDATE arm
+    // with nothing in RLS permitting it, and failed too. Added a matching
+    // "update own announcement_reads" policy (2026-10-03 migration).
+    //
+    // Jeff, 2026-10-03 (same-day follow-up): "如果是群發分店的訊息，有多家
+    // 分店的user只要在其中一家看過後，則其他分店相同訊息都判定為已閱讀" — a
+    // broadcast to N stores (see save()'s isNew branch) is N independent
+    // rows with their own ids, so marking THIS row read never touched its
+    // siblings' own read receipts — a user who belongs to more than one of
+    // the broadcast's stores had to separately "read" every store's copy.
+    // Once broadcast_group_id ties sibling rows together, opening any ONE
+    // of them now also upserts a read receipt for every other sibling row —
+    // scoped to `current_store_ids()` via the same "read same-store
+    // announcements" RLS policy the plain select below already relies on,
+    // so this only ever reaches siblings this profile can actually see
+    // (i.e. stores they belong to), never ones they don't.
     if (profile?.id) {
       supabase
         .from('announcement_reads')
         .upsert({ profile_id: profile.id, announcement_id: announcementId, read_at: new Date().toISOString() }, { onConflict: 'profile_id,announcement_id' })
         .then(({ error }) => {
           if (error) console.error('Failed to mark announcement as read:', error)
+        })
+      supabase
+        .from('announcements')
+        .select('id, broadcast_group_id')
+        .eq('id', announcementId)
+        .maybeSingle()
+        .then(({ data: thisAnnouncement }) => {
+          if (!thisAnnouncement?.broadcast_group_id) return
+          supabase
+            .from('announcements')
+            .select('id')
+            .eq('broadcast_group_id', thisAnnouncement.broadcast_group_id)
+            .neq('id', announcementId)
+            .then(({ data: siblings, error: siblingsError }) => {
+              if (siblingsError) {
+                console.error('Failed to look up broadcast sibling announcements:', siblingsError)
+                return
+              }
+              if (!siblings?.length) return
+              const readAt = new Date().toISOString()
+              supabase
+                .from('announcement_reads')
+                .upsert(
+                  siblings.map((s) => ({ profile_id: profile.id, announcement_id: s.id, read_at: readAt })),
+                  { onConflict: 'profile_id,announcement_id' }
+                )
+                .then(({ error: upsertError }) => {
+                  if (upsertError) console.error('Failed to mark broadcast sibling announcements as read:', upsertError)
+                })
+            })
         })
     }
   }, [announcementId, isNew, profile?.id])
@@ -183,6 +233,16 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
         // other per-store admin/developer content in this app, rather than
         // one row several stores would have to jointly own.
         const targetStoreIds = canBroadcast && selectedStoreIds.length ? selectedStoreIds : [storeId]
+        // Jeff, 2026-10-03: "如果是群發分店的訊息，有多家分店的user只要在其中
+        // 一家看過後，則其他分店相同訊息都判定為已閱讀" — a shared
+        // broadcast_group_id ties this broadcast's N rows together so the
+        // mark-as-read effect below can propagate one store's read receipt
+        // to every sibling store's copy for a user who belongs to more than
+        // one of them. Only actually a "broadcast" (and only ever needed)
+        // when it's going to more than one store — a single-store post keeps
+        // broadcast_group_id null, same as every row did before this column
+        // existed.
+        const broadcastGroupId = targetStoreIds.length > 1 ? crypto.randomUUID() : null
         for (const targetStoreId of targetStoreIds) {
           const { data, error } = await supabase
             .from('announcements')
@@ -196,6 +256,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               created_by_name: actorName,
               updated_by: profile.id,
               updated_by_name: actorName,
+              broadcast_group_id: broadcastGroupId,
             })
             .select()
             .single()
