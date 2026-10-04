@@ -233,6 +233,9 @@ const STYLED_DAY_LABELS = DAY_LABELS
 const STYLED_NAME_COL = 1
 const STYLED_BREAK_LABEL_COL = 2
 const STYLED_FIRST_DAY_COL = 3
+// Last day column (Sunday's "E") with NO Total hr/WKD hr columns — the width
+// of the second (clock-time) table built below, which never shows those.
+const STYLED_LAST_DAY_COL = STYLED_FIRST_DAY_COL + 7 * 2 - 1 // 16
 const STYLED_TOTAL_COL = STYLED_FIRST_DAY_COL + 14 // 17
 const STYLED_WKD_COL = STYLED_TOTAL_COL + 1 // 18
 
@@ -288,39 +291,86 @@ async function loadExcelJS() {
   return mod.default ?? mod
 }
 
-// Builds one styled worksheet (header + one Shift/Break row pair per
-// person) directly against an ExcelJS workbook — the styled-export sibling
-// of buildHeaderRows/buildGridRows above, sharing their day-label/column
-// conventions but not their array-of-arrays shape (ExcelJS addresses cells
-// and merges directly). `staff` should be every active staff member for the
-// store (shown even with zero shifts); any entry with no matching profile
-// (an ad-hoc/casual name typed straight into Manage Roster) gets its own
-// row too, same as the plain export.
-function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
-  const sheet = workbook.addWorksheet((storeName || 'Roster').slice(0, 31))
+// Jeff, 2026-10-04: "下面要出現對應的時間表...只是時間部分呈現正確時間" — the
+// second (clock-time) table's S/E cells show a real time like "9:30"/"22:45"
+// instead of the decimal hours (9.5/22.75) the app computes everything in —
+// same shape as decimalToTime above but no seconds and no zero-padded hour,
+// matching how Jeff's own hand-built sheet writes a clock time.
+function decimalToClockLabel(dec) {
+  if (dec === '' || dec === null || dec === undefined) return null
+  const n = Number(dec)
+  if (Number.isNaN(n)) return null
+  const h = Math.floor(n)
+  const m = Math.round((n - h) * 60)
+  return `${h}:${String(m).padStart(2, '0')}`
+}
 
-  sheet.mergeCells(1, STYLED_NAME_COL, 2, STYLED_BREAK_LABEL_COL)
-  sheet.getCell(1, STYLED_NAME_COL).value = 'Name'
-  sheet.mergeCells(1, STYLED_TOTAL_COL, 2, STYLED_TOTAL_COL)
-  sheet.getCell(1, STYLED_TOTAL_COL).value = 'Total hr'
-  sheet.mergeCells(1, STYLED_WKD_COL, 2, STYLED_WKD_COL)
-  sheet.getCell(1, STYLED_WKD_COL).value = 'WKD hr'
+// Writes one 3-header-row + per-person grid block into `sheet`, starting at
+// `startRow` — the shared shape behind BOTH tables an export now produces.
+// `staff` should be every active staff member for the store (shown even
+// with zero shifts); any entry with no matching profile (an ad-hoc/casual
+// name typed straight into Manage Roster) gets its own row too, same as the
+// plain export.
+//
+// Jeff, 2026-10-04 (roster export spec, against his own hand-drawn
+// reference):
+// 1. "所有儲存格都是文字置中，名字粗體" — every cell's text centered; each
+//    person's own name bold (on top of red when unqualified, not instead).
+// 2. "break次數沒有的地方也是套用合併儲存格" — a day's Break cell is always
+//    the merged S/E pair, whether or not there's a number in it, not only
+//    on days with an actual break recorded.
+// 3. "日期在星期幾上面，然後表格左上方要有分店名" — date and weekday used to
+//    share one combined row ("Mon 28-Sep"); split across two rows instead
+//    (date above, weekday label below), freeing the top-left corner (where
+//    "Name" used to repeat) for the store's own name.
+// 4. "下面要出現對應的時間表，跟上面格式一樣，只是時間部分呈現正確時間" — a
+//    second, visually identical block goes directly underneath the first,
+//    showing the same shifts as real clock times — see buildStyledSheet,
+//    which stacks this function's output twice per sheet. `showTotals`
+//    drops the Total hr/WKD hr header+columns entirely for that second
+//    block (a decimal-hours sum that only means anything once, in the first
+//    table) and `formatValue` is what turns a raw decimal-hours value into
+//    whatever the cell actually shows — the identity function for the first
+//    table, decimalToClockLabel for the second. Returns the row right after
+//    this block (header + every person's 2 rows), with no trailing gap, so
+//    callers can stack more content below it themselves.
+function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, { showTotals, formatValue = (v) => v }) {
+  const lastCol = showTotals ? STYLED_WKD_COL : STYLED_LAST_DAY_COL
+  const dateRow = startRow
+  const labelRow = startRow + 1
+  const subRow = startRow + 2
+
+  sheet.mergeCells(dateRow, STYLED_NAME_COL, dateRow, STYLED_BREAK_LABEL_COL)
+  sheet.getCell(dateRow, STYLED_NAME_COL).value = storeName || ''
+
+  sheet.mergeCells(labelRow, STYLED_NAME_COL, subRow, STYLED_BREAK_LABEL_COL)
+  sheet.getCell(labelRow, STYLED_NAME_COL).value = 'Name'
+
+  if (showTotals) {
+    sheet.mergeCells(labelRow, STYLED_TOTAL_COL, subRow, STYLED_TOTAL_COL)
+    sheet.getCell(labelRow, STYLED_TOTAL_COL).value = 'Total hr'
+    sheet.mergeCells(labelRow, STYLED_WKD_COL, subRow, STYLED_WKD_COL)
+    sheet.getCell(labelRow, STYLED_WKD_COL).value = 'WKD hr'
+  }
+
   weekDates.forEach((d, i) => {
     const c = STYLED_FIRST_DAY_COL + i * 2
-    sheet.mergeCells(1, c, 1, c + 1)
-    sheet.getCell(1, c).value = `${STYLED_DAY_LABELS[i]} ${format(parseISO(d), 'd-MMM')}`
-    sheet.getCell(2, c).value = 'S'
-    sheet.getCell(2, c + 1).value = 'E'
+    sheet.mergeCells(dateRow, c, dateRow, c + 1)
+    sheet.getCell(dateRow, c).value = format(parseISO(d), 'd-MMM')
+    sheet.mergeCells(labelRow, c, labelRow, c + 1)
+    sheet.getCell(labelRow, c).value = STYLED_DAY_LABELS[i]
+    sheet.getCell(subRow, c).value = 'S'
+    sheet.getCell(subRow, c + 1).value = 'E'
   })
-  for (let c = STYLED_NAME_COL; c <= STYLED_WKD_COL; c++) {
-    for (let r = 1; r <= 2; r++) {
+
+  for (let c = STYLED_NAME_COL; c <= lastCol; c++) {
+    for (let r = dateRow; r <= subRow; r++) {
       const cell = sheet.getCell(r, c)
       cell.font = { bold: true }
       cell.alignment = { vertical: 'middle', horizontal: 'center' }
-      styledBorder(cell, r === 2 ? HEADER_RULE : GRID_BORDER)
+      styledBorder(cell, r === subRow ? HEADER_RULE : GRID_BORDER)
     }
   }
-  sheet.getCell(1, STYLED_NAME_COL).alignment = { vertical: 'middle', horizontal: 'center' }
 
   const extraNames = Array.from(new Set(entries.filter((e) => !e.profileId && e.staffName).map((e) => e.staffName)))
   const people = [
@@ -328,7 +378,7 @@ function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
     ...extraNames.map((name) => ({ id: '', name, qualified: true })),
   ]
 
-  let row = 3
+  let row = subRow + 1
   people.forEach(({ id, name, qualified }) => {
     const shiftRow = row
     const breakRow = row + 1
@@ -340,36 +390,40 @@ function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
     sheet.mergeCells(shiftRow, STYLED_NAME_COL, breakRow, STYLED_NAME_COL)
     const nameCell = sheet.getCell(shiftRow, STYLED_NAME_COL)
     nameCell.value = name
-    nameCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
-    if (unqualified) nameCell.font = { color: RED_FONT }
+    nameCell.alignment = { vertical: 'middle', horizontal: 'center' }
+    nameCell.font = unqualified ? { bold: true, color: RED_FONT } : { bold: true }
 
     const breakLabelCell = sheet.getCell(breakRow, STYLED_BREAK_LABEL_COL)
     breakLabelCell.value = 'Break'
     breakLabelCell.font = { color: RED_FONT }
-    breakLabelCell.alignment = { vertical: 'middle', horizontal: 'left' }
+    breakLabelCell.alignment = { vertical: 'middle', horizontal: 'center' }
 
     let total = 0
     let wkd = 0
     weekDates.forEach((date, i) => {
       const entry = entries.find((e) => (id ? e.profileId === id : e.staffName === name) && e.date === date)
       const c = STYLED_FIRST_DAY_COL + i * 2
+      const startCell = sheet.getCell(shiftRow, c)
+      const endCell = sheet.getCell(shiftRow, c + 1)
+      startCell.alignment = { vertical: 'middle', horizontal: 'center' }
+      endCell.alignment = { vertical: 'middle', horizontal: 'center' }
+
+      // Always merged — a day with no break recorded (or no shift at all)
+      // still gets one Break cell spanning S/E, same as a day that has one.
+      sheet.mergeCells(breakRow, c, breakRow, c + 1)
+      const breakCell = sheet.getCell(breakRow, c)
+      breakCell.alignment = { vertical: 'middle', horizontal: 'center' }
+
       if (entry) {
-        const startCell = sheet.getCell(shiftRow, c)
-        const endCell = sheet.getCell(shiftRow, c + 1)
-        startCell.value = entry.startTime === '' || entry.startTime == null ? null : entry.startTime
-        endCell.value = entry.endTime === '' || entry.endTime == null ? null : entry.endTime
-        startCell.alignment = { horizontal: 'center' }
-        endCell.alignment = { horizontal: 'center' }
+        startCell.value = entry.startTime === '' || entry.startTime == null ? null : formatValue(entry.startTime)
+        endCell.value = entry.endTime === '' || entry.endTime == null ? null : formatValue(entry.endTime)
         if (unqualified) {
           startCell.font = { color: RED_FONT }
           endCell.font = { color: RED_FONT }
         }
         if (entry.breakHours !== '' && entry.breakHours != null) {
-          sheet.mergeCells(breakRow, c, breakRow, c + 1)
-          const breakCell = sheet.getCell(breakRow, c)
           breakCell.value = entry.breakHours
           breakCell.font = { color: RED_FONT }
-          breakCell.alignment = { vertical: 'middle', horizontal: 'center' }
         }
         const h = dayHours(entry)
         total += h
@@ -377,14 +431,16 @@ function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
       }
     })
 
-    sheet.mergeCells(shiftRow, STYLED_TOTAL_COL, breakRow, STYLED_TOTAL_COL)
-    sheet.mergeCells(shiftRow, STYLED_WKD_COL, breakRow, STYLED_WKD_COL)
-    sheet.getCell(shiftRow, STYLED_TOTAL_COL).value = total ? round2(total) : null
-    sheet.getCell(shiftRow, STYLED_WKD_COL).value = wkd ? round2(wkd) : null
-    sheet.getCell(shiftRow, STYLED_TOTAL_COL).alignment = { vertical: 'middle', horizontal: 'center' }
-    sheet.getCell(shiftRow, STYLED_WKD_COL).alignment = { vertical: 'middle', horizontal: 'center' }
+    if (showTotals) {
+      sheet.mergeCells(shiftRow, STYLED_TOTAL_COL, breakRow, STYLED_TOTAL_COL)
+      sheet.mergeCells(shiftRow, STYLED_WKD_COL, breakRow, STYLED_WKD_COL)
+      sheet.getCell(shiftRow, STYLED_TOTAL_COL).value = total ? round2(total) : null
+      sheet.getCell(shiftRow, STYLED_WKD_COL).value = wkd ? round2(wkd) : null
+      sheet.getCell(shiftRow, STYLED_TOTAL_COL).alignment = { vertical: 'middle', horizontal: 'center' }
+      sheet.getCell(shiftRow, STYLED_WKD_COL).alignment = { vertical: 'middle', horizontal: 'center' }
+    }
 
-    for (let c = STYLED_NAME_COL; c <= STYLED_WKD_COL; c++) {
+    for (let c = STYLED_NAME_COL; c <= lastCol; c++) {
       styledBorder(sheet.getCell(shiftRow, c))
       // The double rule belongs on every cell in the LAST row of this
       // person's block, so it reads as one continuous line under them —
@@ -399,14 +455,39 @@ function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
   // down last so it overrides just the outward-facing side of each edge
   // cell without disturbing any interior line (header rule, person rule,
   // or the everyday grid) already drawn above.
-  applyOuterFrame(sheet, 1, row - 1, STYLED_NAME_COL, STYLED_WKD_COL)
+  applyOuterFrame(sheet, dateRow, row - 1, STYLED_NAME_COL, lastCol)
+
+  return row
+}
+
+// Builds one store's whole sheet: the hours table (buildHeaderRows/
+// buildGridRows' styled-export sibling, sharing their day-label/column
+// conventions but not their array-of-arrays shape — ExcelJS addresses cells
+// and merges directly), then — Jeff, 2026-10-04 — a second, identically
+// styled table of real clock times stacked directly underneath it, headed
+// by the store's own name underlined as a section title.
+function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
+  const sheet = workbook.addWorksheet((storeName || 'Roster').slice(0, 31))
+
+  const afterHoursTable = writeGridBlock(sheet, storeName, staff, weekDates, entries, 1, { showTotals: true })
+
+  const headingRow = afterHoursTable + 1 // one blank row of separation
+  const headingCell = sheet.getCell(headingRow, STYLED_NAME_COL)
+  headingCell.value = storeName || ''
+  headingCell.font = { bold: true, underline: true, size: 14 }
+  headingCell.alignment = { vertical: 'middle', horizontal: 'left' }
+
+  writeGridBlock(sheet, storeName, staff, weekDates, entries, headingRow + 1, {
+    showTotals: false,
+    formatValue: decimalToClockLabel,
+  })
 
   sheet.getColumn(STYLED_NAME_COL).width = 14
   sheet.getColumn(STYLED_BREAK_LABEL_COL).width = 7
   for (let c = STYLED_FIRST_DAY_COL; c < STYLED_TOTAL_COL; c++) sheet.getColumn(c).width = 6.5
   sheet.getColumn(STYLED_TOTAL_COL).width = 9
   sheet.getColumn(STYLED_WKD_COL).width = 9
-  sheet.views = [{ state: 'frozen', ySplit: 2 }]
+  sheet.views = [{ state: 'frozen', ySplit: 3 }]
 }
 
 // ExcelJS has no writeFile() of its own (it's Node/browser-agnostic) — this
