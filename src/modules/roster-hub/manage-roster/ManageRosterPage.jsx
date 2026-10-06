@@ -538,13 +538,33 @@ export default function ManageRosterPage() {
         // person's PAST shift alongside their FUTURE one still notifies them
         // — it's only when every changed key for a profile is in the past
         // that they're left out of changedProfileIds entirely below.
+        //
+        // Jeff, 2026-10-07 (follow-up, same day): "確認...更改當下當天已經
+        // 過的shift也不會出現提醒" — a same-day shift whose own end time has
+        // already gone by (as of the moment this publish happens) counts as
+        // "passed" too, not just a shift on a past DATE. A today-dated shift
+        // that hasn't started yet, or is still ongoing, still notifies as
+        // normal. `endTimeByKey` prefers the shift's NEW end_time (what's
+        // actually on the roster after this save) and falls back to the old
+        // one for a shift that was deleted outright; a shift with no
+        // end_time at all (e.g. an ad-hoc placeholder row) is never treated
+        // as "ended" — there's nothing to compare, so it defaults to still
+        // notifying rather than silently going missing.
         const todayStr = format(new Date(), 'yyyy-MM-dd')
+        const nowTimeStr = format(new Date(), 'HH:mm:ss')
+        const endTimeByKey = new Map()
+        ;(prevRows ?? []).forEach((r) => endTimeByKey.set(`${r.profile_id}|${r.work_date}`, r.end_time))
+        newRowsWithProfile.forEach((r) => endTimeByKey.set(`${r.profile_id}|${r.work_date}`, r.end_time))
         const allKeys = new Set([...prevByKey.keys(), ...newByKey.keys()])
         const changedProfileIds = new Set()
         allKeys.forEach((key) => {
           if (prevByKey.get(key) === newByKey.get(key)) return
           const [changedProfileId, workDate] = key.split('|')
           if (workDate < todayStr) return
+          if (workDate === todayStr) {
+            const endTime = endTimeByKey.get(key)
+            if (endTime && endTime <= nowTimeStr) return
+          }
           changedProfileIds.add(changedProfileId)
         })
         if (changedProfileIds.size) {
