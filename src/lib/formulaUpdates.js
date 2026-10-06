@@ -16,7 +16,15 @@ import { filterVisibleForStore } from './storeVisibility'
 // changed again since they last looked).
 export async function getUnseenFormulaItems(profileId, currentStoreId) {
   if (!profileId) return []
-  const { data: itemRows } = await supabase.from('formula_items').select('*').eq('is_active', true)
+  // Jeff, 2026-10-07 (migration 0093): a Hide from Formula item doesn't
+  // appear on the Formula page at all, so it shouldn't trigger the Update
+  // tab or the Sidebar's red Update badge either, even if it was just
+  // edited.
+  const { data: itemRows } = await supabase
+    .from('formula_items')
+    .select('*')
+    .eq('is_active', true)
+    .eq('hide_from_formula', false)
   const eligible = (itemRows ?? []).filter((i) => i.updated_at >= i.tracked_since)
   if (!eligible.length) return []
 

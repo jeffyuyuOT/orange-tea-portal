@@ -530,10 +530,22 @@ export default function ManageRosterPage() {
             sigOf({ work_date: r.work_date, start_time: r.start_time, end_time: r.end_time, break_half_hours: r.break_half_hours }),
           ])
         )
+        // Jeff, 2026-10-07: "如果是已經過了的班表更改，就不需要有update提示"
+        // — a change to a shift whose work_date is already in the past
+        // doesn't light up My Roster's badge or Bulletin's roster dot/"New"
+        // tag; only a change to a today-or-future shift does. Checked per
+        // (profile, date) key, not per profile as a whole, so editing one
+        // person's PAST shift alongside their FUTURE one still notifies them
+        // — it's only when every changed key for a profile is in the past
+        // that they're left out of changedProfileIds entirely below.
+        const todayStr = format(new Date(), 'yyyy-MM-dd')
         const allKeys = new Set([...prevByKey.keys(), ...newByKey.keys()])
         const changedProfileIds = new Set()
         allKeys.forEach((key) => {
-          if (prevByKey.get(key) !== newByKey.get(key)) changedProfileIds.add(key.split('|')[0])
+          if (prevByKey.get(key) === newByKey.get(key)) return
+          const [changedProfileId, workDate] = key.split('|')
+          if (workDate < todayStr) return
+          changedProfileIds.add(changedProfileId)
         })
         if (changedProfileIds.size) {
           const { error: changeEventError } = await supabase.from('roster_change_events').insert(

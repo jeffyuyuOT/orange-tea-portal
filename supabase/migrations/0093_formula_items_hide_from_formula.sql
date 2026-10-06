@@ -1,0 +1,9 @@
+-- Claude, 2026-10-07: this file was mistakenly created as
+-- 0093_formula_items_hide_from_formula.sql — 0093 was already in use twice
+-- (0093_formula_items_top10_no_update.sql, 0093_must_appear_in_exam.sql) and
+-- 0094 was also taken (0094_must_appear_in_exam.sql), none of which were in
+-- Claude's working copy of this repo when this file was first written, so
+-- the collision wasn't visible at the time. The real migration now lives at
+-- 0095_formula_items_hide_from_formula.sql (same statement, already applied
+-- to the live DB either way — Postgres doesn't care which local filename
+-- triggered it). This file intentionally does nothing — safe to delete.

@@ -196,7 +196,20 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
         .pop()
       result[entry.profile_id] = { days: [], latestSignal: latest ?? null }
     }
-    result[entry.profile_id].days.push({ date: entry.work_date, scheduledMinutes, actualMinutes, diffMinutes })
+    result[entry.profile_id].days.push({
+      date: entry.work_date,
+      scheduledMinutes,
+      actualMinutes,
+      diffMinutes,
+      // Jeff, 2026-10-07: "在staff time logs裡顯示...Rostered time的地方點擊
+      // 跳出視窗顯示roster上的時間跟break次數" — scheduledMinutes above is
+      // already a netted DURATION, not a clock time, so the raw roster
+      // fields are carried through too for that popup to actually show a
+      // start/end time and a break count.
+      rosterStartTime: entry.start_time,
+      rosterEndTime: entry.end_time,
+      rosterBreakHalfHours: entry.break_half_hours,
+    })
   }
   for (const profileId in result) {
     result[profileId].days.sort((a, b) => b.date.localeCompare(a.date))

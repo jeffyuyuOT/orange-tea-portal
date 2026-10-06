@@ -27,9 +27,12 @@ export function AuthProvider({ children }) {
     () => localStorage.getItem('ot_current_store_id') || null
   )
   const [loading, setLoading] = useState(true)
-  // Training-role users must additionally verify a weekly 4-digit code
-  // before the session is treated as "fully signed in".
-  const [needsTrainingCode, setNeedsTrainingCode] = useState(false)
+  // Jeff, 2026-10-07: "training staff現在不需要經過training code就可以登入"
+  // — this used to also carry a `needsTrainingCode` flag (training-role
+  // accounts had to additionally verify a weekly 4-digit code before the
+  // session was treated as "fully signed in") — removed along with the
+  // Training Code tab itself (see TrainingCentreLayout.jsx/permissions.js)
+  // and the extra sign-in step it drove (LoginPage.jsx/RequireAuth.jsx).
   // "Update" badge for My Roster — see roster_change_events/roster_view_state
   // (migration 0047): true when THIS person's own shift changed since they
   // last opened My Roster. Lives here (rather than in the page itself) so
@@ -174,8 +177,6 @@ export function AuthProvider({ children }) {
           setAccessibleStores([])
         }
       }
-
-      setNeedsTrainingCode(profileRow.role === 'training' && !sessionStorage.getItem('ot_training_verified'))
     }
   }, [])
 
@@ -429,31 +430,11 @@ export function AuthProvider({ children }) {
   }, [refreshTimeDiscrepancies])
 
   const signIn = useCallback(async (email, password) => {
-    sessionStorage.removeItem('ot_training_verified')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
   }, [])
 
-  const verifyTrainingCode = useCallback(
-    async (code) => {
-      if (!profile?.primary_store_id) throw new Error('No store assigned to this training account yet.')
-      const weekStart = currentWeekStart()
-      const { data, error } = await supabase
-        .from('training_codes')
-        .select('code')
-        .eq('store_id', profile.primary_store_id)
-        .eq('week_start', weekStart)
-        .single()
-      if (error || !data) throw new Error("This week's training code hasn't been generated yet. Ask your manager.")
-      if (data.code !== code.trim()) throw new Error('Incorrect training code.')
-      sessionStorage.setItem('ot_training_verified', '1')
-      setNeedsTrainingCode(false)
-    },
-    [profile]
-  )
-
   const signOut = useCallback(async () => {
-    sessionStorage.removeItem('ot_training_verified')
     await supabase.auth.signOut()
   }, [])
 
@@ -464,8 +445,6 @@ export function AuthProvider({ children }) {
     user: session?.user ?? null,
     profile,
     loading,
-    needsTrainingCode,
-    verifyTrainingCode,
     signIn,
     signOut,
     effectivePages,

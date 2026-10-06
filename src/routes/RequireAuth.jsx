@@ -3,7 +3,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner'
 import LoginPage from '../modules/auth/LoginPage'
 
 export default function RequireAuth({ children }) {
-  const { user, profile, loading, needsTrainingCode, signOut } = useAuth()
+  const { user, profile, loading, signOut } = useAuth()
 
   if (loading) {
     return (
@@ -12,7 +12,7 @@ export default function RequireAuth({ children }) {
       </div>
     )
   }
-  if (!user || needsTrainingCode || !profile) return <LoginPage />
+  if (!user || !profile) return <LoginPage />
 
   // A freshly invited account already has a real login (and, since
   // SetPasswordPage, a password) the moment they accept — but the

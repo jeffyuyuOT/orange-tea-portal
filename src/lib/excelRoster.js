@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { format, parseISO } from 'date-fns'
+import { addDays, format, parseISO } from 'date-fns'
 
 // Manage Roster's spreadsheet is a "grid" layout that mirrors how the
 // manager already builds rosters in Excel: one Name column, then an S/E
@@ -25,6 +25,20 @@ const LAST_COL = WKD_COL
 
 function round2(n) {
   return Math.round(n * 100) / 100
+}
+
+// Jeff, 2026-10-07: "roster匯出檔案檔名要包含幾號到幾號 例如
+// roster-2026_10_05-2026_10_12" — every exported roster workbook's filename
+// now names the whole week it covers (start AND end date), not just its
+// start date — shared here so History's single-store export and the
+// admin's multi-store export can't drift into two different date formats.
+// `suffix` is whatever this call site already appended (a period's status,
+// "all-stores") — still tacked on the end, just after the date range now
+// instead of right after the single start date.
+export function rosterExportFilename(weekStart, suffix) {
+  const start = format(parseISO(weekStart), 'yyyy_MM_dd')
+  const end = format(addDays(parseISO(weekStart), 6), 'yyyy_MM_dd')
+  return `roster-${start}-${end}${suffix ? `-${suffix}` : ''}.xlsx`
 }
 
 // ---- decimal-hour ("11", "22.5") <-> "HH:MM:SS" (Postgres `time`) --------

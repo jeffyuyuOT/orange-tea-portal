@@ -4,17 +4,22 @@ import { canAccessPage } from '../../../lib/permissions'
 
 // Jeff, 2026-09: Quiz Bank + Shop Training Database merged into "Training
 // Centre", then (same day) moved from being its own top-level section into
-// living inside Shop Management, with Training Code folded in as a third
-// tab ("training centre是放在shop management下的...training code也放在
-// training centre下"). Same TABS-row + Outlet pattern as
+// living inside Shop Management. Same TABS-row + Outlet pattern as
 // DashboardLayout.jsx — each tab is still its own independent page key
 // under shop_management (see permissions.js), this is purely a shared
-// header/tab-bar for quick cross-navigation between the three, routed under
+// header/tab-bar for quick cross-navigation between them, routed under
 // /shop-management/... like every other Shop Management page.
+//
+// Jeff, 2026-10-07: "移除training centre裡的training code分頁，training
+// staff現在不需要經過training code就可以登入" — Training Code (once folded in
+// here as a third tab, "training code也放在training centre下") is gone along
+// with the weekly-code login requirement it existed for — see
+// AuthContext.jsx (verifyTrainingCode/needsTrainingCode, both removed) and
+// LoginPage.jsx/RequireAuth.jsx (the extra sign-in step they used to gate
+// training-role accounts behind).
 const TABS = [
   { key: 'shop_management.quiz_bank', to: '/shop-management/quiz-bank', label: 'Branch Quiz Bank' },
   { key: 'shop_management.shop_training_database', to: '/shop-management/shop-training-database', label: 'Shop Training Database' },
-  { key: 'shop_management.training_code', to: '/shop-management/training-code', label: 'Training Code' },
   // Jeff, 2026-10-02 (Training Journey spec, point 5): this store's own
   // Must-Know shop training item → phase assignment — see
   // TrainingJourneySettingPage.jsx's own comment for how this pairs with

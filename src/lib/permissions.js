@@ -75,7 +75,6 @@ export const SECTIONS = {
       // otherwise unchanged.
       quiz_bank: 'Branch Quiz Bank',
       shop_training_database: 'Shop Training Database',
-      training_code: 'Training Code',
       // Jeff, 2026-10-02 (Training Journey spec, point 5): assigns this
       // store's own Must-Know shop training items to a Training Journey
       // phase — a fourth Training Centre tab, folded into the same

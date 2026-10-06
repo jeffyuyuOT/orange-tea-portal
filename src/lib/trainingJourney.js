@@ -35,7 +35,17 @@ export async function loadTrainingJourneyData(profileId, storeId) {
     hoursByProfile,
   ] = await Promise.all([
     supabase.from('training_journey_phases').select('*').order('phase_number'),
-    supabase.from('formula_items').select('id, name_en, name_zh, is_must_know, training_journey_phase').eq('is_active', true),
+    // Jeff, 2026-10-07 (migration 0093): hide_from_formula excludes an item
+    // from phase assign (PhaseItemTab.jsx), so it's excluded from this
+    // read-side phase/pool computation too — otherwise a hidden item that
+    // was already phase-assigned before being hidden would keep counting
+    // toward someone's Training Journey checklist even though it no longer
+    // shows up anywhere an admin could re-check or un-assign it.
+    supabase
+      .from('formula_items')
+      .select('id, name_en, name_zh, is_must_know, training_journey_phase')
+      .eq('is_active', true)
+      .eq('hide_from_formula', false),
     supabase.from('formula_item_stores').select('*'),
     storeId
       ? supabase.from('shop_training_items').select('id, title, is_must_know, training_journey_phase').eq('store_id', storeId)

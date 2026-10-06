@@ -1,0 +1,20 @@
+-- Jeff, 2026-10-07: "在formula database商品頁面下新增'Hide from formula'勾選
+-- 選項，勾選的話則不會在formula出現，也會從phase assign裡移除。在formula
+-- database該商品也呈現半透明狀。" — a per-item flag, admin-only (Formula
+-- Database > edit item), that pulls the item out of the staff-facing
+-- Formula page entirely (every group/category/Top 10/Must Know Item list,
+-- plus the "Update" tab and the Sidebar's red Update badge — see
+-- formulaUpdates.js) and out of Admin Training Journey Setting's
+-- phase-assign lists (Must-Know Phase list, Phase 6/7 Add-Item picker and
+-- Phase 6/7 pool — see PhaseItemTab.jsx) and the Training Journey phase
+-- checklists themselves (trainingJourney.js), without touching the item's
+-- own training_journey_phase value in the DB — unhiding it later simply
+-- puts it back wherever it already was. Formula Database's own admin list
+-- (ItemManager.jsx) still shows a hidden item, just visually dimmed, so
+-- admins can always find and un-hide it again.
+--
+-- Deliberately formula_items only — Jeff's request names "formula database
+-- 商品頁面" specifically (Admin Center > Formula Database), not Shop
+-- Training Database, which is a separate admin surface with its own items
+-- table (shop_training_items) that this request never mentioned.
+alter table formula_items add column if not exists hide_from_formula boolean not null default false;

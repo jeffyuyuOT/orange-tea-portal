@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
-import { exportMultiStoreWorkbook, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
+import { exportMultiStoreWorkbook, rosterExportFilename, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import { thisWeekStart } from '../shared/rosterWeeks'
@@ -81,7 +81,7 @@ export default function MultiStoreExportModal({ onClose }) {
       }
       storeSheets.push({ storeName: store?.name ?? storeId, staff: staffList, weekDates, entries })
     }
-    await exportMultiStoreWorkbook(storeSheets, `roster-${weekStart}-all-stores.xlsx`)
+    await exportMultiStoreWorkbook(storeSheets, rosterExportFilename(weekStart, 'all-stores'))
     setBusy(false)
     onClose()
   }

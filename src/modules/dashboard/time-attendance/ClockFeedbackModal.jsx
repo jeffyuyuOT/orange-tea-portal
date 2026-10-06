@@ -19,6 +19,11 @@ import Button from '../../../components/ui/Button'
 // trying again too, not just a successful clock in/out).
 export default function ClockFeedbackModal({ feedback, onClose }) {
   const isSuccess = feedback.type === 'success'
+  // Jeff, 2026-10-07: "log in視窗的字和勾勾用綠色，log out視窗的字和勾勾用紅色"
+  // — green for a successful clock-IN, red for a successful clock-OUT
+  // (feedback.kind, set alongside `type` in useClockInOut.js's handleScan).
+  const isClockIn = feedback.kind === 'in'
+  const successColor = isClockIn ? 'text-green-700' : 'text-red-600'
   return (
     <Modal
       open
@@ -36,13 +41,30 @@ export default function ClockFeedbackModal({ feedback, onClose }) {
           for a small toast rather than something that demands a tap to
           dismiss. A big icon + much larger message (same modal/backdrop
           mechanics, dismissable=false) makes it read as a real standalone
-          popup rather than an inline status line. */}
-      <div className="flex flex-col items-center gap-3 py-5 text-center">
-        <span className="text-6xl leading-none" aria-hidden>
-          {isSuccess ? '✅' : '⚠️'}
-        </span>
-        <p className={`text-2xl font-semibold ${isSuccess ? 'text-green-700' : 'text-red-600'}`}>{feedback.text}</p>
-      </div>
+          popup rather than an inline status line.
+          Jeff, 2026-10-07: "clock in和out的字大一點在中間(取代先在勾勾的位
+          置)，勾勾在clock in/out的旁邊" — on a successful punch, the big
+          centered element is now the "Clock In"/"Clock Out" wording itself
+          (the checkmark moved beside it, no longer standing alone up top),
+          colored per isClockIn above; the detail line (store + time) sits
+          smaller underneath. A rejected scan is unaffected — still the
+          warning icon over the message, same as before. */}
+      {isSuccess ? (
+        <div className="flex flex-col items-center gap-2 py-5 text-center">
+          <p className={`flex items-center gap-2 text-4xl font-bold ${successColor}`}>
+            <span aria-hidden>✅</span>
+            {isClockIn ? 'Clock In' : 'Clock Out'}
+          </p>
+          <p className="text-lg text-gray-600">{feedback.text}</p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 py-5 text-center">
+          <span className="text-6xl leading-none" aria-hidden>
+            ⚠️
+          </span>
+          <p className="text-2xl font-semibold text-red-600">{feedback.text}</p>
+        </div>
+      )}
     </Modal>
   )
 }

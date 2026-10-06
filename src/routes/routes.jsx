@@ -52,7 +52,6 @@ import PayrollPage from '../modules/developer/payroll/PayrollPage'
 import TrainingCentreLayout from '../modules/shop-management/training-centre/TrainingCentreLayout'
 import TrainingCentreQuizBankPage from '../modules/shop-management/training-centre/quiz-bank/QuizBankPage'
 import TrainingCentreShopTrainingDatabasePage from '../modules/shop-management/training-centre/shop-training-database/ShopTrainingDatabasePage'
-import TrainingCentreTrainingCodePage from '../modules/shop-management/training-centre/training-code/TrainingCodePage'
 import TrainingCentreTrainingJourneySettingPage from '../modules/shop-management/training-centre/training-journey-setting/TrainingJourneySettingPage'
 
 function guarded(pageKey, element) {
@@ -127,7 +126,6 @@ export default function AppRoutes() {
             path="/shop-management/shop-training-database"
             element={guarded('shop_management.shop_training_database', <TrainingCentreShopTrainingDatabasePage />)}
           />
-          <Route path="/shop-management/training-code" element={guarded('shop_management.training_code', <TrainingCentreTrainingCodePage />)} />
           <Route
             path="/shop-management/training-journey-setting"
             element={guarded('shop_management.training_journey_setting', <TrainingCentreTrainingJourneySettingPage />)}

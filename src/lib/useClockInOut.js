@@ -78,6 +78,11 @@ export function useClockInOut(profileId, accessibleStores) {
     }
     setFeedback({
       type: 'success',
+      // Jeff, 2026-10-07: "log in視窗的字和勾勾用綠色，log out視窗的字和勾勾用
+      // 紅色" — ClockFeedbackModal needs to know which of the two this was
+      // to color itself; carried as its own field rather than making it
+      // re-parse `text` back apart.
+      kind: eventType === 'clock_in' ? 'in' : 'out',
       text: `${eventType === 'clock_in' ? 'Clocked in' : 'Clocked out'} at ${parsed.storeName || 'store'} — ${new Date().toLocaleTimeString()}.`,
     })
     refreshStatus()

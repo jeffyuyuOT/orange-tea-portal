@@ -108,11 +108,6 @@ export default function ShopTrainingDatabasePage() {
                     ⭐
                   </span>
                 )}
-                {item.must_appear_in_exam && (
-                  <span className="text-brand-500" title="Must Appear in Exam">
-                    📌
-                  </span>
-                )}
                 {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
               </button>
               <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -203,13 +198,6 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   // drinks (StaffStudyDetail.jsx). An unchecked item stays fully visible
   // and keeps its own Study Log "Memorized" self-tracking checkbox.
   const [mustKnow, setMustKnow] = useState(item.is_must_know ?? false)
-  // Jeff, 2026-10-04 (migration 0093): "formula跟shop training的商品編輯
-  // 頁面，出現必出勾選，勾選的話在formal exam, 和expert/master exam為必出
-  // 考題" — same new flag as Formula Database's ItemEditModal.jsx, just for
-  // this store's shop training items. Independent of Must Know Item; see
-  // examBuilders.js's splitForced() for how it's enforced. Not wired into
-  // the Level-Up Exam, which Jeff didn't mention here either.
-  const [mustAppear, setMustAppear] = useState(item.must_appear_in_exam ?? false)
   // Attached files staff can download alongside the content — same
   // "upload immediately, only link it to the item at Save" pattern Formula
   // Database's videos use, since a brand-new item has no id yet for a
@@ -266,7 +254,6 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           content_html: content,
           visible_to_training: visible,
           is_must_know: mustKnow,
-          must_appear_in_exam: mustAppear,
           sort_order: nextSortOrder,
           store_id: currentStoreId,
           created_by: profileId,
@@ -288,7 +275,6 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           content_html: content,
           visible_to_training: visible,
           is_must_know: mustKnow,
-          must_appear_in_exam: mustAppear,
           updated_by: profileId,
           updated_by_name: profileName,
         })
@@ -336,14 +322,6 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           ⭐ Must Know Item
           <span className="text-xs font-normal text-gray-400">
             — required for the Formal Quiz memorization check (a non-must-know item stays optional to memorize)
-          </span>
-        </label>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          <input type="checkbox" checked={mustAppear} onChange={(e) => setMustAppear(e.target.checked)} />
-          📌 Must Appear in Exam
-          <span className="text-xs font-normal text-gray-400">
-            — guarantees a question about this item in the Formal Exam and the Expert/Master Exam (not the
-            Level-Up Exam)
           </span>
         </label>
 
@@ -463,7 +441,6 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
           content_html: item.content_html,
           visible_to_training: item.visible_to_training,
           is_must_know: item.is_must_know,
-          must_appear_in_exam: item.must_appear_in_exam,
           sort_order: count ?? 0,
           store_id: storeId,
         })

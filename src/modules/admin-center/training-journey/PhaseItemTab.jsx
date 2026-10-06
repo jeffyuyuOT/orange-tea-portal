@@ -56,6 +56,13 @@ const VIEWS = [
 // available again. This also means Phase 6 and Phase 7 are each other's
 // disjoint pool, not "Phase 7 = everything" any more — see trainingJourney.js's
 // loadTrainingJourneyData for the read-side half of this change.
+//
+// Jeff, 2026-10-07 (migration 0093): a formula item checked "Hide from
+// Formula" (Formula Database > edit item) is filtered out of every list on
+// this page too, in all three sub-tabs — it reads as "removed from phase
+// assign" even though its training_journey_phase value is left untouched in
+// the DB, so un-hiding the item later simply makes it reappear wherever it
+// already was (or still available to pick, for Phase 6/7).
 export default function PhaseItemTab() {
   const [view, setView] = useState('mustknow')
 
@@ -95,6 +102,7 @@ function MustKnowPhaseList() {
       .select('id, name_en, name_zh, training_journey_phase')
       .eq('is_must_know', true)
       .eq('is_active', true)
+      .eq('hide_from_formula', false)
       .order('name_en')
     setItems(data ?? [])
     setLoading(false)
@@ -215,6 +223,7 @@ function PhaseItemPicker({ phaseNumber, phaseLabel }) {
       .select('id, name_en, name_zh')
       .eq('is_must_know', false)
       .eq('is_active', true)
+      .eq('hide_from_formula', false)
       .eq('training_journey_phase', phaseNumber)
       .order('name_en')
     setPhaseItems(data ?? [])
@@ -285,6 +294,7 @@ function AddPhaseItemModal({ phaseNumber, phaseLabel, onClose }) {
       .select('id, name_en, name_zh')
       .eq('is_must_know', false)
       .eq('is_active', true)
+      .eq('hide_from_formula', false)
       .is('training_journey_phase', null)
       .order('name_en')
     setItems(data ?? [])

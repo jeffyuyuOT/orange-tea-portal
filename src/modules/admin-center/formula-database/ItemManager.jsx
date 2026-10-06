@@ -85,6 +85,7 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
         notes: item.notes,
         notes_image_path: item.notes_image_path,
         has_hot_version: item.has_hot_version,
+        hide_from_formula: item.hide_from_formula,
       })
       .select()
       .single()
@@ -179,7 +180,7 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
                 key={item.id}
                 {...dragRowProps}
                 className={`flex items-center justify-between px-2 py-2.5 transition-colors ${
-                  isDragging ? 'opacity-40' : ''
+                  isDragging || item.hide_from_formula ? 'opacity-40' : ''
                 } ${isDropTarget ? 'bg-brand-50' : ''}`}
               >
                 <DragHandle {...handleProps(item.id)} />
@@ -190,9 +191,9 @@ export default function ItemManager({ groupKey, categoryId, topTen = false, onBa
                       ⭐
                     </span>
                   )}
-                  {item.must_appear_in_exam && (
-                    <span className="ml-1.5 text-brand-500" title="Must Appear in Exam">
-                      📌
+                  {item.hide_from_formula && (
+                    <span className="ml-1.5 text-gray-400" title="Hidden from Formula">
+                      🙈
                     </span>
                   )}
                 </button>

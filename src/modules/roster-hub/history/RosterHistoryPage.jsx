@@ -7,7 +7,7 @@ import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import Modal from '../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
-import { exportRosterGrid, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
+import { exportRosterGrid, rosterExportFilename, timeToDecimal, rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import MultiStoreExportModal from './MultiStoreExportModal'
@@ -119,7 +119,7 @@ export default function RosterHistoryPage() {
       endTime: timeToDecimal(r.end_time),
       breakHours: r.break_half_hours ?? '',
     }))
-    await exportRosterGrid(storeName, staffList, weekDates, entries, `roster-${period.week_start_date}-${period.status}.xlsx`)
+    await exportRosterGrid(storeName, staffList, weekDates, entries, rosterExportFilename(period.week_start_date, period.status))
   }
 
   // roster_entries.roster_period_id is `on delete cascade` (0001_init.sql),

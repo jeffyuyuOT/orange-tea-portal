@@ -3,11 +3,17 @@ import { useAuth } from '../../lib/AuthContext'
 import Button from '../../components/ui/Button'
 import AuthLayout from './AuthLayout'
 
+// Jeff, 2026-10-07: "training staff現在不需要經過training code就可以登入" —
+// this used to have a second step after a training-role account's regular
+// sign-in, requiring that week's 4-digit training code (set by a manager in
+// Shop Management > Training Code) before the session counted as fully
+// signed in. Both the step and the Training Code tab it depended on are
+// gone now — see AuthContext.jsx (needsTrainingCode/verifyTrainingCode,
+// removed) and TrainingCentreLayout.jsx/permissions.js. Plain sign-in only.
 export default function LoginPage() {
-  const { signIn, needsTrainingCode, verifyTrainingCode, profile } = useAuth()
+  const { signIn } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [trainingCode, setTrainingCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -22,43 +28,6 @@ export default function LoginPage() {
     } finally {
       setBusy(false)
     }
-  }
-
-  async function handleTrainingCode(e) {
-    e.preventDefault()
-    setError('')
-    setBusy(true)
-    try {
-      await verifyTrainingCode(trainingCode)
-    } catch (err) {
-      setError(err.message ?? 'Verification failed.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // Step 2: Training-role accounts must also enter this week's 4-digit
-  // training code (set by a manager in Shop Management > Training Code).
-  if (profile && needsTrainingCode) {
-    return (
-      <AuthLayout title="Training verification">
-        <form onSubmit={handleTrainingCode} className="space-y-4">
-          <p className="text-sm text-gray-500">Enter this week's 4-digit training code from your manager.</p>
-          <input
-            value={trainingCode}
-            onChange={(e) => setTrainingCode(e.target.value)}
-            maxLength={4}
-            inputMode="numeric"
-            placeholder="0000"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-center text-2xl tracking-[0.5em] focus:border-brand-400 focus:outline-none"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <Button type="submit" disabled={busy} className="w-full">
-            {busy ? 'Checking…' : 'Continue'}
-          </Button>
-        </form>
-      </AuthLayout>
-    )
   }
 
   return (

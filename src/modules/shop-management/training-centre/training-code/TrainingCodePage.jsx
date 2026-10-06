@@ -1,3 +1,11 @@
+// Jeff, 2026-10-07: "移除training centre裡的training code分頁，training
+// staff現在不需要經過training code就可以登入" — this page is no longer
+// imported or routed anywhere (removed from TrainingCentreLayout.jsx's TABS
+// and routes.jsx) now that the weekly-code login step it supported is gone
+// too (AuthContext.jsx). Left in place only because the device bridge this
+// session uses can't delete files on Jeff's machine — safe to delete by
+// hand (the whole training-code folder), or safe to just leave; nothing
+// references it any more either way.
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 import { useAuth } from '../../../../lib/AuthContext'

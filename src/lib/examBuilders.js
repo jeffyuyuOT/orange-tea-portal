@@ -12,56 +12,17 @@ function shuffle(arr) {
   return a
 }
 
-// Jeff, 2026-10-04 (migration 0093): "formula跟shop training的商品編輯頁面，
-// 出現必出勾選，勾選的話在formal exam, 和expert/master exam為必出考題" — an
-// item flagged `must_appear_in_exam` (formula_items or shop_training_items)
-// gets at least one of its linked questions guaranteed a slot, instead of
-// leaving it purely to chance in the shuffle().slice() every exam builder
-// below already ends with. Deliberately not used by buildLevelUpExamQuestionSet
-// — Jeff only named Formal/Expert/Master.
-//
-// `candidates` can mix two shapes: raw quiz_questions bank rows (spread in
-// as-is elsewhere in this file, so the link is the snake_case
-// `formula_item_id`/`shop_training_item_id` columns) and the Formal Exam's
-// own locally-generated fill-blank candidates (camelCase `formulaItemId`,
-// no shop-training equivalent — those are always built from a formula
-// item's ingredients). Checking both naming conventions here lets every
-// builder reuse this one helper rather than re-shaping its pools first.
-// Only one candidate per flagged item is forced (the first hit in whatever
-// order `candidates` is already in — callers pass a pre-shuffled array so
-// this isn't biased toward whichever question was created first) since the
-// point is "this item gets asked about", not "every question about it".
-function splitForced(candidates, mustAppearFormulaIds, mustAppearTrainingIds) {
-  const forced = []
-  const rest = []
-  const seen = new Set()
-  for (const c of candidates) {
-    const formulaId = c.formula_item_id ?? c.formulaItemId ?? null
-    const trainingId = c.shop_training_item_id ?? c.shopTrainingItemId ?? null
-    const key =
-      formulaId && mustAppearFormulaIds.has(formulaId)
-        ? `f:${formulaId}`
-        : trainingId && mustAppearTrainingIds.has(trainingId)
-          ? `t:${trainingId}`
-          : null
-    if (key && !seen.has(key)) {
-      seen.add(key)
-      forced.push(c)
-    } else {
-      rest.push(c)
-    }
-  }
-  return { forced, rest }
-}
-
-// Shared tail end for Master/Expert (and, inline, Formal): guarantee every
-// forced candidate a slot, then fill whatever's left of questionCount from
-// the (already-shuffled) rest — never the other way around, so a forced
-// item can never be bumped by the random slice.
-function combineWithForced(forced, rest, questionCount) {
-  const remaining = Math.max(0, questionCount - forced.length)
-  return shuffle([...forced, ...shuffle(rest).slice(0, remaining)])
-}
+// Jeff, 2026-10-07: "Must Appear in Exam的選項從商品編輯移除，重要的題目標註
+// important 1就好" — the per-item "guarantee this a slot" forcing mechanism
+// (migration 0093's must_appear_in_exam, and the splitForced/
+// combineWithForced helpers that used to live here) is retired; an
+// important question is simply tagged importance = 1 on the question itself
+// (Admin Center / shop Quiz Bank question editor), which Formal Exam's own
+// importance-ratio sampling below already weights toward (50% of its slots
+// by default — see `ratio`/`byImportance`). Master/Expert Exam never had an
+// importance-ratio concept of their own, so they're back to a plain
+// shuffle+slice over their full eligible pool, same as before migration
+// 0093 added the forcing layer.
 
 // Formal Exam question set — shared by the real Formal Exam (initial
 // qualification, manager-reviewed; and the recurring Advanced title-defense
@@ -92,22 +53,11 @@ export async function buildFormalExamQuestionSet(profileId, storeId) {
 
   const { data: itemFlagRows } = await supabase
     .from('formula_items')
-    .select('id, top_10, is_must_know, must_appear_in_exam')
+    .select('id, top_10, is_must_know')
     .in('id', memorizedIds)
   const top10Ids = new Set((itemFlagRows ?? []).filter((r) => r.top_10).map((r) => r.id))
   const mustKnowIds = new Set((itemFlagRows ?? []).filter((r) => r.is_must_know).map((r) => r.id))
   const mustKnowMemorizedIds = memorizedIds.filter((id) => mustKnowIds.has(id))
-  // Must Appear in Exam (migration 0093): formula side is scoped to this
-  // staff member's own memorized items (itemFlagRows, above) — a flagged
-  // item they haven't memorized yet simply has no eligible question to
-  // force here, same as it has none for the rest of this pool. Shop
-  // training's flag isn't gated by memorization anywhere in this function
-  // (it never tracked that), so it's fetched store-wide instead.
-  const mustAppearFormulaIds = new Set((itemFlagRows ?? []).filter((r) => r.must_appear_in_exam).map((r) => r.id))
-  const { data: trainingMustAppearRows } = storeId
-    ? await supabase.from('shop_training_items').select('id').eq('store_id', storeId).eq('must_appear_in_exam', true)
-    : { data: [] }
-  const mustAppearTrainingIds = new Set((trainingMustAppearRows ?? []).map((r) => r.id))
 
   const [{ data: ingredientRows }, { data: excludedRows }, { data: allQuantityRows }, { data: sizedItemRows }] = await Promise.all([
     supabase
@@ -189,36 +139,14 @@ export async function buildFormalExamQuestionSet(profileId, storeId) {
   let allFillBlankCandidates = [...fillBlankCandidates, ...bankFillBlankVisible]
   if (!allFillBlankCandidates.length && !mcVisible.length) return { questions: [], reason: 'no_questions' }
 
-  // Pull Must Appear in Exam candidates out of the full pools BEFORE any of
-  // the quota/importance-ratio sampling below runs, so they're guaranteed a
-  // slot rather than just getting lucky in it — then shrink the budget the
-  // rest of this function samples for by however many got forced, and fold
-  // them back in further down (fill-blank ones still need the same
-  // hard-quantity-choice pass real fillBlankSelected items get, so they're
-  // merged in before that, not just appended at the end). One combined
-  // splitForced() call (rather than one per pool) so an item with BOTH a
-  // generated fill-blank candidate and a bank MC question is only forced
-  // once, not twice.
-  const { forced: forcedQuestions, rest: nonForcedPool } = splitForced(
-    shuffle([...allFillBlankCandidates, ...mcVisible]),
-    mustAppearFormulaIds,
-    mustAppearTrainingIds
-  )
-  const forcedFillBlank = forcedQuestions.filter((c) => c.type === 'fill_blank')
-  const forcedMc = forcedQuestions.filter((c) => c.type !== 'fill_blank')
-  allFillBlankCandidates = nonForcedPool.filter((c) => c.type === 'fill_blank')
-  mcVisible = nonForcedPool.filter((c) => c.type !== 'fill_blank')
-  const effectiveQuestionCount = Math.max(0, questionCount - forcedQuestions.length)
-
-  let fillBlankTarget = Math.round((effectiveQuestionCount * fillBlankRatio) / 100)
+  let fillBlankTarget = Math.round((questionCount * fillBlankRatio) / 100)
   fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
-  let mcTarget = effectiveQuestionCount - fillBlankTarget
+  let mcTarget = questionCount - fillBlankTarget
 
   const fillBlankWeight = (c) => (c.topTen ? top10Weight : 1)
-  let fillBlankSelected = [...forcedFillBlank, ...weightedSample(allFillBlankCandidates, fillBlankWeight, fillBlankTarget)]
+  let fillBlankSelected = weightedSample(allFillBlankCandidates, fillBlankWeight, fillBlankTarget)
 
   const fillBlankDrinkIds = new Set(fillBlankSelected.map((c) => c.formulaItemId).filter(Boolean))
-  let mcSelected = [...forcedMc]
   const mcPool = mcVisible.filter((q) => !fillBlankDrinkIds.has(q.formula_item_id))
 
   const byImportance = { 1: [], 2: [], 3: [] }
@@ -232,17 +160,8 @@ export async function buildFormalExamQuestionSet(profileId, storeId) {
     const remaining = shuffle(mcPool.filter((q) => !mcPicked.includes(q))).slice(0, mcTarget - mcPicked.length)
     mcPicked.push(...remaining)
   }
-  mcPicked = mcPicked.slice(0, mcTarget)
-  // forcedMc was seeded into mcSelected above, ahead of this importance-
-  // ratio sampling — appended here rather than capped by mcTarget with it,
-  // so a forced item can't get sliced away by the quota the same way
-  // fillBlankSelected's forced ones are kept outside fillBlankTarget too.
-  mcSelected = [...mcSelected, ...mcPicked]
+  let mcSelected = mcPicked.slice(0, mcTarget)
 
-  // mcSelected/fillBlankSelected already include the forced items merged in
-  // above, so the shortfall check compares against the real total
-  // questionCount, not the forced-reduced effectiveQuestionCount budget
-  // that only governed how much of each pool's quota sampling ran.
   const shortfall = questionCount - mcSelected.length - fillBlankSelected.length
   if (shortfall > 0) {
     const usedIds = new Set(fillBlankSelected.map((f) => f.localId))
@@ -276,10 +195,10 @@ export async function buildFormalExamQuestionSet(profileId, storeId) {
 // `errorTolerance` other misses are OK — see master_quiz_settings.
 export async function buildMasterExamQuestionSet(storeId) {
   const [{ data: formulaItemRows }, { data: drinkStoreRows }, { data: trainingItemRows }, { data: settings }] = await Promise.all([
-    supabase.from('formula_items').select('id, is_must_know, must_appear_in_exam').eq('is_active', true),
+    supabase.from('formula_items').select('id, is_must_know').eq('is_active', true),
     supabase.from('formula_item_stores').select('*'),
     storeId
-      ? supabase.from('shop_training_items').select('id, is_must_know, must_appear_in_exam').eq('store_id', storeId)
+      ? supabase.from('shop_training_items').select('id, is_must_know').eq('store_id', storeId)
       : Promise.resolve({ data: [] }),
     supabase.from('master_quiz_settings').select('*').maybeSingle(),
   ])
@@ -288,8 +207,6 @@ export async function buildMasterExamQuestionSet(storeId) {
   const visibleFormulaIdSet = new Set(visibleFormulaItems.map((i) => i.id))
   const mustKnowTrainingIds = new Set((trainingItemRows ?? []).filter((i) => i.is_must_know).map((i) => i.id))
   const trainingIdSet = new Set((trainingItemRows ?? []).map((i) => i.id))
-  const mustAppearFormulaIds = new Set(visibleFormulaItems.filter((i) => i.must_appear_in_exam).map((i) => i.id))
-  const mustAppearTrainingIds = new Set((trainingItemRows ?? []).filter((i) => i.must_appear_in_exam).map((i) => i.id))
 
   const questionCount = settings?.question_count ?? 30
   const errorTolerance = settings?.error_tolerance ?? 0
@@ -308,8 +225,7 @@ export async function buildMasterExamQuestionSet(storeId) {
     type: q.question_type === 'multi' ? 'multi' : q.question_type === 'fill_blank' ? 'fill_blank' : 'choice',
     isMustKnow: q.formula_item_id ? mustKnowFormulaIds.has(q.formula_item_id) : q.shop_training_item_id ? mustKnowTrainingIds.has(q.shop_training_item_id) : false,
   }))
-  const { forced, rest } = splitForced(shuffle(tagged), mustAppearFormulaIds, mustAppearTrainingIds)
-  const questions = combineWithForced(forced, rest, questionCount)
+  const questions = shuffle(tagged).slice(0, questionCount)
   return { questions, reason: null, errorTolerance }
 }
 
@@ -367,10 +283,10 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
 // with a narrower item pool, not a new settings row.
 export async function buildExpertExamQuestionSet(storeId) {
   const [{ data: formulaItemRows }, { data: drinkStoreRows }, { data: trainingItemRows }, { data: settings }] = await Promise.all([
-    supabase.from('formula_items').select('id, is_must_know, training_journey_phase, must_appear_in_exam').eq('is_active', true),
+    supabase.from('formula_items').select('id, is_must_know, training_journey_phase').eq('is_active', true),
     supabase.from('formula_item_stores').select('*'),
     storeId
-      ? supabase.from('shop_training_items').select('id, is_must_know, training_journey_phase, must_appear_in_exam').eq('store_id', storeId)
+      ? supabase.from('shop_training_items').select('id, is_must_know, training_journey_phase').eq('store_id', storeId)
       : Promise.resolve({ data: [] }),
     supabase.from('master_quiz_settings').select('*').maybeSingle(),
   ])
@@ -381,8 +297,6 @@ export async function buildExpertExamQuestionSet(storeId) {
   const phaseSixTrainingItems = (trainingItemRows ?? []).filter((i) => i.training_journey_phase && i.training_journey_phase <= 6)
   const mustKnowTrainingIds = new Set(phaseSixTrainingItems.filter((i) => i.is_must_know).map((i) => i.id))
   const trainingIdSet = new Set(phaseSixTrainingItems.map((i) => i.id))
-  const mustAppearFormulaIds = new Set(phaseSixFormulaItems.filter((i) => i.must_appear_in_exam).map((i) => i.id))
-  const mustAppearTrainingIds = new Set(phaseSixTrainingItems.filter((i) => i.must_appear_in_exam).map((i) => i.id))
 
   const questionCount = settings?.question_count ?? 30
   const errorTolerance = settings?.error_tolerance ?? 0
@@ -403,7 +317,6 @@ export async function buildExpertExamQuestionSet(storeId) {
     type: q.question_type === 'multi' ? 'multi' : q.question_type === 'fill_blank' ? 'fill_blank' : 'choice',
     isMustKnow: q.formula_item_id ? mustKnowFormulaIds.has(q.formula_item_id) : q.shop_training_item_id ? mustKnowTrainingIds.has(q.shop_training_item_id) : false,
   }))
-  const { forced, rest } = splitForced(shuffle(tagged), mustAppearFormulaIds, mustAppearTrainingIds)
-  const questions = combineWithForced(forced, rest, questionCount)
+  const questions = shuffle(tagged).slice(0, questionCount)
   return { questions, reason: null, errorTolerance }
 }

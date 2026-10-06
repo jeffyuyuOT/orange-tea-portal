@@ -78,26 +78,33 @@ export function orderedPageEntries(sectionKey, order) {
 
 // Some pages share one Sidebar row even though each still has its own real
 // permission key underneath (permissions.js's shop_management.quiz_bank /
-// shop_training_database / training_code, grouped visually by
-// TrainingCentreLayout.jsx's shared tab bar). Jeff, 2026-09: "shop
-// management下只要有training center，不要出現quiz bank跟training code" — one
-// row in the Sidebar for the whole group, not three. Keyed by section; each
-// entry is a synthetic group (its `key` is NOT a real page/permission key,
-// just an id for this row) folding several real page keys into one link.
-// `pages` is this group's own fixed canonical order — matches
-// TrainingCentreLayout.jsx's TABS — used to pick which member the one link
-// lands on and is independent of pageOrder/movePage (see
-// logicalPageEntries and SidebarOrderPanel.jsx, which both move/fold the
-// group as a single unit rather than the three keys separately).
+// shop_training_database, grouped visually by TrainingCentreLayout.jsx's
+// shared tab bar). Jeff, 2026-09: "shop management下只要有training center，
+// 不要出現quiz bank跟training code" — one row in the Sidebar for the whole
+// group, not several. Keyed by section; each entry is a synthetic group
+// (its `key` is NOT a real page/permission key, just an id for this row)
+// folding several real page keys into one link. `pages` is this group's own
+// fixed canonical order — matches TrainingCentreLayout.jsx's TABS — used to
+// pick which member the one link lands on and is independent of
+// pageOrder/movePage (see logicalPageEntries and SidebarOrderPanel.jsx,
+// which both move/fold the group as a single unit rather than the member
+// keys separately).
 export const PAGE_GROUPS = {
   shop_management: [
     {
       key: 'training_centre',
       label: 'Training Centre',
       // Jeff, 2026-10-02: 'training_journey_setting' joined this group the
-      // same way 'training_code' did — a fourth Training Centre tab, one
-      // more Sidebar row member rather than its own separate row.
-      pages: ['quiz_bank', 'shop_training_database', 'training_code', 'training_journey_setting'],
+      // same way 'training_code' once did — one more Training Centre tab,
+      // another Sidebar row member rather than its own separate row.
+      // Jeff, 2026-10-07: "移除training centre裡的training code分頁，
+      // training staff現在不需要經過training code就可以登入" — 'training_code'
+      // itself dropped out of this group along with the page and the
+      // login-gate it existed for (see AuthContext.jsx's verifyTrainingCode,
+      // now removed, and permissions.js, which no longer has this key at
+      // all — this group's own next reconcile against SECTIONS drops it
+      // from anyone's already-saved Sidebar order automatically).
+      pages: ['quiz_bank', 'shop_training_database', 'training_journey_setting'],
     },
   ],
 }

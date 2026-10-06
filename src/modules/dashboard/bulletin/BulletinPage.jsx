@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { addMonths } from 'date-fns'
+import { addMonths, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
@@ -350,7 +350,17 @@ export default function BulletinPage() {
       return {
         id: `roster-${r.id}`,
         type: 'roster',
-        date: new Date(r.submitted_at),
+        // Jeff, 2026-10-07: "是以roster的日期判斷新舊，不是按照publish的時間"
+        // — the feed's shared newest-first sort (merged.sort below) used to
+        // run every item, roster included, off `submitted_at` (when it was
+        // posted/re-posted); a roster re-submitted for a PAST week would
+        // then jump back to the top ahead of an already-posted future week,
+        // which isn't the "new" Jeff means here. Sorting a roster item by
+        // its own week_start_date instead means newer WEEKS sort above
+        // older ones regardless of which got (re-)published more recently
+        // — `subtitle` below still shows the real publish timestamp, that
+        // just isn't the ordering key any more.
+        date: parseISO(r.week_start_date),
         title: `Roster posted: ${r.week_start_date} – ${r.week_end_date}`,
         subtitle: `${new Date(r.submitted_at).toLocaleString()}${creatorName ? ` · ${creatorName}` : ''}`,
         // Jeff, 2026-10-02: "Bulletin的roster更新時不用顯示小紅點，除了有

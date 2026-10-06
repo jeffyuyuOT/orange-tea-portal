@@ -85,14 +85,24 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   // constraint); Jeff, 2026-10-03: "Tea, topping跟others也要有must-know
   // item標示" -- opened up to every group_key (top_10 stays drink-only).
   const [mustKnow, setMustKnow] = useState(item.is_must_know ?? false)
-  // Jeff, 2026-10-04 (migration 0093): a third, independent flag — unlike
-  // Must Know Item (which gates memorization requirements/fill-in-the-blank
-  // eligibility), this guarantees a question linked to this item a slot in
-  // the Formal Exam and the Expert/Master Exam instead of leaving it to the
-  // random draw every exam builder otherwise does (see examBuilders.js's
-  // splitForced()). Deliberately NOT wired into the Level-Up Exam — Jeff's
-  // request only named Formal/Expert/Master.
-  const [mustAppear, setMustAppear] = useState(item.must_appear_in_exam ?? false)
+  // Jeff, 2026-10-07: "Must Appear in Exam的選項從商品編輯移除，重要的題目
+  // 標註important 1就好" — the per-item "guarantee a slot" flag (migration
+  // 0093's must_appear_in_exam) is retired; mark the QUESTION itself
+  // importance 1 instead (Admin Quiz Bank / shop Quiz Bank's question
+  // editor), which Formal Exam's importance-ratio sampling already weights
+  // toward. The DB column is left in place, unused — same as every other
+  // retired flag this session (e.g. Training Code), nothing reads it any
+  // more.
+  // Jeff, 2026-10-07 (migration 0093): pulls this item out of the
+  // staff-facing Formula page entirely (every list there, plus the Update
+  // tab/badge) and out of Admin Training Journey Setting's phase-assign
+  // lists and the Training Journey phase checklists — see
+  // FormulaPage.jsx/formulaUpdates.js/PhaseItemTab.jsx/trainingJourney.js.
+  // Its own training_journey_phase value is left untouched in the DB, so
+  // un-hiding it later restores it to wherever it already was assigned.
+  // ItemManager.jsx (this item's own admin list) still shows it, just
+  // dimmed, so it stays findable.
+  const [hideFromFormula, setHideFromFormula] = useState(item.hide_from_formula ?? false)
   const [activeHot, setActiveHot] = useState(false) // which ingredient set is showing: false = Iced/Cold, true = Hot
   const [ingredients, setIngredients] = useState([])
   const [annotations, setAnnotations] = useState([]) // small notes shown just above/below the table on the Formula page
@@ -381,7 +391,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         has_hot_version: isDrink ? hasHotVersion : false,
         top_10: isDrink ? topTen : false,
         is_must_know: mustKnow,
-        must_appear_in_exam: mustAppear,
+        hide_from_formula: hideFromFormula,
       }
       if (isNew) {
         const { data, error } = await supabase
@@ -529,11 +539,11 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
             </span>
           </label>
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <input type="checkbox" checked={mustAppear} onChange={(e) => setMustAppear(e.target.checked)} />
-            📌 Must Appear in Exam
+            <input type="checkbox" checked={hideFromFormula} onChange={(e) => setHideFromFormula(e.target.checked)} />
+            🙈 Hide from Formula
             <span className="text-xs font-normal text-gray-400">
-              — guarantees a question about this item in the Formal Exam and the Expert/Master Exam (not the
-              Level-Up Exam)
+              — removes this item from the staff Formula page and from Training Journey's phase assignment; it still
+              shows here (dimmed) so you can find it again
             </span>
           </label>
 

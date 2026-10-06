@@ -3,9 +3,10 @@ import { format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
+import Modal from '../../../components/ui/Modal'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
-import { formatMinutes } from '../../../lib/attendance'
+import { formatMinutes, formatBreakUnits } from '../../../lib/attendance'
 import {
   getStaffTimeDiscrepancies,
   isUnreadDiscrepancy,
@@ -43,6 +44,11 @@ export default function StaffTimeLogsPage() {
   // how "unread" is decided from the two together.
   const [discrepancies, setDiscrepancies] = useState({})
   const [viewedAtBySubject, setViewedAtBySubject] = useState(new Map())
+  // Jeff, 2026-10-07: "在staff time logs裡顯示...Rostered time的地方點擊跳出
+  // 視窗顯示roster上的時間跟break次數" — which flagged day's "Rostered ..."
+  // was clicked, or null; the day object itself (see timeDiscrepancy.js) is
+  // enough to render the popup, no extra fetch needed.
+  const [rosterDetailDay, setRosterDetailDay] = useState(null)
 
   useEffect(() => {
     if (!currentStoreId) return
@@ -163,7 +169,19 @@ export default function StaffTimeLogsPage() {
                 <li key={d.date} className="flex flex-wrap items-center justify-between gap-2">
                   <span>{format(parseISO(d.date), 'EEE, MMM d')}</span>
                   <span>
-                    Rostered {formatMinutes(d.scheduledMinutes)} · Clocked {formatMinutes(d.actualMinutes)} ·{' '}
+                    {/* Jeff, 2026-10-07: "Rostered time的地方點擊跳出視窗顯示
+                        roster上的時間跟break次數" — "Rostered Xh Ym" here is
+                        just a netted DURATION; clicking it shows the actual
+                        scheduled start/end clock time and break count it was
+                        computed from. */}
+                    <button
+                      type="button"
+                      onClick={() => setRosterDetailDay(d)}
+                      className="underline decoration-dotted underline-offset-2 hover:text-red-900"
+                    >
+                      Rostered {formatMinutes(d.scheduledMinutes)}
+                    </button>{' '}
+                    · Clocked {formatMinutes(d.actualMinutes)} ·{' '}
                     <span className="font-medium">
                       {d.diffMinutes > 0 ? '+' : ''}
                       {formatMinutes(Math.abs(d.diffMinutes))} {d.diffMinutes > 0 ? 'more' : 'less'}
@@ -174,6 +192,29 @@ export default function StaffTimeLogsPage() {
             </ul>
           </div>
         )}
+
+        <Modal
+          open={!!rosterDetailDay}
+          onClose={() => setRosterDetailDay(null)}
+          title={rosterDetailDay ? format(parseISO(rosterDetailDay.date), 'EEE, MMM d') + ' — rostered shift' : ''}
+        >
+          {rosterDetailDay && (
+            <div className="space-y-2 text-sm text-gray-700">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Scheduled time</span>
+                <span className="font-medium">
+                  {rosterDetailDay.rosterStartTime && rosterDetailDay.rosterEndTime
+                    ? `${rosterDetailDay.rosterStartTime.slice(0, 5)}–${rosterDetailDay.rosterEndTime.slice(0, 5)}`
+                    : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Break</span>
+                <span className="font-medium">{formatBreakUnits(rosterDetailDay.rosterBreakHalfHours) ?? 'None'}</span>
+              </div>
+            </div>
+          )}
+        </Modal>
 
         <AttendanceLogTable
           profileId={selected.id}

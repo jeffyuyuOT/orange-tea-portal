@@ -248,7 +248,12 @@ function ItemList({ groupKey, categoryId, topTen, mustKnow, storeId, onBack, bac
     let active = true
     setLoading(true)
     async function load() {
-      let query = supabase.from('formula_items').select('*').eq('group_key', groupKey).eq('is_active', true)
+      let query = supabase
+        .from('formula_items')
+        .select('*')
+        .eq('group_key', groupKey)
+        .eq('is_active', true)
+        .eq('hide_from_formula', false)
       query = topTen
         ? query.eq('top_10', true)
         : mustKnow
