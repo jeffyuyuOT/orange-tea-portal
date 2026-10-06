@@ -27,8 +27,14 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
     // at all; a touch narrower on mobile (still comfortably tappable) gives
     // MyAvailabilityPage's row-wrap fix less work to do and keeps a single
     // start–end pair on one line on more phones. Unchanged from `sm` up.
+    // Jeff, 2026-10-07: same fix as TypedTimeInput.jsx's AM/PM select (Edit
+    // Staff Time Log) — these three were squeezed to !py-1.5 (6px vertical),
+    // likely too tight for some Android builds' native <select> chrome to
+    // render its label text in at all. Bumped to !py-2 (8px) + an explicit
+    // normal line-height, same reasoning, pre-emptively applied here since
+    // it's the identical narrow-select pattern.
     <div className={`flex items-center gap-1 ${className}`}>
-      <select className="input !w-14 !py-1.5 sm:!w-16" value={hour12} onChange={(e) => set({ hour12: Number(e.target.value) })}>
+      <select className="input !w-14 !py-2 leading-normal sm:!w-16" value={hour12} onChange={(e) => set({ hour12: Number(e.target.value) })}>
         {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
           <option key={h} value={h}>
             {h}
@@ -36,14 +42,14 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
         ))}
       </select>
       <span className="text-gray-400">:</span>
-      <select className="input !w-14 !py-1.5 sm:!w-16" value={minute} onChange={(e) => set({ minute: e.target.value })}>
+      <select className="input !w-14 !py-2 leading-normal sm:!w-16" value={minute} onChange={(e) => set({ minute: e.target.value })}>
         {MINUTE_OPTIONS.map((m) => (
           <option key={m} value={m}>
             {m}
           </option>
         ))}
       </select>
-      <select className="input !w-20 !py-1.5 sm:!w-24" value={ampm} onChange={(e) => set({ ampm: e.target.value })}>
+      <select className="input !w-20 !py-2 leading-normal sm:!w-24" value={ampm} onChange={(e) => set({ ampm: e.target.value })}>
         <option value="AM">AM</option>
         <option value="PM">PM</option>
       </select>

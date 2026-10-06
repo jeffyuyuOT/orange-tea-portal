@@ -99,7 +99,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="hh"
         disabled={disabled}
-        className={`input w-12 !py-1.5 text-center ${hourInvalid ? 'border-red-400' : ''}`}
+        className={`input w-12 !py-2 text-center leading-normal ${hourInvalid ? 'border-red-400' : ''}`}
         value={hour}
         onChange={(e) => {
           const { displayHour, forcedAmpm } = normalizeTypedHour(digitsOnly(e.target.value))
@@ -117,7 +117,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="mm"
         disabled={disabled}
-        className={`input w-12 !py-1.5 text-center ${minuteInvalid ? 'border-red-400' : ''}`}
+        className={`input w-12 !py-2 text-center leading-normal ${minuteInvalid ? 'border-red-400' : ''}`}
         value={minute}
         onChange={(e) => {
           const v = digitsOnly(e.target.value)
@@ -125,8 +125,22 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
           commit(hour, v, ampm)
         }}
       />
+      {/* Jeff, 2026-10-07: "新增clock in/out時間的時候AM/PM會看不到內容" — on
+          his phone this <select>'s text wasn't rendering at all (the box and
+          its dropdown arrow showed, but "AM"/"PM" didn't), while the
+          same-row event-type <select> (AttendanceCellEditModal.jsx, plain
+          .input padding, no height override) rendered its text fine. The one
+          working difference: this one was squeezed to !py-1.5 (6px vertical)
+          — likely too tight for this Android build's native <select> chrome
+          to lay the label out in, especially if the OS's own accessibility
+          font-size is scaled up past what the page's own CSS text sizing
+          assumes. Bumped to !py-2 (8px, matching .input's own untouched
+          default — the same padding the working event-type select already
+          uses) plus an explicit normal line-height, on all three fields here
+          for consistent row height, rather than trimming padding specifically
+          on the one native widget that needs it most. */}
       <select
-        className="input w-20 !py-1.5"
+        className="input w-20 !py-2 leading-normal"
         disabled={disabled}
         value={ampm}
         onChange={(e) => {
