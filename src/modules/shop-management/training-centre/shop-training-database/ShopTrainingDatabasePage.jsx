@@ -23,6 +23,14 @@ import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker
 // action, so it now lives next to its Quiz Bank counterpart. No code changes
 // needed for the move itself — this file's relative import depth is
 // unchanged.
+//
+// Jeff, 2026-10-07: "shop training database裡的item新增assign to training
+// journey的選項" — EditModal below gets its own Phase dropdown (Phase 1-3 for
+// a Must-Know item, Phase 4/Master for a non-Must-Know one — same split
+// TrainingJourneySettingPage.jsx's own tab already enforces for this store;
+// that tab is unaffected/still there, this is just a second, inline place to
+// set the same training_journey_phase column). "copy to store也會將phase
+// assign設定copy過去" — CopyToStoreModal's insert carries it over too.
 export default function ShopTrainingDatabasePage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [items, setItems] = useState([])
@@ -45,7 +53,11 @@ export default function ShopTrainingDatabasePage() {
   async function load() {
     if (!currentStoreId) return
     setLoading(true)
-    const { data } = await supabase.from('shop_training_items').select('*').eq('store_id', currentStoreId).order('sort_order')
+    const { data } = await supabase
+      .from('shop_training_items')
+      .select('*')
+      .eq('store_id', currentStoreId)
+      .order('sort_order')
     setItems(data ?? [])
     setLoading(false)
   }
@@ -106,6 +118,19 @@ export default function ShopTrainingDatabasePage() {
                 {item.is_must_know && (
                   <span className="text-amber-500" title="Must Know Item">
                     ⭐
+                  </span>
+                )}
+                {/* Jeff, 2026-10-07: "shop training database裡的item新增
+                    assign to training journey的選項" — same phase badge
+                    TrainingJourneySettingPage.jsx's own item list already
+                    shows, so a phase assignment made from either place is
+                    visible here at a glance. */}
+                {item.training_journey_phase && (
+                  <span
+                    className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700"
+                    title="Training Journey phase"
+                  >
+                    {item.training_journey_phase === 4 ? 'Phase 4 (Master)' : `Phase ${item.training_journey_phase}`}
                   </span>
                 )}
                 {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
@@ -198,6 +223,17 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   // drinks (StaffStudyDetail.jsx). An unchecked item stays fully visible
   // and keeps its own Study Log "Memorized" self-tracking checkbox.
   const [mustKnow, setMustKnow] = useState(item.is_must_know ?? false)
+  // Jeff, 2026-10-07: "shop training database裡的item新增assign to training
+  // journey的選項，可以下拉選取phase，則item也會在training journey裡出現" —
+  // same training_journey_phase column, same Phase 1-3 (must-know) / Phase 4
+  // Master (non-must-know) split TrainingJourneySettingPage.jsx already
+  // enforces for this store, just editable right here too now instead of
+  // only on that separate tab. "如果勾選must-know item時，則必須選擇phase 1-3
+  // 其中一個" — toggling Must Know on/off clears whichever side's phase no
+  // longer applies (a stale Phase 4 surviving a must-know check, or vice
+  // versa), and save() below blocks with no phase chosen while Must Know is
+  // checked.
+  const [trainingPhase, setTrainingPhase] = useState(item.training_journey_phase ?? null)
   // Attached files staff can download alongside the content — same
   // "upload immediately, only link it to the item at Save" pattern Formula
   // Database's videos use, since a brand-new item has no id yet for a
@@ -244,6 +280,10 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   }
 
   async function save() {
+    if (mustKnow && !trainingPhase) {
+      alert('Must-Know items need a Phase 1–3 Training Journey assignment — pick one below.')
+      return
+    }
     setSaving(true)
     let itemId = item.id
     if (isNew) {
@@ -254,6 +294,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           content_html: content,
           visible_to_training: visible,
           is_must_know: mustKnow,
+          training_journey_phase: trainingPhase,
           sort_order: nextSortOrder,
           store_id: currentStoreId,
           created_by: profileId,
@@ -275,6 +316,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           content_html: content,
           visible_to_training: visible,
           is_must_know: mustKnow,
+          training_journey_phase: trainingPhase,
           updated_by: profileId,
           updated_by_name: profileName,
         })
@@ -305,7 +347,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
       wide
       title={isNew ? 'New Training Item' : 'Edit Training Item'}
       footer={
-        <Button onClick={save} disabled={saving || !title}>
+        <Button onClick={save} disabled={saving || !title || (mustKnow && !trainingPhase)}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
       }
@@ -318,11 +360,43 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           Visible to Training-role logins
         </label>
         <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          <input type="checkbox" checked={mustKnow} onChange={(e) => setMustKnow(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={mustKnow}
+            onChange={(e) => {
+              const checked = e.target.checked
+              setMustKnow(checked)
+              // Phase 1-3 is must-know-only, Phase 4 is non-must-know-only —
+              // clear whichever side no longer applies rather than let a
+              // stale value silently ride along to Save.
+              setTrainingPhase((prev) => (checked ? (prev === 4 ? null : prev) : prev && prev <= 3 ? null : prev))
+            }}
+          />
           ⭐ Must Know Item
           <span className="text-xs font-normal text-gray-400">
             — required for the Formal Quiz memorization check (a non-must-know item stays optional to memorize)
           </span>
+        </label>
+
+        <label className="block max-w-xs">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Assign to Training Journey</span>
+          <select
+            className="input"
+            value={trainingPhase ?? ''}
+            onChange={(e) => setTrainingPhase(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">— Not in Training Journey —</option>
+            {(mustKnow ? [1, 2, 3] : [4]).map((p) => (
+              <option key={p} value={p}>
+                {p === 4 ? 'Phase 4 (Master)' : `Phase ${p}`}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-gray-400">
+            {mustKnow
+              ? 'Must-Know items need one of Phase 1–3 to show up in everyone\'s Training Journey — same assignment as the Training Journey Setting tab.'
+              : "Non-must-know items can optionally join Phase 4 (Master)'s item pool instead — same Phase 4 picker as the Training Journey Setting tab."}
+          </p>
         </label>
 
         <div>
@@ -441,6 +515,13 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
           content_html: item.content_html,
           visible_to_training: item.visible_to_training,
           is_must_know: item.is_must_know,
+          // Jeff, 2026-10-07: "copy to store也會將phase assign設定copy過去" —
+          // the Training Journey phase assignment travels with the copy, same
+          // as is_must_know right above it (the two always went together
+          // conceptually — a phase without this would silently vanish at the
+          // destination store, leaving the copy's Training Journey placement
+          // to be redone by hand).
+          training_journey_phase: item.training_journey_phase,
           sort_order: count ?? 0,
           store_id: storeId,
         })
