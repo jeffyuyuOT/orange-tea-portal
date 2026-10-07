@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import Button from '../../../components/ui/Button'
 
-// Jeff, 2026-10-02 (Training Journey spec, point 5): per-phase styling +
-// pacing, backing `training_journey_phases` (migration 0091 — 6 seeded
-// rows, phase_number 1-6). Phase names (Beginner … Master) are fixed, not
-// editable here — only color, how many hours worked fill each phase
-// (1-5 only; Phase 6 fills by memorized items instead, see
-// TrainingJourneyPage.jsx), and each phase's Level-Up Exam question count.
+// Jeff, 2026-10-02 (Training Journey spec, point 5; phase-merge, 2026-10-07,
+// point 1): per-phase styling + pacing, backing `training_journey_phases`
+// (migration 0096 — 4 rows, phase_number 1-4: Novice/Practitioner/Advanced/
+// Master). Phase names are fixed, not editable here — only color, how many
+// hours worked fill each phase (1-3 only; Phase 4/Master fills by memorized
+// items instead, see TrainingJourneyPage.jsx), and each phase's Level-Up
+// Exam question count.
 export default function PhaseSettingTab() {
   const [phases, setPhases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -35,10 +36,10 @@ export default function PhaseSettingTab() {
         supabase
           .from('training_journey_phases')
           .update({
-            hours_required: p.phase_number <= 5 ? p.hours_required : null,
+            hours_required: p.phase_number <= 3 ? p.hours_required : null,
             bg_color: p.bg_color,
             text_color: p.text_color,
-            level_up_exam_question_count: p.phase_number <= 5 ? p.level_up_exam_question_count : null,
+            level_up_exam_question_count: p.phase_number <= 3 ? p.level_up_exam_question_count : null,
           })
           .eq('phase_number', p.phase_number)
       )
@@ -50,7 +51,7 @@ export default function PhaseSettingTab() {
 
   if (loading) return null
 
-  const totalHours = phases.filter((p) => p.phase_number <= 5).reduce((sum, p) => sum + (Number(p.hours_required) || 0), 0)
+  const totalHours = phases.filter((p) => p.phase_number <= 3).reduce((sum, p) => sum + (Number(p.hours_required) || 0), 0)
 
   return (
     <div>
@@ -85,7 +86,7 @@ export default function PhaseSettingTab() {
                 onChange={(e) => update(p.phase_number, { text_color: e.target.value })}
               />
             </label>
-            {p.phase_number <= 5 ? (
+            {p.phase_number <= 3 ? (
               <>
                 <label className="flex items-center gap-1.5 text-xs text-gray-500">
                   Hours to fill
@@ -109,13 +110,13 @@ export default function PhaseSettingTab() {
                 </label>
               </>
             ) : (
-              <span className="text-xs text-gray-400">Phase 6 fills by % of all items memorized, not hours or a Level-Up Exam.</span>
+              <span className="text-xs text-gray-400">Phase 4 fills by % of all items memorized, not hours or a Level-Up Exam.</span>
             )}
           </div>
         ))}
       </div>
 
-      <p className="mt-3 text-xs text-gray-400">Phase 1–5 total: {totalHours} hours worked to reach Phase 5 (Advanced) from hours alone.</p>
+      <p className="mt-3 text-xs text-gray-400">Phase 1–3 total: {totalHours} hours worked to reach Phase 3 (Advanced) from hours alone.</p>
 
       <Button onClick={save} disabled={saving} className="mt-4">
         {saving ? 'Saving…' : 'Save'}

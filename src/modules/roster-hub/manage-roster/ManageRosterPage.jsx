@@ -164,10 +164,8 @@ export default function ManageRosterPage() {
       // has_master_title (Training Journey spec, point 6) are the same
       // idea's successor — RosterEntryGrid reads them instead, under
       // whichever Roster Name Display Format System Setting has chosen.
-      // has_expert_title (Expert/Master split, point 4) joins them so
-      // rosterTitleStyle() can tell Expert apart from Master/in-progress.
       .select(
-        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity, training_journey_phase, has_expert_title, has_master_title)'
+        'roster_display_name, roster_order, hidden_from_roster, profiles(id, first_name, last_name, email, is_active, role, qualified, primary_store_id, join_store_activity, training_journey_phase, has_master_title)'
       )
       .eq('store_id', currentStoreId)
       .order('roster_order')

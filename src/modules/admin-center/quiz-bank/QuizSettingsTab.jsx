@@ -67,34 +67,43 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 // still two columns under the hood, just kept in sync from here — so
 // QuickQuizModal.jsx/FormalQuizModal.jsx don't need to change how they read
 // their own column.
+// Jeff, 2026-10-07 (8-point phase-merge request, point 4): "Formal quiz
+// Quiz reminder cadence從formal exam設定區塊移除。因為Title defense exam才有
+// Quiz reminder cadence" — the generic Bulletin quiz-reminder cadence
+// (quiz_settings.reminder_period_months) moves from the Formal Quiz section
+// into Quick Quiz's, since it's a Quick-Quiz-nudge setting, not a title-
+// defense one. "Title defense cadence從Expert/Master Quiz區塊獨立出來到其下
+// 面另一個區塊Title defense exam裡" — Title Defense Exam becomes its own
+// section (new title_defense_settings table, migration 0096), with its own
+// question count AND cadence, shared by BOTH Advanced and Master
+// titleholders — Expert/Master Quiz is relabeled plain "Master Quiz"
+// (the merged Expert tier no longer exists) and loses its own
+// reminder_period_months field (column dropped by the same migration).
 export default function QuizSettingsTab() {
-  // Quick Quiz's own settings (quiz_settings table).
+  // Quick Quiz's own settings (quiz_settings table), plus the Bulletin quiz
+  // reminder cadence — moved here (was under Formal Quiz) since it's a
+  // Quick Quiz nudge, not a title-defense one (that's its own section now).
   const [quickQuestionCount, setQuickQuestionCount] = useState(10)
-
-  // Formal Quiz's own settings (formal_quiz_settings table), plus the quiz
-  // reminder cadence — stored in quiz_settings for historical reasons, but
-  // grouped here visually because the reminder is about Formal Quiz.
-  const [formalQuestionCount, setFormalQuestionCount] = useState(30)
   const [reminderMonths, setReminderMonths] = useState(3)
 
-  // Jeff, 2026-10-02 (Training Journey spec, point 10): Master Exam's own
-  // settings (master_quiz_settings table, migration 0091 — a true
-  // singleton, same shape as formal_quiz_settings). error_tolerance is how
-  // many NON-must-know questions can be missed and still pass — a missed
-  // must-know-linked question always fails regardless (see
-  // MasterExamModal.jsx/ExpertExamModal.jsx/examBuilders.js).
-  // reminder_period_months is the title-defense cadence — deliberately
-  // separate from Formal Quiz's reminderMonths above, since Expert/Master
-  // titleholders defend on their own schedule, not the Advanced one
-  // (recordExpertExamResult/recordMasterExamResult in trainingJourney.js).
-  // Jeff, 2026-10-03 (Expert/Master split, point 3): "出題是從phase 1-6
-  // 勾選的item出題，邏輯設定都跟master exam一樣" — Expert reuses this exact
-  // same settings row rather than getting its own, so the state/field names
-  // below stay "master" (no schema change) while the labels rendered below
-  // read "Expert/Master" throughout.
+  // Formal Quiz's own settings (formal_quiz_settings table).
+  const [formalQuestionCount, setFormalQuestionCount] = useState(30)
+
+  // Master Exam's own settings (master_quiz_settings table) — question
+  // count and error tolerance only now; its own title-defense cadence field
+  // moved into the shared Title Defense Exam section below.
+  // error_tolerance is how many NON-must-know questions can be missed and
+  // still pass — a missed must-know-linked question always fails
+  // regardless (see MasterExamModal.jsx/examBuilders.js).
   const [masterQuestionCount, setMasterQuestionCount] = useState(30)
   const [masterErrorTolerance, setMasterErrorTolerance] = useState(0)
-  const [masterReminderMonths, setMasterReminderMonths] = useState(3)
+
+  // Title Defense Exam — shared by BOTH Advanced and Master titleholders
+  // (title_defense_settings table, migration 0096), replacing the old split
+  // between Formal Quiz's reminderMonths (Advanced) and Master Quiz's own
+  // reminder_period_months (Master).
+  const [titleDefenseQuestionCount, setTitleDefenseQuestionCount] = useState(20)
+  const [titleDefenseMonths, setTitleDefenseMonths] = useState(3)
 
   // Quiz Bank block — one shared Importance Mix feeding BOTH quiz types'
   // pull from the curated question bank (Admin + Branch together).
@@ -102,7 +111,9 @@ export default function QuizSettingsTab() {
 
   // Formula fill-in-the-blank block — genuinely shared mechanics (Top 10
   // weight, excluded ingredients, and now the mix % itself too — see the
-  // 2026-09-30 comment above) apply identically to both quiz types.
+  // 2026-09-30 comment above) apply identically to every exam type
+  // (point 6: Quick/Formal/Level-Up/Master/Title Defense all share this one
+  // global ratio/weight, each bounded by its own item-pool scope).
   const [fillBlankRatio, setFillBlankRatio] = useState(20) // shared — % of quiz that's fill-in-the-blank
   const [top10Weight, setTop10Weight] = useState(3) // shared — see quizSelection.js
   const [showLogicDetails, setShowLogicDetails] = useState(false)
@@ -114,7 +125,8 @@ export default function QuizSettingsTab() {
       supabase.from('quiz_settings').select('*').maybeSingle(),
       supabase.from('formal_quiz_settings').select('*').maybeSingle(),
       supabase.from('master_quiz_settings').select('*').maybeSingle(),
-    ]).then(([{ data: quick }, { data: formal }, { data: master }]) => {
+      supabase.from('title_defense_settings').select('*').maybeSingle(),
+    ]).then(([{ data: quick }, { data: formal }, { data: master }, { data: titleDefense }]) => {
       if (quick) {
         setQuickQuestionCount(quick.question_count)
         setReminderMonths(quick.reminder_period_months ?? 3)
@@ -126,7 +138,10 @@ export default function QuizSettingsTab() {
       if (master) {
         setMasterQuestionCount(master.question_count ?? 30)
         setMasterErrorTolerance(master.error_tolerance ?? 0)
-        setMasterReminderMonths(master.reminder_period_months ?? 3)
+      }
+      if (titleDefense) {
+        setTitleDefenseQuestionCount(titleDefense.question_count ?? 20)
+        setTitleDefenseMonths(titleDefense.reminder_period_months ?? 3)
       }
       // Either table's importance_ratio is the same shared value once this
       // has been saved at least once from this merged UI — prefer
@@ -146,7 +161,7 @@ export default function QuizSettingsTab() {
 
   async function save() {
     setSaving(true)
-    const [{ error: quickError }, { error: formalError }, { error: masterError }] = await Promise.all([
+    const [{ error: quickError }, { error: formalError }, { error: masterError }, { error: titleDefenseError }] = await Promise.all([
       supabase.from('quiz_settings').update({
         question_count: quickQuestionCount,
         importance_ratio: importanceRatio,
@@ -162,13 +177,17 @@ export default function QuizSettingsTab() {
       supabase.from('master_quiz_settings').update({
         question_count: masterQuestionCount,
         error_tolerance: masterErrorTolerance,
-        reminder_period_months: masterReminderMonths,
+      }).eq('singleton', true),
+      supabase.from('title_defense_settings').update({
+        question_count: titleDefenseQuestionCount,
+        reminder_period_months: titleDefenseMonths,
       }).eq('singleton', true),
     ])
     setSaving(false)
     if (quickError) alert(quickError.message)
     else if (formalError) alert(formalError.message)
     else if (masterError) alert(masterError.message)
+    else if (titleDefenseError) alert(titleDefenseError.message)
   }
 
   const importanceTotal = Number(importanceRatio[1]) + Number(importanceRatio[2]) + Number(importanceRatio[3])
@@ -180,34 +199,20 @@ export default function QuizSettingsTab() {
       </p>
 
       <div className="max-w-2xl space-y-4">
-        {/* Quick Quiz — its own setting only. */}
+        {/* Quick Quiz — its own setting, plus the Bulletin quiz-reminder
+            cadence (point 4: moved here from Formal Quiz — it's a Quick
+            Quiz nudge, not a title-defense one; see Title Defense Exam
+            below for that cadence). */}
         <section className="rounded-xl border border-orange-200 bg-orange-50 p-4">
           <h3 className="mb-3 text-sm font-semibold text-orange-700">🧠 Quick Quiz</h3>
-          <label className="block max-w-xs">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Quick Quiz</span>
-            <input
-              type="number"
-              className="input"
-              value={quickQuestionCount}
-              onChange={(e) => setQuickQuestionCount(Number(e.target.value))}
-            />
-          </label>
-        </section>
-
-        {/* Formal Quiz — its own settings, including the reminder cadence
-            (stored in quiz_settings, but this is the setting that decides
-            when a staff member is nudged to take the quiz again — Jeff's
-            call that it reads as a Formal Quiz setting). */}
-        <section className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <h3 className="mb-3 text-sm font-semibold text-blue-700">📝 Formal Quiz</h3>
           <div className="flex flex-wrap gap-4">
             <label className="block max-w-xs">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Formal Quiz</span>
+              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Quick Quiz</span>
               <input
                 type="number"
                 className="input"
-                value={formalQuestionCount}
-                onChange={(e) => setFormalQuestionCount(Number(e.target.value))}
+                value={quickQuestionCount}
+                onChange={(e) => setQuickQuestionCount(Number(e.target.value))}
               />
             </label>
             <label className="block max-w-xs">
@@ -231,22 +236,31 @@ export default function QuizSettingsTab() {
           </p>
         </section>
 
-        {/* Expert/Master Exam — Training Journey spec point 10, relabeled
-            2026-10-03 for the Expert/Master split (point 3): "Master exam
-            的敘述都改成Expert/Master exam" — Expert and Master share this
-            exact same settings row (question count / error tolerance /
-            defense cadence, still against master_quiz_settings — no new
-            settings row, since Expert's exam logic is a direct clone of
-            Master's per Jeff's spec), so the labels read "Expert/Master"
-            throughout rather than duplicating the section. Its own section,
-            separate from Formal Quiz's above, including its own reminder
-            cadence (the Expert/Master title-defense clock, distinct from
-            Advanced's). */}
+        {/* Formal Quiz — its own setting only now (point 4: the reminder
+            cadence that used to live here moved to Quick Quiz above). */}
+        <section className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-blue-700">📝 Formal Quiz</h3>
+          <label className="block max-w-xs">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Formal Quiz</span>
+            <input
+              type="number"
+              className="input"
+              value={formalQuestionCount}
+              onChange={(e) => setFormalQuestionCount(Number(e.target.value))}
+            />
+          </label>
+        </section>
+
+        {/* Master Exam — Jeff, 2026-10-07 (8-point phase-merge request,
+            point 1, 4): relabeled plain "Master Quiz" (the merged Expert
+            tier no longer exists as its own title), and its own title-
+            defense cadence field moved out into the shared Title Defense
+            Exam section below. */}
         <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-          <h3 className="mb-3 text-sm font-semibold text-indigo-700">🎓 Expert/Master Quiz</h3>
+          <h3 className="mb-3 text-sm font-semibold text-indigo-700">🎓 Master Quiz</h3>
           <div className="flex flex-wrap gap-4">
             <label className="block max-w-xs">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Expert/Master Exam</span>
+              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per Master Exam</span>
               <input
                 type="number"
                 className="input"
@@ -264,6 +278,32 @@ export default function QuizSettingsTab() {
                 onChange={(e) => setMasterErrorTolerance(Number(e.target.value))}
               />
             </label>
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
+            Any missed question linked to a Must-Know item always fails the Master Exam, regardless of the error
+            tolerance above — tolerance only covers non-must-know misses. This question count/tolerance governs a
+            voluntary Master Exam attempt; a Master title-defense attempt uses the Title Defense Exam settings below
+            instead.
+          </p>
+        </section>
+
+        {/* Title Defense Exam — Jeff, 2026-10-07 (8-point phase-merge
+            request, point 4): shared cadence + question count for BOTH
+            Advanced and Master titleholders' recurring defense (new
+            title_defense_settings table, migration 0096), independent of
+            the voluntary Formal/Master Exam content settings above. */}
+        <section className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-rose-700">🛡️ Title Defense Exam</h3>
+          <div className="flex flex-wrap gap-4">
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Questions per title defense exam</span>
+              <input
+                type="number"
+                className="input"
+                value={titleDefenseQuestionCount}
+                onChange={(e) => setTitleDefenseQuestionCount(Number(e.target.value))}
+              />
+            </label>
             <label className="block max-w-xs">
               <span className="mb-1 block text-xs font-medium text-gray-500">Title defense cadence</span>
               <div className="flex items-center gap-2">
@@ -272,17 +312,18 @@ export default function QuizSettingsTab() {
                   type="number"
                   min={1}
                   className="input w-20"
-                  value={masterReminderMonths}
-                  onChange={(e) => setMasterReminderMonths(Number(e.target.value))}
+                  value={titleDefenseMonths}
+                  onChange={(e) => setTitleDefenseMonths(Number(e.target.value))}
                 />
                 <span className="text-sm text-gray-400">months</span>
               </div>
             </label>
           </div>
           <p className="mt-2 text-xs text-gray-400">
-            Any missed question linked to a Must-Know item always fails the Expert or Master Exam, regardless of
-            the error tolerance above — tolerance only covers non-must-know misses. An Expert or Master titleholder's
-            recurring title defense runs on this cadence, separate from Formal Quiz's Advanced defense cadence above.
+            Applies to both Advanced and Master titleholders' recurring title-defense re-sit — separate from the
+            Formal/Master Exam content settings above, which only govern a voluntary attempt. A failed defense
+            instantly loses that title (Advanced → Practitioner, recoverable only via the Phase 3 Level-Up Exam;
+            Master → Advanced, recoverable by retaking the Master Exam).
           </p>
         </section>
 

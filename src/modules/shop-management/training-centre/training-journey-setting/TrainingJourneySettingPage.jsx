@@ -5,35 +5,33 @@ import { EmptyState } from '../../../../components/ui/LoadingSpinner'
 import Modal from '../../../../components/ui/Modal'
 import Button from '../../../../components/ui/Button'
 
-const PHASE_OPTIONS = [1, 2, 3, 4, 5]
+const PHASE_OPTIONS = [1, 2, 3]
 // Jeff, 2026-10-03: same filter row added to Admin Center's Phase Item tab
-// (PhaseItemTab.jsx) — see its comment. Phase 6/7 aren't in this row
-// either; they each have their own sub-tab below, same as Admin Center's.
-const FILTER_OPTIONS = ['all', 'unassigned', 1, 2, 3, 4, 5]
+// (PhaseItemTab.jsx) — see its comment. Phase 4 isn't in this row either;
+// it has its own sub-tab below, same as Admin Center's.
+const FILTER_OPTIONS = ['all', 'unassigned', 1, 2, 3]
 
 const VIEWS = [
-  { key: 'mustknow', label: 'Must-Know Items (Phase 1–5)' },
-  { key: 'phase6', label: 'Phase 6 (Expert)' },
-  { key: 'phase7', label: 'Phase 7 (Master)' },
+  { key: 'mustknow', label: 'Must-Know Items (Phase 1–3)' },
+  { key: 'phase4', label: 'Phase 4 (Master)' },
 ]
 
-// Jeff, 2026-10-02 (Training Journey spec, point 5): the shop-level half of
-// Training Journey Setting — assigns THIS store's own ⭐ Must-Know shop
-// training items (Training Centre > Shop Training Database) to Phase 1-5,
-// same role Admin Center's "Phase Item" tab plays for (global) Must-Know
-// formula items, but per store since shop_training_items isn't global. No
-// own <h1> — renders under TrainingCentreLayout's shared heading + tab bar,
-// same as this bar's other three tabs. Switch stores (header picker) to
-// edit another store's assignments.
+// Jeff, 2026-10-02 (Training Journey spec, point 5; phase-merge, 2026-10-07,
+// point 1): the shop-level half of Training Journey Setting — assigns THIS
+// store's own ⭐ Must-Know shop training items (Training Centre > Shop
+// Training Database) to Phase 1-3, same role Admin Center's "Phase Item"
+// tab plays for (global) Must-Know formula items, but per store since
+// shop_training_items isn't global. No own <h1> — renders under
+// TrainingCentreLayout's shared heading + tab bar, same as this bar's other
+// three tabs. Switch stores (header picker) to edit another store's
+// assignments.
 //
-// Jeff, 2026-10-03 (Expert/Master split, point 2, plus same-day follow-up):
-// two more sub-tabs, "Phase 6 (Expert)" and "Phase 7 (Master)", mirror
-// Admin Center's PhaseItemTab.jsx exactly — assign NON-Must-Know shop
-// training items (this store's) into Phase 6 or Phase 7's pool via a
-// dedicated "Add Item" picker that only ever offers items not yet assigned
-// to any phase; the Must-Know dropdown above never offers Phase 6/7. See
-// that file's comment for the full rationale — identical here, just scoped
-// to `currentStoreId`.
+// A second sub-tab, "Phase 4 (Master)", mirrors Admin Center's
+// PhaseItemTab.jsx exactly — assigns NON-Must-Know shop training items
+// (this store's) into Phase 4's pool via a dedicated "Add Item" picker that
+// only ever offers items not yet assigned to any phase; the Must-Know
+// dropdown above never offers Phase 4. See that file's comment for the
+// full rationale — identical here, just scoped to `currentStoreId`.
 export default function TrainingJourneySettingPage() {
   const [view, setView] = useState('mustknow')
 
@@ -52,11 +50,7 @@ export default function TrainingJourneySettingPage() {
           </button>
         ))}
       </div>
-      {view === 'mustknow' ? (
-        <MustKnowPhaseList />
-      ) : (
-        <PhaseItemPicker phaseNumber={view === 'phase6' ? 6 : 7} phaseLabel={view === 'phase6' ? 'Phase 6 (Expert)' : 'Phase 7 (Master)'} />
-      )}
+      {view === 'mustknow' ? <MustKnowPhaseList /> : <PhaseItemPicker phaseNumber={4} phaseLabel="Phase 4 (Master)" />}
     </div>
   )
 }
@@ -96,7 +90,7 @@ function MustKnowPhaseList() {
   return (
     <div>
       <p className="mb-4 text-sm text-gray-500">
-        This store's own ⭐ Must-Know shop training items (Shop Training Database), assigned to one of Phase 1–5 —
+        This store's own ⭐ Must-Know shop training items (Shop Training Database), assigned to one of Phase 1–3 —
         same role as Admin Center's Training Journey Setting plays for Must-Know formula items. Switch stores above
         to edit another store's assignments.
       </p>
@@ -177,10 +171,10 @@ function ItemList({ items, onChange, showPhase }) {
   )
 }
 
-// Phase 6 (Expert) / Phase 7 (Master) pool for this store — non-Must-Know
-// shop training items that have been checked into this exact phase via the
-// "+ Add Item" picker below. Mirrors PhaseItemTab.jsx's PhaseItemPicker
-// exactly, scoped to currentStoreId.
+// Phase 4 (Master) pool for this store — non-Must-Know shop training items
+// that have been checked into Phase 4 via the "+ Add Item" picker below.
+// Mirrors PhaseItemTab.jsx's PhaseItemPicker exactly, scoped to
+// currentStoreId.
 function PhaseItemPicker({ phaseNumber, phaseLabel }) {
   const { currentStoreId } = useAuth()
   const [phaseItems, setPhaseItems] = useState([])
@@ -213,9 +207,8 @@ function PhaseItemPicker({ phaseNumber, phaseLabel }) {
     <div>
       <p className="mb-4 text-sm text-gray-500">
         Items checked in here join {phaseLabel}'s item pool and X-of-Y checklist for this store, on everyone's
-        Training Journey tab. Only items with no phase assigned at all show up in "+ Add Item" below — an item
-        already in Phase 6 or Phase 7 isn't offered again until it's removed from whichever one it's in. Switch
-        stores above to edit another store's Phase 6/7 items.
+        Training Journey tab. Only items with no phase assigned at all show up in "+ Add Item" below. Switch
+        stores above to edit another store's Phase 4 items.
       </p>
       <div className="mb-3 flex justify-end">
         <Button onClick={() => setShowAdd(true)}>+ Add Item</Button>
@@ -257,10 +250,10 @@ function AddPhaseItemModal({ storeId, phaseNumber, phaseLabel, onClose }) {
     if (!storeId) return
     setLoading(true)
     // Jeff, 2026-10-03: only items with NO phase assigned anywhere yet —
-    // once an item is checked into Phase 6 or Phase 7 it disappears from
-    // this list (both of them), rather than staying listed with a checkbox
-    // that could be toggled back and forth here. Removing an item from its
-    // phase (✕ on the main list) is what makes it reappear.
+    // once an item is checked into Phase 4 it disappears from this list,
+    // rather than staying listed with a checkbox that could be toggled back
+    // and forth here. Removing an item from its phase (✕ on the main list)
+    // is what makes it reappear.
     const { data } = await supabase
       .from('shop_training_items')
       .select('id, title')

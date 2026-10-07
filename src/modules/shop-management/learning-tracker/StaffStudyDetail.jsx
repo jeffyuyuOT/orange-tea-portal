@@ -197,12 +197,12 @@ export default function StaffStudyDetail({ staff, onBack }) {
           // qualified has always MEANT "holds at least Advanced" (see this
           // column's own comment in migration 0091), so the title system
           // (Learning Tracker/dashboard/roster) needs to agree: bump the
-          // Training Journey phase up to 5 right here too, not just the
+          // Training Journey phase up to 3 right here too, not just the
           // defense clock, in case this staff member reached Qualified via
-          // Formal Quiz before ever doing a Phase 1-5 Level-Up Exam. Only
-          // bumps up, never down — someone who already reached Phase 5 (or
+          // Formal Quiz before ever doing a Phase 1-3 Level-Up Exam. Only
+          // bumps up, never down — someone who already reached Phase 3 (or
           // beyond, Master) via Level-Up keeps whatever they've already got.
-          ...((staff.training_journey_phase ?? 0) < 5 ? { training_journey_phase: 5 } : {}),
+          ...((staff.training_journey_phase ?? 0) < 3 ? { training_journey_phase: 3 } : {}),
         })
         .eq('id', staff.id)
       // No markAllCurrentItemsMemorized() here — see the comment on that
@@ -236,7 +236,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
         // See the same comment on togglePass above — Qualified means at
         // least Advanced, so the title has to agree even when granted this
         // direct way, bypassing any Level-Up Exam entirely.
-        ...((staff.training_journey_phase ?? 0) < 5 ? { training_journey_phase: 5 } : {}),
+        ...((staff.training_journey_phase ?? 0) < 3 ? { training_journey_phase: 3 } : {}),
       })
       .eq('id', staff.id)
     await markAllCurrentItemsMemorized()
@@ -260,15 +260,20 @@ export default function StaffStudyDetail({ staff, onBack }) {
         qualified: false,
         qualified_at: new Date().toISOString(),
         qualified_by: profile.id,
-        // Mirrors the 3-strike disqualify reset (trainingJourney.js's
+        // Mirrors the instant-disqualify reset (trainingJourney.js's
         // recordFormalDefenseResult) — cancelling Qualified this direct way
         // is the same end state as losing a title defense: no longer
         // holding Advanced, so the title/defense-clock fields need to drop
-        // back in step, not just the qualified flag.
-        ...((staff.training_journey_phase ?? 0) >= 5 ? { training_journey_phase: 4 } : {}),
+        // back in step, not just the qualified flag. Also stamps
+        // title_loss_* (point 5) so this manager-initiated cancel pops the
+        // same one-time lost-title login notice an automated disqualify
+        // would.
+        ...((staff.training_journey_phase ?? 0) >= 3 ? { training_journey_phase: 2 } : {}),
         has_master_title: false,
         title_defense_due_at: null,
-        title_defense_attempts_used: 0,
+        title_loss_from: staff.has_master_title ? 'Master' : 'Advanced',
+        title_loss_to: staff.has_master_title ? 'Advanced' : 'Practitioner',
+        title_loss_at: new Date().toISOString(),
       })
       .eq('id', staff.id)
   }

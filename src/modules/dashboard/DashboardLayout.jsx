@@ -37,12 +37,12 @@ export default function DashboardLayout() {
       .select('*')
       .then(({ data }) => setPhases(data ?? []))
   }, [])
-  // Jeff, 2026-10-03 (Expert/Master split, point 4): Master now reads as
-  // Phase 7's color (was Phase 6, before the split), Expert reads as Phase
-  // 6's own color, and both get an icon next to the title — 👑 for Master,
-  // 🏅 for Expert — same icons used on the roster.
+  // Jeff, 2026-10-07 (8-point phase-merge request, point 1): Master now
+  // reads as Phase 4's own color (the merged Expert tier no longer exists
+  // as a separate color/icon), with 👑 next to the title — same icon used
+  // on the roster.
   const title = phases.length ? currentTitle(profile, phases) : null
-  const titlePhaseNumber = profile?.has_master_title ? 7 : profile?.has_expert_title ? 6 : profile?.training_journey_phase ?? 0
+  const titlePhaseNumber = profile?.has_master_title ? 4 : profile?.training_journey_phase ?? 0
   const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
 
   return (
@@ -55,7 +55,7 @@ export default function DashboardLayout() {
             className={`ml-2 align-middle text-sm font-medium ${titleColor ? '' : 'text-gray-400'}`}
             style={titleColor ? { color: titleColor } : undefined}
           >
-            ({profile?.has_master_title ? <span aria-hidden>👑 </span> : profile?.has_expert_title ? <span aria-hidden>🏅 </span> : null}
+            ({profile?.has_master_title ? <span aria-hidden>👑 </span> : null}
             {title})
           </span>
         )}

@@ -27,13 +27,13 @@ export default function MasterExamModal({ isDefense = false, onClose, onResult }
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    buildMasterExamQuestionSet(currentStoreId).then((res) => {
+    buildMasterExamQuestionSet(currentStoreId, { isDefense }).then((res) => {
       setQuestions(res.questions)
       setReason(res.reason)
       setErrorTolerance(res.errorTolerance ?? 0)
       setLoading(false)
     })
-  }, [currentStoreId])
+  }, [currentStoreId, isDefense])
 
   async function submit() {
     setSubmitting(true)

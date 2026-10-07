@@ -6,14 +6,22 @@ import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { buildLevelUpExamQuestionSet } from '../../../lib/examBuilders'
 import { gradeQuestion } from '../../../lib/quizGrading'
+import { startAdvancedDefenseClock } from '../../../lib/trainingJourney'
 
-// A Phase 1-5 Level-Up Exam — self-graded, every question must be correct
+// A Phase 1-3 Level-Up Exam — self-graded, every question must be correct
 // to pass (Jeff: "要全部都答對才能通過這個phase"). Drawn from must-know items
 // across every phase up to and including `phaseNumber`. On pass, bumps
 // profiles.training_journey_phase and tells the parent (TrainingJourneyPage)
-// to show the "🎉 Congratulations, Level-Up Unlocked!" celebration — passing
-// phase 5 specifically is what starts showing the Formal Exam next.
-export default function LevelUpExamModal({ phaseNumber, phaseLabel, onClose, onPassed }) {
+// to show the "🎉 Congratulations, Level-Up Unlocked!" celebration.
+//
+// Jeff, 2026-10-07 (8-point phase-merge request, point 8): `recoversQualified`
+// is true only when a previously-qualified, now-disqualified profile is
+// retaking Phase 3's Level-Up Exam to recover from a lost Advanced title —
+// per Jeff, that recovery path is Level-Up-Exam-only, never a new Formal
+// Exam review. On pass in that case, this also restores `qualified: true`
+// and restarts the Advanced title-defense clock, without touching Formal
+// Exam at all.
+export default function LevelUpExamModal({ phaseNumber, phaseLabel, recoversQualified, onClose, onPassed }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
   const [questions, setQuestions] = useState([])
@@ -60,7 +68,11 @@ export default function LevelUpExamModal({ phaseNumber, phaseLabel, onClose, onP
       if (error) console.error('Failed to save quiz answer detail:', error)
     }
     if (passed) {
-      await supabase.from('profiles').update({ training_journey_phase: phaseNumber }).eq('id', profile.id)
+      await supabase
+        .from('profiles')
+        .update({ training_journey_phase: phaseNumber, ...(recoversQualified ? { qualified: true, qualified_at: new Date().toISOString() } : {}) })
+        .eq('id', profile.id)
+      if (recoversQualified) await startAdvancedDefenseClock(profile.id)
     }
     setResult({ correct, total, passed })
     setSubmitting(false)

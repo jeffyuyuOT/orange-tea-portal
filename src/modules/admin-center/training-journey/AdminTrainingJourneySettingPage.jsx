@@ -21,7 +21,7 @@ export default function AdminTrainingJourneySettingPage() {
     <div>
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Training Journey Setting</h1>
       <p className="mb-4 text-sm text-gray-500">
-        Controls the 6-phase Training Journey staff progress through in My Dashboard &gt; Study Log &gt; Training
+        Controls the 4-phase Training Journey staff progress through in My Dashboard &gt; Study Log &gt; Training
         Journey (and the matching tab in Shop Management &gt; Learning Tracker).
       </p>
 

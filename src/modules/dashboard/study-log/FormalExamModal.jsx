@@ -8,17 +8,19 @@ import { buildFormalExamQuestionSet } from '../../../lib/examBuilders'
 import { gradeQuestion } from '../../../lib/quizGrading'
 import { recordFormalDefenseResult } from '../../../lib/trainingJourney'
 
-// The real Formal Exam — reached phase 5 (Advanced title, not yet
-// Qualified) or Jeff: "Qualified之後的員工可以進到phase6". Two modes:
+// The real Formal Exam — reached phase 3 (Advanced title, not yet
+// Qualified) or Jeff: "Qualified之後的員工可以進到phase4". Two modes:
 //  - isDefense=false (initial): same as the old FormalQuizModal.jsx — a
 //    manager/admin reviews the attempt in Learning Tracker and ticks Pass
 //    (which is what actually grants Qualified), UNLESS this profile is
 //    already qualified (re-attempting voluntarily before a defense is due),
 //    in which case it still auto-passes with no reviewer needed.
-//  - isDefense=true (the recurring 3-month title-defense re-sit, only
-//    reachable once title_defense_due_at has passed): self-graded, every
-//    question must be correct — see recordFormalDefenseResult, which also
-//    applies the 3-strike disqualify rule.
+//  - isDefense=true (the recurring title-defense re-sit, only reachable
+//    once title_defense_due_at has passed, cadence/question-count from
+//    title_defense_settings): self-graded, every question must be correct
+//    — see recordFormalDefenseResult. Jeff, 2026-10-07 (point 4): a single
+//    failed defense attempt now instantly disqualifies — the old 3-strike
+//    grace is gone.
 export default function FormalExamModal({ isDefense = false, onClose, onResult }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -29,12 +31,12 @@ export default function FormalExamModal({ isDefense = false, onClose, onResult }
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    buildFormalExamQuestionSet(profile.id, currentStoreId).then((res) => {
+    buildFormalExamQuestionSet(profile.id, currentStoreId, { isDefense }).then((res) => {
       setQuestions(res.questions)
       setReason(res.reason)
       setLoading(false)
     })
-  }, [profile.id, currentStoreId])
+  }, [profile.id, currentStoreId, isDefense])
 
   async function submit() {
     setSubmitting(true)
@@ -55,10 +57,8 @@ export default function FormalExamModal({ isDefense = false, onClose, onResult }
       const outcome = await recordFormalDefenseResult(profile.id, passed)
       disqualified = outcome.disqualified
       message = passed
-        ? "Defense passed — you keep your Advanced title, and the clock resets for another 3 months."
-        : disqualified
-          ? "That was your third attempt without a perfect score — you've lost your Advanced title and are back to Proficient. You'll need to pass the Formal Exam again, reviewed by a manager."
-          : `Every question needs to be correct to defend your title — ${outcome.attemptsUsed} of 3 attempts used this cycle.`
+        ? 'Defense passed — you keep your Advanced title, and the clock resets.'
+        : "That defense didn't pass — you've lost your Advanced title and are back to Practitioner. Pass the Phase 3 Level-Up Exam to reclaim it — no new Formal Exam review needed."
     } else {
       const { data: freshProfile } = await supabase.from('profiles').select('qualified').eq('id', profile.id).single()
       const autoPassed = !!freshProfile?.qualified

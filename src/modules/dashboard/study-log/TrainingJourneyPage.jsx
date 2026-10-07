@@ -10,10 +10,10 @@ import {
   phaseFillFractions,
   highestFilledPhase,
   isDefenseDue,
+  findStaleMustKnowItems,
 } from '../../../lib/trainingJourney'
 import LevelUpExamModal from './LevelUpExamModal'
 import FormalExamModal from './FormalExamModal'
-import ExpertExamModal from './ExpertExamModal'
 import MasterExamModal from './MasterExamModal'
 
 // Jeff, 2026-10-02 (Training Journey spec, points 3-4, 9): the gamified
@@ -24,42 +24,38 @@ import MasterExamModal from './MasterExamModal'
 // item checklist (shared with Study Log — ticking here ticks there too)
 // and title/warning banners are otherwise identical.
 //
-// Jeff, 2026-10-03 (Expert/Master split, points 1-4): phases 1-5 still fill
-// by hours worked + a Level-Up Exam each, exactly as before. What used to
-// be a single "Phase 6 (Master)" item-count tier is now TWO item-count
-// tiers stacked on top of the hours-driven ladder: Phase 6 "Expert" and
-// Phase 7 "Master", each its own pool of non-must-know items explicitly
-// checked in via its own "Add Item" picker (Admin/shop Training Journey
-// Setting — see PhaseItemTab.jsx / TrainingJourneySettingPage.jsx). A green
-// "qualified" divider sits between Phase 6 and Phase 5, since passing the
-// Formal Exam (becoming qualified/Advanced) is the gate that unlocks Phase
-// 6+ in the first place. Clicking "View items" on the Phase 6/7 cards pops
-// a standalone modal with a checklist (shared with Study Log, same upsert
-// as the Phase 1-5 inline checklist) instead of expanding inline. Titles
-// are now sequential — Expert before Master — so the Master Exam button
-// requires has_expert_title first, and the title-defense cascade is
-// 3-tiered (Advanced → Expert → Master) based on whichever title is
-// currently held.
+// Jeff, 2026-10-07 (8-point phase-merge request, point 1): the old 7-phase
+// ladder with a separate Expert tier between Qualified/Advanced and Master
+// is merged into 4 phases — Novice (old 1+2), Practitioner (old 3+4),
+// Advanced (old 5), Master (old 6+7, Expert folded into Master). Phases 1-3
+// still fill by hours worked + a Level-Up Exam each. What used to be TWO
+// item-count tiers stacked above the hours ladder (Phase 6 Expert, Phase 7
+// Master) is now just ONE: Phase 4 Master, its own pool of non-must-know
+// items explicitly checked in via its own "Add Item" picker (Admin/shop
+// Training Journey Setting — see PhaseItemTab.jsx /
+// TrainingJourneySettingPage.jsx). A green "qualified" divider sits between
+// Phase 4 and Phase 3, since passing the Formal Exam (becoming
+// qualified/Advanced) is the gate that unlocks Phase 4 in the first place.
+// Clicking "View items" on the Phase 4 card pops a standalone modal with a
+// checklist (shared with Study Log, same upsert as the Phase 1-3 inline
+// checklist) instead of expanding inline. Titles are two-tiered now —
+// Advanced then Master — so the title-defense cascade is Advanced → Master
+// based on whichever title is currently held.
 //
-// Jeff, 2026-10-03 (follow-up, same day): "exper跟master phase裡view item
-// 是看專屬於這個Phase的商品" — Phase 6/7's item pool (and the "X out of Y"
-// below) is each phase's OWN exclusively-assigned items only, not a
-// cumulative 1-6 or "every item" pool like the first Expert/Master split
-// pass had — see trainingJourney.js's loadTrainingJourneyData. Also per
-// that follow-up, "所有phase區塊中間都要顯示X out of Y" — every phase card
-// (1-7), not just 6/7, now shows a prominent centered "X out of Y items
-// memorized" line, using the same items list that phase's own checklist
-// already uses (itemsByPhase[n] for 1-5, the phase's own pool for 6/7).
+// Jeff, 2026-10-07 (point 7): a true first-time Advanced staff member (one
+// who's never been qualified before) skips their own Phase 3 Level-Up Exam
+// entirely once every Phase 3 item is memorized — straight to the Formal
+// Exam. A staff member RECOVERING from a lost Advanced title (disqualified,
+// `qualified_at` already set) is excluded from that skip and instead sees
+// the ordinary Phase 3 Level-Up Exam button — passing it restores Qualified
+// directly, without a new Formal Exam review (point 8).
 //
-// Jeff, 2026-10-03: "如果現在要push command，但user(除了developer)看到
-// training journey頁面會顯示coming soon" — the feature's still being tested
-// locally, so a "Coming Soon" placeholder gates the real view for anyone
-// whose OWN account isn't the developer role — this checks the VIEWER
-// (useAuth's profile), not whose journey is being looked at, so a manager
-// looking at a staff member's Training Journey tab in Learning Tracker
-// sees the same placeholder unless the manager's own account is developer.
-// Once Jeff's happy with it, this gate is the one block to delete (and the
-// tab/page work underneath it ships immediately, already pushed).
+// Jeff, 2026-10-07 (point 2): before opening either Formal or Master Exam
+// as a title defense, checks for any must-know item in an already-passed
+// phase that's still unmemorized (findStaleMustKnowItems) — these can only
+// exist because the item was added AFTER that phase's own Level-Up Exam was
+// passed. If any are found, a blocking modal lists them (no "continue
+// anyway") instead of opening the exam.
 export default function TrainingJourneyPage({ profileId, isSelf }) {
   const { currentStoreId, profile: viewerProfile } = useAuth()
   const canView = viewerProfile?.role === 'developer'
@@ -67,11 +63,11 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   const [data, setData] = useState(null)
   const [targetProfile, setTargetProfile] = useState(null)
   const [openPhaseItems, setOpenPhaseItems] = useState(null)
-  const [itemsModalPhase, setItemsModalPhase] = useState(null) // null | 6 | 7
+  const [itemsModalPhase, setItemsModalPhase] = useState(null) // null | 4
   const [levelUpPhase, setLevelUpPhase] = useState(null)
   const [showFormal, setShowFormal] = useState(null) // null | { isDefense }
-  const [showExpert, setShowExpert] = useState(null) // null | { isDefense }
   const [showMaster, setShowMaster] = useState(null) // null | { isDefense }
+  const [staleItemsWarning, setStaleItemsWarning] = useState(null) // null | items[]
   const [congrats, setCongrats] = useState(null)
 
   const reload = useCallback(async () => {
@@ -84,9 +80,7 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
       loadTrainingJourneyData(profileId, currentStoreId),
       supabase
         .from('profiles')
-        .select(
-          'qualified, qualified_at, training_journey_phase, has_expert_title, expert_title_earned_at, has_master_title, master_title_earned_at, title_defense_due_at, title_defense_attempts_used'
-        )
+        .select('qualified, qualified_at, training_journey_phase, has_master_title, master_title_earned_at, title_defense_due_at')
         .eq('id', profileId)
         .single(),
     ])
@@ -120,61 +114,86 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
 
   if (loading || !data || !targetProfile) return <LoadingSpinner />
 
-  const { phases, itemsByPhase, phaseSixItems, phaseSixTotal, phaseSixMemorized, phaseSevenItems, phaseSevenTotal, phaseSevenMemorized, hoursWorked } = data
+  const { phases, itemsByPhase, phaseFourItems, phaseFourTotal, phaseFourMemorized, hoursWorked } = data
   const fractions = phaseFillFractions(phases, hoursWorked)
   const filledPhase = highestFilledPhase(fractions)
   const currentPhase = targetProfile.training_journey_phase ?? 0
   const title = currentTitle(targetProfile, phases)
-  const phase6 = phases.find((p) => p.phase_number === 6)
-  const phase7 = phases.find((p) => p.phase_number === 7)
+  const phase4 = phases.find((p) => p.phase_number === 4)
 
   // "落後的item數就是計算工作時數填滿的phase還沒勾選的item數" — only the
   // IMMEDIATE next phase matters, since exams must be passed in order.
   const nextPhase = currentPhase + 1
-  const behindItems = filledPhase > currentPhase && nextPhase <= 5 ? (itemsByPhase[nextPhase] ?? []).filter((i) => !i.memorized) : []
+  const behindItems = filledPhase > currentPhase && nextPhase <= 3 ? (itemsByPhase[nextPhase] ?? []).filter((i) => !i.memorized) : []
 
-  // Jeff, 2026-10-03 (point 5): "title防衛戰失敗的話，則上面warning視窗不會
-  // 像之前顯示'Warning! Your progress is behind xx個items'而是顯示
-  // 'Warning! Please pass the test as soon as possible to restore your
-  // title'" — qualified_at is stamped every time `qualified` flips, in
-  // either direction (recordFormalDefenseResult's 3-strike disqualify,
-  // StaffStudyDetail's manual Cancel Qualified), and stays null for anyone
-  // who's never been qualified at all — so "!qualified && qualified_at" is
-  // exactly "has lost Advanced before" without needing a new column. Takes
-  // over the slot the generic behind-items banner would otherwise use,
-  // since for this person the real fix isn't "finish ticking items", it's
-  // retaking the exam that restores the title.
+  // Jeff, 2026-10-03 (point 5, carried into the phase-merge): "title防衛戰失
+  // 敗的話，則上面warning視窗不會像之前顯示'Warning! Your progress is behind
+  // xx個items'而是顯示'Warning! Please pass the test as soon as possible to
+  // restore your title'" — qualified_at is stamped every time `qualified`
+  // flips, in either direction, and stays null for anyone who's never been
+  // qualified at all — so "!qualified && qualified_at" is exactly "has lost
+  // Advanced before" without needing a new column.
   const previouslyLostTitle = !targetProfile.qualified && !!targetProfile.qualified_at
 
-  // Three-tiered defense: whichever title is currently held is the one
-  // being defended — Master > Expert > Advanced, since a holder of a
-  // higher title is never also mid-defending a lower one.
+  // Two-tiered defense: whichever title is currently held is the one being
+  // defended — Master beats Advanced, since a Master holder is never also
+  // mid-defending Advanced.
   const defenseDue = isDefenseDue(targetProfile)
-  const showFormalDefenseBanner = isSelf && targetProfile.qualified && !targetProfile.has_expert_title && !targetProfile.has_master_title && defenseDue
-  const showExpertDefenseBanner = isSelf && targetProfile.has_expert_title && !targetProfile.has_master_title && defenseDue
+  const showFormalDefenseBanner = isSelf && targetProfile.qualified && !targetProfile.has_master_title && defenseDue
   const showMasterDefenseBanner = isSelf && targetProfile.has_master_title && defenseDue
+
+  // Jeff, 2026-10-07 (point 7): a true first-timer reaching Phase 3 100%
+  // skips straight to the Formal Exam instead of a Phase 3 Level-Up Exam.
+  // Gated on `!targetProfile.qualified_at` so this only ever fires once, for
+  // someone who's never been qualified before — a disqualified-and-
+  // recovering profile (qualified_at already set) still sees the ordinary
+  // Level-Up Exam button below, and passing it restores Qualified directly
+  // (see LevelUpExamModal's recoversQualified).
+  const firstTimeAdvancing = !targetProfile.qualified_at
 
   function phaseCanLevelUp(phaseNumber) {
     if (!isSelf) return false
+    if (phaseNumber === 3 && firstTimeAdvancing) return false // skip straight to Formal
     if (currentPhase !== phaseNumber - 1) return false
     const items = itemsByPhase[phaseNumber] ?? []
     return items.length > 0 && items.every((i) => i.memorized)
   }
 
-  const showFormalInitial = isSelf && currentPhase >= 5 && !targetProfile.qualified
-  const phase6Complete = phaseSixTotal > 0 && phaseSixMemorized === phaseSixTotal
-  const phase7Complete = phaseSevenTotal > 0 && phaseSevenMemorized === phaseSevenTotal
-  const showExpertVoluntary = isSelf && targetProfile.qualified && !targetProfile.has_expert_title && phase6Complete
-  // Master requires Expert first — strict sequential progression through
-  // the three title tiers, same as Expert requires Advanced (qualified)
-  // first.
-  const showMasterVoluntary = isSelf && targetProfile.has_expert_title && !targetProfile.has_master_title && phase7Complete
+  const phase3Items = itemsByPhase[3] ?? []
+  const advancedItemsComplete = phase3Items.length > 0 && phase3Items.every((i) => i.memorized)
+  const showFormalInitial =
+    isSelf && !targetProfile.qualified && (currentPhase >= 3 || (currentPhase === 2 && advancedItemsComplete && firstTimeAdvancing))
+  const phase4Complete = phaseFourTotal > 0 && phaseFourMemorized === phaseFourTotal
+  // Master requires already being Qualified/Advanced first — strict
+  // sequential progression through the two title tiers.
+  const showMasterVoluntary = isSelf && targetProfile.qualified && !targetProfile.has_master_title && phase4Complete
+
+  // Jeff, 2026-10-07 (point 2): a blocking pre-exam check — any must-know
+  // item in an already-passed phase (plus Phase 4, for a Master holder
+  // defending) that's still unmemorized has to be ticked off before the
+  // defense exam can open at all.
+  function staleItemsFor(includePhaseFour) {
+    return findStaleMustKnowItems(itemsByPhase, currentPhase, { phaseFourItems, includePhaseFour })
+  }
 
   function defendTopTitle() {
+    const stale = staleItemsFor(targetProfile.has_master_title)
+    if (stale.length) {
+      setStaleItemsWarning(stale)
+      return
+    }
     if (targetProfile.has_master_title) setShowMaster({ isDefense: true })
-    else if (targetProfile.has_expert_title) setShowExpert({ isDefense: true })
     else setShowFormal({ isDefense: true })
   }
+
+  // Jeff, 2026-10-07 (point 2a): non-blocking banner — any stale must-know
+  // item anywhere already passed, shown as a heads-up (not a block) so it
+  // gets memorized before it blocks a defense attempt later.
+  const nonBlockingStale = staleItemsFor(targetProfile.has_master_title)
+  const staleByPhase = {}
+  nonBlockingStale.forEach((i) => {
+    (staleByPhase[i.phaseNumber] ??= []).push(i)
+  })
 
   return (
     <div
@@ -185,13 +204,13 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
         <div>
           <p className="text-xs text-gray-400">Current title</p>
           <p className="text-lg font-semibold text-gray-900">
-            {targetProfile.has_master_title ? '👑 ' : targetProfile.has_expert_title ? '🏅 ' : ''}
+            {targetProfile.has_master_title ? '👑 ' : ''}
             {title}
           </p>
         </div>
         {isSelf && defenseDue && (
           <Button variant="secondary" onClick={defendTopTitle}>
-            {targetProfile.has_master_title ? 'Defend Master Title' : targetProfile.has_expert_title ? 'Defend Expert Title' : 'Defend Advanced Title'}
+            {targetProfile.has_master_title ? 'Defend Master Title' : 'Defend Advanced Title'}
           </Button>
         )}
       </div>
@@ -208,74 +227,52 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
           </div>
         )
       )}
-      {showFormalDefenseBanner && (
-        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ⚠️ Your Advanced title defense is due{targetProfile.title_defense_attempts_used ? ` — ${targetProfile.title_defense_attempts_used} of 3 attempts used` : ''}.
+      {Object.keys(staleByPhase).length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {Object.entries(staleByPhase)
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([phaseNumber, items]) => (
+              <p key={phaseNumber}>
+                ⚠️ New must-know item added to Phase {phaseNumber}: {items.map((i) => i.label).join(', ')} — memorize it soon.
+              </p>
+            ))}
         </div>
       )}
-      {showExpertDefenseBanner && (
+      {showFormalDefenseBanner && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ⚠️ Your Expert title defense is due — tick every Phase 6 item as Memorized if you haven't already, then retake the Expert Exam.
+          ⚠️ Your Advanced title defense is due.
         </div>
       )}
       {showMasterDefenseBanner && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ⚠️ Your Master title defense is due — tick every Phase 7 item as Memorized if you haven't already, then retake the Master Exam.
+          ⚠️ Your Master title defense is due — tick every Phase 4 item as Memorized if you haven't already, then retake the Master Exam.
         </div>
       )}
 
       {/* Jeff, 2026-10-02: "工作小時填補phase的顏色再明顯一點，Phase 1放最下
-          面，phase 6放在上面，這樣才有一直往上填補的感覺" — rendered
-          top-to-bottom in DESCENDING phase order, so the column reads like
-          a tower/thermometer filling upward — the highest tier sits at the
-          top of the page, Phase 1 (the floor) at the bottom.
-          Jeff, 2026-10-03 (Expert/Master split): Phase 7 (Master) now sits
-          at the very top, Phase 6 (Expert) just below it, then a green
-          "qualified" divider, then Phases 5..1 (hours-driven) below that.
-          Phases 6 and 7 both render through this same loop (fraction = % of
-          their own item pool memorized) rather than being visually separate
-          blocks. Every card's own frame is a thick border in that phase's
-          own text_color, unconditionally, so the column still reads as
-          "phase 7 / 6 / 5…" at a glance even when a card is mid-way through
-          filling.
-          Phases 1-5 (hours-driven): NOT YET passed that phase's Level-Up
-          Exam — the hours-worked fraction fills the card from the bottom in
-          solid ORANGE at 50% opacity — "要有感覺phase區塊被佔領感覺，但顏色
-          不要太深影響閱讀內容" — no border-top line on the fill (the orange
-          block itself is the signal). ALREADY passed: the whole card fills
-          with that phase's OWN color instead — "如果通過level up exam，則該
-          phase色塊變回自己的顏色". A Qualified staff member has
-          currentPhase>=5, so every one of phases 1-5 is "passed" and shows
-          its own color (考試都過了). A staff member disqualified after
-          losing a title defense drops back to currentPhase=4, so Phase 5
-          goes back to NOT passed — rendering fully orange if hours worked
-          exceed the sum of every phase's hours_required (fraction clamps
-          to 1), or a partial orange fill otherwise, exactly Jeff's
-          "advanced phase變回全橘色(工作小時超過...)，沒有超過的話則回照原
-          本填補計算" — both cases fall out of the same fraction/passed
-          logic below, no special-casing needed. */}
-      {[7, 6, 5, 4, 3, 2, 1].map((phaseNumber) => {
-        const p = phaseNumber === 7 ? phase7 : phaseNumber === 6 ? phase6 : phases.find((ph) => ph.phase_number === phaseNumber)
+          面，phase往上放，這樣才有一直往上填補的感覺" — rendered top-to-
+          bottom in DESCENDING phase order, so the column reads like a
+          tower/thermometer filling upward. Jeff, 2026-10-07 (phase merge):
+          Phase 4 (Master) now sits at the very top, then a green "qualified"
+          divider, then Phases 3..1 (hours-driven) below that. Every card's
+          own frame is a thick border in that phase's own text_color,
+          unconditionally. Phases 1-3 (hours-driven): NOT YET passed that
+          phase's Level-Up Exam — the hours-worked fraction fills the card
+          from the bottom in solid ORANGE at 50% opacity. ALREADY passed: the
+          whole card fills with that phase's OWN color instead. */}
+      {[4, 3, 2, 1].map((phaseNumber) => {
+        const p = phaseNumber === 4 ? phase4 : phases.find((ph) => ph.phase_number === phaseNumber)
         if (!p) return null
-        const fraction =
-          phaseNumber === 7
-            ? phaseSevenTotal > 0
-              ? phaseSevenMemorized / phaseSevenTotal
-              : 0
-            : phaseNumber === 6
-              ? phaseSixTotal > 0
-                ? phaseSixMemorized / phaseSixTotal
-                : 0
-              : fractions[phaseNumber] ?? 0
-        const items = phaseNumber <= 5 ? itemsByPhase[phaseNumber] ?? [] : phaseNumber === 6 ? phaseSixItems : phaseSevenItems
-        const passed = phaseNumber <= 5 && currentPhase >= phaseNumber
-        const canLevelUp = phaseNumber <= 5 && phaseCanLevelUp(phaseNumber)
-        const complete = phaseNumber === 6 ? phase6Complete : phaseNumber === 7 ? phase7Complete : false
+        const fraction = phaseNumber === 4 ? (phaseFourTotal > 0 ? phaseFourMemorized / phaseFourTotal : 0) : fractions[phaseNumber] ?? 0
+        const items = phaseNumber <= 3 ? itemsByPhase[phaseNumber] ?? [] : phaseFourItems
+        const passed = phaseNumber <= 3 && currentPhase >= phaseNumber
+        const canLevelUp = phaseNumber <= 3 && phaseCanLevelUp(phaseNumber)
+        const complete = phaseNumber === 4 ? phase4Complete : false
 
         return (
           <div key={phaseNumber}>
             <div className="relative overflow-hidden rounded-xl bg-white" style={{ border: `3px solid ${p.text_color}` }}>
-              {phaseNumber <= 5 ? (
+              {phaseNumber <= 3 ? (
                 passed ? (
                   <div className="absolute bottom-0 left-0 h-full w-full" style={{ background: p.bg_color, filter: 'saturate(1.8) brightness(0.96)' }} />
                 ) : (
@@ -300,19 +297,13 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
                   <p className="text-sm font-semibold" style={{ color: p.text_color }}>
                     Phase {phaseNumber}: {p.label} {(passed || complete) && '✓'}
                   </p>
-                  {phaseNumber <= 5 && <p className="text-xs text-gray-500">{Math.round(fraction * 100)}% hours filled</p>}
+                  {phaseNumber <= 3 && <p className="text-xs text-gray-500">{Math.round(fraction * 100)}% hours filled</p>}
                 </div>
-                {/* Jeff, 2026-10-03 (follow-up): "所有phase區塊中間都要顯示X
-                    out of Y" — every phase, not just 6/7, shows this same
-                    prominent centered line now; X/Y both come from `items`,
-                    which is already scoped to exactly this phase's own
-                    pool above (itemsByPhase[n] for 1-5, the phase's own
-                    exclusive pool for 6/7). */}
                 <p className="mt-1 text-center text-sm font-semibold text-gray-700">
                   {items.filter((i) => i.memorized).length} out of {items.length} items memorized
                 </p>
 
-                {phaseNumber <= 5 && (
+                {phaseNumber <= 3 && (
                   <>
                     <button
                       className="mt-2 text-xs font-medium text-brand-600 hover:underline"
@@ -342,20 +333,12 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
                   </>
                 )}
 
-                {(phaseNumber === 6 || phaseNumber === 7) && (
+                {phaseNumber === 4 && (
                   <>
-                    <button
-                      className="mt-2 text-xs font-medium text-brand-600 hover:underline"
-                      onClick={() => setItemsModalPhase(phaseNumber)}
-                    >
+                    <button className="mt-2 text-xs font-medium text-brand-600 hover:underline" onClick={() => setItemsModalPhase(4)}>
                       View items ({items.length})
                     </button>
-                    {phaseNumber === 6 && showExpertVoluntary && (
-                      <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setShowExpert({ isDefense: false })}>
-                        🏅 Take Expert Exam
-                      </Button>
-                    )}
-                    {phaseNumber === 7 && showMasterVoluntary && (
+                    {showMasterVoluntary && (
                       <Button className="mt-3 !px-3 !py-1.5 text-xs" onClick={() => setShowMaster({ isDefense: false })}>
                         🏆 Take Master Exam
                       </Button>
@@ -365,7 +348,7 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
               </div>
             </div>
 
-            {phaseNumber === 6 && (
+            {phaseNumber === 4 && (
               <div className="mt-2 flex flex-wrap items-center justify-center gap-3 rounded-full border-2 border-green-400 bg-green-50 px-4 py-2">
                 <span className="text-xs font-bold uppercase tracking-wide text-green-700">
                   {targetProfile.qualified ? '✅ Qualified' : '🔒 Not Yet Qualified'}
@@ -382,12 +365,12 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
       })}
 
       {itemsModalPhase && (
-        <Modal open onClose={() => setItemsModalPhase(null)} title={`Phase ${itemsModalPhase} Items`}>
+        <Modal open onClose={() => setItemsModalPhase(null)} title="Phase 4 Items">
           <div className="max-h-[60vh] space-y-1 overflow-y-auto">
-            {(itemsModalPhase === 6 ? phaseSixItems : phaseSevenItems).length === 0 ? (
+            {phaseFourItems.length === 0 ? (
               <p className="text-xs text-gray-400">No items yet.</p>
             ) : (
-              (itemsModalPhase === 6 ? phaseSixItems : phaseSevenItems).map((i) => (
+              phaseFourItems.map((i) => (
                 <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0">
                   <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
                   {i.label}
@@ -398,10 +381,30 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
         </Modal>
       )}
 
+      {staleItemsWarning && (
+        <Modal open onClose={() => setStaleItemsWarning(null)} title="⚠️ New must-know items to memorize first">
+          <p className="mb-3 text-sm text-gray-600">
+            These must-know items were added after you passed their phase. Please memorize them before taking the defense exam:
+          </p>
+          <div className="max-h-[50vh] space-y-1 overflow-y-auto">
+            {staleItemsWarning.map((i) => (
+              <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0">
+                <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
+                Phase {i.phaseNumber}: {i.label}
+              </label>
+            ))}
+          </div>
+          <Button className="mt-4 w-full" onClick={() => setStaleItemsWarning(null)}>
+            Close
+          </Button>
+        </Modal>
+      )}
+
       {levelUpPhase && (
         <LevelUpExamModal
           phaseNumber={levelUpPhase}
           phaseLabel={phases.find((p) => p.phase_number === levelUpPhase)?.label}
+          recoversQualified={levelUpPhase === 3 && !firstTimeAdvancing}
           onClose={() => setLevelUpPhase(null)}
           onPassed={() => {
             const label = phases.find((p) => p.phase_number === levelUpPhase)?.label
@@ -416,16 +419,6 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
           isDefense={showFormal.isDefense}
           onClose={() => setShowFormal(null)}
           onResult={() => reload()}
-        />
-      )}
-      {showExpert && (
-        <ExpertExamModal
-          isDefense={showExpert.isDefense}
-          onClose={() => setShowExpert(null)}
-          onResult={({ passed }) => {
-            if (passed && !showExpert.isDefense) setCongrats('Expert')
-            reload()
-          }}
         />
       )}
       {showMaster && (

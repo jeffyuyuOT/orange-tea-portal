@@ -130,10 +130,10 @@ export default function LearningTrackerPage() {
             // cards use. Phase 0 (Trainee — no phase row to match) keeps
             // the plain gray this already had.
             //
-            // Jeff, 2026-10-03 (Expert/Master split, point 4): Master now
-            // reads as Phase 7's color (was Phase 6, before the split),
-            // Expert reads as Phase 6's own color.
-            const titlePhaseNumber = s.has_master_title ? 7 : s.has_expert_title ? 6 : s.training_journey_phase ?? 0
+            // Jeff, 2026-10-07 (8-point phase-merge request, point 1):
+            // Master now reads as Phase 4's own color (the merged Expert
+            // tier no longer exists as a separate color/icon).
+            const titlePhaseNumber = s.has_master_title ? 4 : s.training_journey_phase ?? 0
             const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
             return (
               <button
@@ -153,7 +153,7 @@ export default function LearningTrackerPage() {
                       className={`text-xs font-medium ${titleColor ? '' : 'text-gray-400'}`}
                       style={titleColor ? { color: titleColor } : undefined}
                     >
-                      {s.has_master_title ? '👑 ' : s.has_expert_title ? '🏅 ' : ''}
+                      {s.has_master_title ? '👑 ' : ''}
                       {title}
                     </span>
                   )}
