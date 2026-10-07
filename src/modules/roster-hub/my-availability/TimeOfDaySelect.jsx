@@ -33,8 +33,21 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
     // render its label text in at all. Bumped to !py-2 (8px) + an explicit
     // normal line-height, same reasoning, pre-emptively applied here since
     // it's the identical narrow-select pattern.
+    //
+    // Jeff, 2026-10-07 (later): the AM/PM report came back ("還是看不到") even
+    // after that padding bump, which turned out to have never actually
+    // reached TypedTimeInput.jsx's own select at all — so the real fix there
+    // is an explicit color/background/color-scheme forced directly on the
+    // select (some Android WebViews re-theme a native select's label
+    // independently of the page's own CSS). Applied here too, pre-emptively,
+    // for the same reason the padding bump was.
     <div className={`flex items-center gap-1 ${className}`}>
-      <select className="input !w-14 !py-2 leading-normal sm:!w-16" value={hour12} onChange={(e) => set({ hour12: Number(e.target.value) })}>
+      <select
+        className="input !w-14 !py-2 leading-normal sm:!w-16"
+        style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
+        value={hour12}
+        onChange={(e) => set({ hour12: Number(e.target.value) })}
+      >
         {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
           <option key={h} value={h}>
             {h}
@@ -42,14 +55,24 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
         ))}
       </select>
       <span className="text-gray-400">:</span>
-      <select className="input !w-14 !py-2 leading-normal sm:!w-16" value={minute} onChange={(e) => set({ minute: e.target.value })}>
+      <select
+        className="input !w-14 !py-2 leading-normal sm:!w-16"
+        style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
+        value={minute}
+        onChange={(e) => set({ minute: e.target.value })}
+      >
         {MINUTE_OPTIONS.map((m) => (
           <option key={m} value={m}>
             {m}
           </option>
         ))}
       </select>
-      <select className="input !w-20 !py-2 leading-normal sm:!w-24" value={ampm} onChange={(e) => set({ ampm: e.target.value })}>
+      <select
+        className="input !w-20 !py-2 leading-normal sm:!w-24"
+        style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
+        value={ampm}
+        onChange={(e) => set({ ampm: e.target.value })}
+      >
         <option value="AM">AM</option>
         <option value="PM">PM</option>
       </select>
