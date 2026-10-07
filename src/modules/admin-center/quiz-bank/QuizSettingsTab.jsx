@@ -483,10 +483,16 @@ function ExcludedIngredientsSection() {
 
   return (
     <div>
-      <span className="mb-1 block text-xs font-medium text-gray-500">Ingredients excluded from formula questions</span>
+      {/* Jeff, 2026-10-07: "那應該叫quiz included ingredients比較合適?" — the
+          checkbox itself means "included" (checked = eligible to be quizzed
+          on), so the heading/copy should read that way too, not "excluded",
+          which was backwards from what checking/unchecking actually does.
+          Unchanged underneath — still the same quiz_excluded_ingredients
+          table/toggle(), this is wording only. */}
+      <span className="mb-1 block text-xs font-medium text-gray-500">Ingredients included in formula questions</span>
       <p className="mb-2 text-xs text-gray-400">
-        Every ingredient with a recorded quantity is eligible by default. Uncheck one here if its quantity isn't
-        meaningful to quiz staff on (e.g. water, ice).
+        Every ingredient with a recorded quantity is checked (included) by default. Uncheck one here to exclude it
+        if its quantity isn't meaningful to quiz staff on (e.g. water, ice).
       </p>
       <input
         className="input mb-2"
