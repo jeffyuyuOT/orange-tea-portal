@@ -16,16 +16,22 @@ import { recordFormalDefenseResult } from '../../../lib/trainingJourney'
 //    already qualified (re-attempting voluntarily before a defense is due),
 //    in which case it still auto-passes with no reviewer needed.
 //  - isDefense=true (the recurring title-defense re-sit, only reachable
-//    once title_defense_due_at has passed, cadence/question-count from
-//    title_defense_settings): self-graded, every question must be correct
-//    — see recordFormalDefenseResult. Jeff, 2026-10-07 (point 4): a single
-//    failed defense attempt now instantly disqualifies — the old 3-strike
-//    grace is gone.
+//    once title_defense_due_at has passed, cadence/question-count/error-
+//    tolerance from title_defense_settings): self-graded — a missed
+//    must-know-linked question always fails outright, otherwise up to the
+//    error-tolerance setting's worth of other misses is still a pass, same
+//    "non-must-know misses allowed" rule Master Exam already uses (added
+//    2026-10-07 — a defense attempt used to need a flat 100%) — see
+//    recordFormalDefenseResult. Jeff, 2026-10-07 (point 4): a single failed
+//    defense attempt now instantly disqualifies — the old 3-strike grace is
+//    gone. Error tolerance only applies to a defense attempt — the initial
+//    Formal Exam is still manager-reviewed/auto-pass, never self-graded.
 export default function FormalExamModal({ isDefense = false, onClose, onResult }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
   const [questions, setQuestions] = useState([])
   const [reason, setReason] = useState(null)
+  const [errorTolerance, setErrorTolerance] = useState(0)
   const [answers, setAnswers] = useState({})
   const [result, setResult] = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -34,6 +40,7 @@ export default function FormalExamModal({ isDefense = false, onClose, onResult }
     buildFormalExamQuestionSet(profile.id, currentStoreId, { isDefense }).then((res) => {
       setQuestions(res.questions)
       setReason(res.reason)
+      setErrorTolerance(res.errorTolerance ?? 0)
       setLoading(false)
     })
   }, [profile.id, currentStoreId, isDefense])
@@ -41,9 +48,13 @@ export default function FormalExamModal({ isDefense = false, onClose, onResult }
   async function submit() {
     setSubmitting(true)
     let correct = 0
+    let wrongMustKnow = 0
+    let wrongOther = 0
     const answerRows = questions.map((q) => {
       const { isCorrect, row } = gradeQuestion(q, answers)
       if (isCorrect) correct += 1
+      else if (q.isMustKnow) wrongMustKnow += 1
+      else wrongOther += 1
       return row
     })
     const total = questions.length
@@ -53,7 +64,7 @@ export default function FormalExamModal({ isDefense = false, onClose, onResult }
     let message = ''
 
     if (isDefense) {
-      passed = correct === total
+      passed = wrongMustKnow === 0 && wrongOther <= errorTolerance
       const outcome = await recordFormalDefenseResult(profile.id, passed)
       disqualified = outcome.disqualified
       message = passed

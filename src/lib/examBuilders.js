@@ -30,9 +30,18 @@ function shuffle(arr) {
 // question_count, so the defense's own budget is separate from however many
 // questions someone chooses to put in the regular Formal/Master Exam
 // settings.
-async function titleDefenseQuestionCount() {
-  const { data } = await supabase.from('title_defense_settings').select('question_count').maybeSingle()
-  return data?.question_count ?? 20
+//
+// Jeff, 2026-10-07 (later): "title defense exam增加Error tolerance
+// (non-must-know misses allowed)選項" — title_defense_settings also got its
+// own error_tolerance column (migration 0097), used by BOTH a Formal
+// (Advanced) and a Master title-defense attempt instead of each exam's own
+// voluntary-attempt tolerance (Formal's voluntary attempt still needs a
+// perfect score; Master's voluntary attempt still uses its own
+// master_quiz_settings.error_tolerance) — same "any missed must-know-linked
+// question always fails regardless" rule underneath.
+async function titleDefenseSettings() {
+  const { data } = await supabase.from('title_defense_settings').select('question_count, error_tolerance').maybeSingle()
+  return { questionCount: data?.question_count ?? 20, errorTolerance: data?.error_tolerance ?? 0 }
 }
 
 // Jeff, 2026-10-07 (8-point phase-merge request, point 6): "Formula
@@ -107,15 +116,28 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
 // Shared fill-in-the-blank selection math: weighted-samples up to
 // `fillBlankTarget` from the combined generated + bank candidate pool (⭐
 // Top 10 drinks weighted higher, same `top10Weight` for every exam type),
-// then converts each selected non-Top-10 generated candidate into a hard
-// multiple-choice question wherever enough real-quantity distractors exist
-// for that ingredient (Top 10 ones and bank fill-blanks stay typed-answer).
-function selectFillBlankQuestions({ candidates, fillBlankTarget, top10Weight, realQuantityPool }) {
+// then converts each selected generated candidate into a hard multiple-
+// choice question wherever enough real-quantity distractors exist for that
+// ingredient (bank fill-blanks — an admin's own hand-written question —
+// always stay typed-answer, regardless of `forceMultipleChoice`).
+//
+// Jeff, 2026-10-07: "Quick Quiz's version of these questions is always
+// multiple choice...改成all quizzes' version (except formal quiz) of these
+// questions is always multiple choice" — Formal Quiz (voluntary or its
+// Advanced title-defense re-sit) is the one exception that keeps a ⭐ Top 10
+// drink's generated question typed (`forceMultipleChoice` left false/
+// omitted there, the original behavior); every other quiz type (Quick,
+// Level-Up, Master, and a Master title-defense re-sit) passes
+// `forceMultipleChoice: true` so even a Top 10 drink's generated question
+// gets converted — no typed-answer generated question anywhere outside
+// Formal Quiz.
+function selectFillBlankQuestions({ candidates, fillBlankTarget, top10Weight, realQuantityPool, forceMultipleChoice = false }) {
   if (!candidates.length || fillBlankTarget <= 0) return []
   const weightOf = (c) => (c.topTen ? top10Weight : 1)
   const selected = weightedSample(candidates, weightOf, Math.min(fillBlankTarget, candidates.length))
   return selected.map((q) => {
-    if (!q.isGenerated || q.topTen) return q
+    if (!q.isGenerated) return q
+    if (!forceMultipleChoice && q.topTen) return q
     const built = buildHardQuantityChoiceQuestion({
       questionText: q.question,
       quantityText: q.quantityText,
@@ -138,7 +160,17 @@ function selectFillBlankQuestions({ candidates, fillBlankTarget, top10Weight, re
 // question) stays unrestricted, same as before — it isn't "from" any one
 // item, must-know or not. `isDefense` (point 4): a title-defense attempt
 // draws its question count from title_defense_settings instead of this
-// exam's own voluntary question_count.
+// exam's own voluntary question_count — and, since 2026-10-07 (error-
+// tolerance addition), also grades with title_defense_settings.
+// error_tolerance instead of needing a perfect score: every question here is
+// already must-know-linked-or-unlinked (see the comment above), so a defense
+// attempt tags each question `isMustKnow` (true when linked to an item —
+// every linked item here is must-know by construction — false for an
+// unlinked cross-drink concept question) and the caller fails outright on
+// any missed must-know question, same "non-must-know misses allowed" rule
+// Master Exam already uses, up to `errorTolerance` other misses. A
+// voluntary (non-defense) attempt is unaffected — it's graded by manager
+// review / auto-pass-if-already-qualified, never by this tolerance.
 export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense } = {}) {
   const { data: memorized } = await supabase.from('study_progress').select('formula_item_id').eq('profile_id', profileId).eq('memorized', true)
   let memorizedIds = (memorized ?? []).map((m) => m.formula_item_id)
@@ -149,7 +181,9 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
   if (!memorizedIds.length) return { questions: [], reason: 'no_questions' }
 
   const { data: settings } = await supabase.from('formal_quiz_settings').select('*').maybeSingle()
-  const questionCount = isDefense ? await titleDefenseQuestionCount() : settings?.question_count ?? 30
+  const defenseSettings = isDefense ? await titleDefenseSettings() : null
+  const questionCount = defenseSettings ? defenseSettings.questionCount : settings?.question_count ?? 30
+  const errorTolerance = defenseSettings?.errorTolerance ?? 0
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
   const fillBlankRatio = settings?.fill_in_blank_ratio ?? 20
   const top10Weight = settings?.top10_fill_blank_weight ?? 3
@@ -176,7 +210,7 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
     const top10Ids = new Set((itemFlagRows ?? []).filter((r) => r.top_10).map((r) => r.id))
     mcVisible = candidateQuestions
       .filter((q) => (q.question_type ?? 'single') !== 'fill_blank')
-      .map((q) => ({ type: q.question_type === 'multi' ? 'multi' : 'choice', localId: q.id, ...q }))
+      .map((q) => ({ type: q.question_type === 'multi' ? 'multi' : 'choice', localId: q.id, isMustKnow: !!q.formula_item_id, ...q }))
     bankFillBlankVisible = candidateQuestions
       .filter((q) => q.question_type === 'fill_blank')
       .map((q) => ({
@@ -190,11 +224,15 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
         topTen: top10Ids.has(q.formula_item_id),
         formulaItemId: q.formula_item_id,
         shopTrainingItemId: q.shop_training_item_id,
+        isMustKnow: !!q.formula_item_id,
       }))
   }
+  // Every generated candidate here came from buildGeneratedFillBlankCandidates
+  // with requireMustKnow: true — always must-know-linked by construction.
+  const taggedFillBlankCandidates = fillBlankCandidates.map((c) => ({ ...c, isMustKnow: true }))
 
-  const allFillBlankCandidates = [...fillBlankCandidates, ...bankFillBlankVisible]
-  if (!allFillBlankCandidates.length && !mcVisible.length) return { questions: [], reason: 'no_questions' }
+  const allFillBlankCandidates = [...taggedFillBlankCandidates, ...bankFillBlankVisible]
+  if (!allFillBlankCandidates.length && !mcVisible.length) return { questions: [], reason: 'no_questions', errorTolerance }
 
   let fillBlankTarget = Math.round((questionCount * fillBlankRatio) / 100)
   fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
@@ -231,7 +269,7 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
   }
 
   const combined = shuffle([...mcSelected, ...fillBlankSelected]).slice(0, questionCount)
-  return { questions: combined, reason: null }
+  return { questions: combined, reason: null, errorTolerance }
 }
 
 // Master Exam question set — shared by the real Master Exam (initial +
@@ -245,7 +283,10 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
 // must-know question, regardless of error_tolerance; otherwise up to
 // `errorTolerance` other misses are OK — see master_quiz_settings.
 // `isDefense` (point 4): draws its question count from
-// title_defense_settings instead of master_quiz_settings.question_count.
+// title_defense_settings instead of master_quiz_settings.question_count —
+// and, since 2026-10-07, its error_tolerance too, instead of
+// master_quiz_settings' own (that one now only governs a voluntary Master
+// Exam attempt).
 export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
   const [{ data: formulaItemRows }, { data: drinkStoreRows }, { data: trainingItemRows }, { data: settings }, { data: formalSettings }] = await Promise.all([
     supabase.from('formula_items').select('id, is_must_know').eq('is_active', true),
@@ -262,8 +303,9 @@ export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
   const mustKnowTrainingIds = new Set((trainingItemRows ?? []).filter((i) => i.is_must_know).map((i) => i.id))
   const trainingIdSet = new Set((trainingItemRows ?? []).map((i) => i.id))
 
-  const questionCount = isDefense ? await titleDefenseQuestionCount() : settings?.question_count ?? 30
-  const errorTolerance = settings?.error_tolerance ?? 0
+  const defenseSettings = isDefense ? await titleDefenseSettings() : null
+  const questionCount = defenseSettings ? defenseSettings.questionCount : settings?.question_count ?? 30
+  const errorTolerance = defenseSettings ? defenseSettings.errorTolerance : settings?.error_tolerance ?? 0
   const fillBlankRatio = formalSettings?.fill_in_blank_ratio ?? 20
   const top10Weight = formalSettings?.top10_fill_blank_weight ?? 3
 
@@ -293,9 +335,13 @@ export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
 
   let fillBlankTarget = Math.round((questionCount * fillBlankRatio) / 100)
   fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
-  const fillBlankSelected = selectFillBlankQuestions({ candidates: allFillBlankCandidates, fillBlankTarget, top10Weight, realQuantityPool }).map(
-    (q) => (q.isMustKnow === undefined ? { ...q, isMustKnow: q.formulaItemId ? mustKnowFormulaIds.has(q.formulaItemId) : false } : q)
-  )
+  const fillBlankSelected = selectFillBlankQuestions({
+    candidates: allFillBlankCandidates,
+    fillBlankTarget,
+    top10Weight,
+    realQuantityPool,
+    forceMultipleChoice: true, // Master Exam isn't Formal Quiz — no typed-answer generated questions, even for a ⭐ Top 10 drink
+  }).map((q) => (q.isMustKnow === undefined ? { ...q, isMustKnow: q.formulaItemId ? mustKnowFormulaIds.has(q.formulaItemId) : false } : q))
 
   const fillBlankDrinkIds = new Set(fillBlankSelected.map((c) => c.formulaItemId).filter(Boolean))
   const mcTarget = questionCount - fillBlankSelected.length
@@ -355,7 +401,13 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
 
   let fillBlankTarget = Math.round((questionCount * fillBlankRatio) / 100)
   fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
-  const fillBlankSelected = selectFillBlankQuestions({ candidates: allFillBlankCandidates, fillBlankTarget, top10Weight, realQuantityPool })
+  const fillBlankSelected = selectFillBlankQuestions({
+    candidates: allFillBlankCandidates,
+    fillBlankTarget,
+    top10Weight,
+    realQuantityPool,
+    forceMultipleChoice: true, // Level-Up Exam isn't Formal Quiz — no typed-answer generated questions, even for a ⭐ Top 10 drink
+  })
 
   const fillBlankDrinkIds = new Set(fillBlankSelected.map((c) => c.formulaItemId).filter(Boolean))
   const mcTarget = questionCount - fillBlankSelected.length

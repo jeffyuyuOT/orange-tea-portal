@@ -12,10 +12,15 @@ import { recordMasterExamResult } from '../../../lib/trainingJourney'
 // attempt) or whenever a Master-titled profile wants to re-earn Master after
 // losing it (voluntary retry, isDefense=false) or once title_defense_due_at
 // has passed while still holding Master (isDefense=true). Self-graded in
-// both cases, using master_quiz_settings.error_tolerance: any missed
-// must-know-linked question fails outright regardless of tolerance; a
-// failed DEFENSE (not a voluntary retry) immediately drops Master back to
-// Advanced — no 3-strike grace like Formal Exam's defense.
+// both cases: any missed must-know-linked question fails outright regardless
+// of tolerance; a voluntary attempt's tolerance comes from
+// master_quiz_settings.error_tolerance, a defense attempt's from
+// title_defense_settings.error_tolerance instead (2026-10-07 — shared with
+// Advanced's Formal Exam defense, independent of this exam's own voluntary
+// setting) — examBuilders.js picks the right one, this modal just reads
+// whichever buildMasterExamQuestionSet returns. A failed DEFENSE (not a
+// voluntary retry) immediately drops Master back to Advanced — no 3-strike
+// grace like Formal Exam's defense.
 export default function MasterExamModal({ isDefense = false, onClose, onResult }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
