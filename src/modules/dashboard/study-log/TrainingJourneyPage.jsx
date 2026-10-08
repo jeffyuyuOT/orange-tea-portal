@@ -163,9 +163,18 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   const showFormalInitial =
     isSelf && !targetProfile.qualified && (currentPhase >= 3 || (currentPhase === 2 && advancedItemsComplete && firstTimeAdvancing))
   const phase4Complete = phaseFourTotal > 0 && phaseFourMemorized === phaseFourTotal
+  // Jeff, 2026-10-08: "要出現master exam需要下面的must-know item也要全勾選，
+  // 不能只是phase 4的全勾選就好" — phase4Complete alone isn't enough: a
+  // qualified staff member can still have an unmemorized must-know item sitting
+  // in Phase 1-3 (e.g. a new must-know item got added to an already-passed
+  // phase after they passed it — see the "stale must-know items" banner
+  // above) even while Phase 4 itself is 100% done. The Master Exam button
+  // needs every phase's must-know items checked, not just the one it's
+  // actually testing.
+  const lowerPhasesComplete = [1, 2, 3].every((n) => (itemsByPhase[n] ?? []).every((i) => i.memorized))
   // Master requires already being Qualified/Advanced first — strict
   // sequential progression through the two title tiers.
-  const showMasterVoluntary = isSelf && targetProfile.qualified && !targetProfile.has_master_title && phase4Complete
+  const showMasterVoluntary = isSelf && targetProfile.qualified && !targetProfile.has_master_title && phase4Complete && lowerPhasesComplete
 
   // Jeff, 2026-10-07 (point 2): a blocking pre-exam check — any must-know
   // item in an already-passed phase (plus Phase 4, for a Master holder
