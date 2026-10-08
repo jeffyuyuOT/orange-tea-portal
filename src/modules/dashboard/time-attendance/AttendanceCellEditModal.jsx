@@ -297,9 +297,9 @@ export default function AttendanceCellEditModal({
         <>
           <div className="mb-3 space-y-2">
             {rows.map((r) => (
-              <div key={r.key} className={`flex items-center gap-2 ${r.deleted ? 'opacity-40' : ''}`}>
+              <div key={r.key} className={`flex flex-wrap items-center gap-2 ${r.deleted ? 'opacity-40' : ''}`}>
                 <select
-                  className="input w-auto"
+                  className="input w-auto shrink-0"
                   value={r.eventType}
                   disabled={r.deleted}
                   onChange={(e) => updateRow(r.key, { eventType: e.target.value })}
@@ -307,7 +307,7 @@ export default function AttendanceCellEditModal({
                   <option value="clock_in">Clock in</option>
                   <option value="clock_out">Clock out</option>
                 </select>
-                <TypedTimeInput value={r.time} disabled={r.deleted} onChange={(t) => updateRow(r.key, { time: t })} />
+                <TypedTimeInput value={r.time} disabled={r.deleted} onChange={(t) => updateRow(r.key, { time: t })} className="shrink-0" />
                 {r.existing ? (
                   <button
                     type="button"

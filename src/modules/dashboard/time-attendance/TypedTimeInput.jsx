@@ -99,7 +99,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="hh"
         disabled={disabled}
-        className={`input w-12 !py-1.5 text-center ${hourInvalid ? 'border-red-400' : ''}`}
+        className={`input w-12 shrink-0 !py-1.5 text-center ${hourInvalid ? 'border-red-400' : ''}`}
         value={hour}
         onChange={(e) => {
           const { displayHour, forcedAmpm } = normalizeTypedHour(digitsOnly(e.target.value))
@@ -109,7 +109,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
           commit(displayHour, minute, nextAmpm)
         }}
       />
-      <span className="text-gray-400">:</span>
+      <span className="shrink-0 text-gray-400">:</span>
       <input
         type="text"
         inputMode="numeric"
@@ -117,7 +117,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="mm"
         disabled={disabled}
-        className={`input w-12 !py-1.5 text-center ${minuteInvalid ? 'border-red-400' : ''}`}
+        className={`input w-12 shrink-0 !py-1.5 text-center ${minuteInvalid ? 'border-red-400' : ''}`}
         value={minute}
         onChange={(e) => {
           const v = digitsOnly(e.target.value)
@@ -141,8 +141,22 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
           it everywhere either — just made it fail on a different box width.
           Replaced the native select entirely with two plain buttons: a
           segmented AM/PM toggle renders its own text exactly like any other
-          button label, immune to native-select theming on any device. */}
-      <div className="flex overflow-hidden rounded-lg border border-gray-300">
+          button label, immune to native-select theming on any device.
+          Jeff, 2026-10-08 (again, same day): still showed only a sliver of
+          "A" with no "PM" button at all — but THIS report was from "Add
+          attendance record" (AttendanceCellEditModal's isNewCell rows),
+          which packs an extra Clock-in/Clock-out type <select> onto the same
+          line before this component even starts. That row had no
+          flex-wrap and nothing in it was marked flex-shrink:0, so once it
+          didn't fit the screen, flexbox default behavior compressed
+          whichever children had the least "must stay this wide" pressure —
+          here, this whole AM/PM toggle — rather than ever wrapping onto a
+          second line. shrink-0 below (plus on hour/minute/the colon, and on
+          the row's own cells in AttendanceCellEditModal.jsx, which also
+          switched to flex-wrap) stops that: the row now wraps to a second
+          line on a narrow screen instead of squeezing any one control
+          illegibly. */}
+      <div className="flex shrink-0 overflow-hidden rounded-lg border border-gray-300">
         {['AM', 'PM'].map((period) => (
           <button
             key={period}
