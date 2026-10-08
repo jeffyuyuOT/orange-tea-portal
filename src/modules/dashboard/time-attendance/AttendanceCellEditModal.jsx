@@ -295,11 +295,22 @@ export default function AttendanceCellEditModal({
 
       {showRows && (
         <>
+          {/* Jeff, 2026-10-08: "clock in/out的欄寬縮短一點(可以fit字就好),
+              後面的discard改用x表示，這樣am/pm的欄寬就可以寬一點" — the type
+              select now uses !w-auto (plain w-auto was losing to .input's
+              own width:100% — see TypedTimeInput.jsx's comment on the same
+              cascade issue) so it only takes as much width as "Clock out"
+              actually needs, and Remove/Discard collapse to a single ✕
+              icon-button instead of a text label, freeing up room on this
+              already-crowded mobile row for the AM/PM toggle to be
+              comfortably tappable. "Undo remove" stays as text — it's a
+              less-common, already-dimmed state where compactness matters
+              less than being unambiguous about what tapping it undoes. */}
           <div className="mb-3 space-y-2">
             {rows.map((r) => (
               <div key={r.key} className={`flex flex-wrap items-center gap-2 ${r.deleted ? 'opacity-40' : ''}`}>
                 <select
-                  className="input w-auto shrink-0"
+                  className="input !w-auto shrink-0"
                   value={r.eventType}
                   disabled={r.deleted}
                   onChange={(e) => updateRow(r.key, { eventType: e.target.value })}
@@ -309,16 +320,34 @@ export default function AttendanceCellEditModal({
                 </select>
                 <TypedTimeInput value={r.time} disabled={r.deleted} onChange={(t) => updateRow(r.key, { time: t })} className="shrink-0" />
                 {r.existing ? (
+                  r.deleted ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleDeleted(r.key)}
+                      className="shrink-0 text-xs font-medium text-red-500 hover:underline"
+                    >
+                      Undo remove
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => toggleDeleted(r.key)}
+                      title="Remove"
+                      aria-label="Remove"
+                      className="shrink-0 text-base leading-none text-red-500 hover:text-red-600"
+                    >
+                      ✕
+                    </button>
+                  )
+                ) : (
                   <button
                     type="button"
-                    onClick={() => toggleDeleted(r.key)}
-                    className="text-xs font-medium text-red-500 hover:underline"
+                    onClick={() => removeNewRow(r.key)}
+                    title="Discard"
+                    aria-label="Discard"
+                    className="shrink-0 text-base leading-none text-gray-400 hover:text-gray-600"
                   >
-                    {r.deleted ? 'Undo remove' : 'Remove'}
-                  </button>
-                ) : (
-                  <button type="button" onClick={() => removeNewRow(r.key)} className="text-xs font-medium text-gray-400 hover:underline">
-                    Discard
+                    ✕
                   </button>
                 )}
               </div>

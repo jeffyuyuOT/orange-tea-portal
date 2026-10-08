@@ -17,6 +17,20 @@ import { useEffect, useState } from 'react'
 // minute steps only, fine for a declared availability window), a punch
 // needs the exact minute someone actually clocked in/out at, so minute is
 // free-typed 00-59 here, not a dropdown.
+//
+// Jeff, 2026-10-08 (again): after the shrink-0 fix below, the whole row
+// needed horizontal scrolling to see minute/AM-PM at all — turned out
+// `.input`'s own `width: 100%` (index.css, written outside any Tailwind
+// @layer) beats a plain `w-12` utility class in cascade priority no matter
+// what order they're written in (Tailwind v4: unlayered CSS always outranks
+// layered utility CSS). `w-12` was silently losing that fight the whole
+// time — shrink:1 (the default) was quietly bailing it out by squeezing the
+// resulting 100%-wide flex-basis back down to fit, which is what made the
+// text look "squeezed small" rather than "box literally this wide" before.
+// shrink-0 removed that accidental rescue, so the 100% width this input was
+// ACTUALLY computing all along finally showed up for real. `!w-12`
+// (Tailwind's important-prefix syntax) is the fix — same trick `!py-1.5`
+// right below it already uses for the same reason.
 export default function TypedTimeInput({ value, onChange, disabled, className = '' }) {
   const [hour, setHour] = useState('')
   const [minute, setMinute] = useState('')
@@ -99,7 +113,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="hh"
         disabled={disabled}
-        className={`input w-12 shrink-0 !py-1.5 text-center ${hourInvalid ? 'border-red-400' : ''}`}
+        className={`input !w-12 shrink-0 !py-1.5 text-center ${hourInvalid ? 'border-red-400' : ''}`}
         value={hour}
         onChange={(e) => {
           const { displayHour, forcedAmpm } = normalizeTypedHour(digitsOnly(e.target.value))
@@ -117,7 +131,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         maxLength={2}
         placeholder="mm"
         disabled={disabled}
-        className={`input w-12 shrink-0 !py-1.5 text-center ${minuteInvalid ? 'border-red-400' : ''}`}
+        className={`input !w-12 shrink-0 !py-1.5 text-center ${minuteInvalid ? 'border-red-400' : ''}`}
         value={minute}
         onChange={(e) => {
           const v = digitsOnly(e.target.value)
@@ -166,7 +180,7 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
               setAmpm(period)
               commit(hour, minute, period)
             }}
-            className={`px-2.5 py-1.5 text-xs font-semibold ${
+            className={`px-3 py-1.5 text-sm font-semibold ${
               ampm === period ? 'bg-brand-500 text-white' : 'bg-white text-gray-600'
             }`}
           >
