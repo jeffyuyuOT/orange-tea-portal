@@ -383,8 +383,17 @@ export function AuthProvider({ children }) {
   // login, and again by MessagePage right after it marks something read (or
   // sends/receives), so the badge updates without a full page reload. Not
   // tied to currentStoreId — see the state comment above.
+  //
+  // Jeff, 2026-10-08: "之前因為發系統信造成2d maker收到信有系統提示1，但2d
+  // maker看不到訊息頁面，請把所有店的2d maker系統提示移除" — same gap
+  // refreshRosterUpdates already closed for itself (see its own 2026-10-02
+  // comment): a developer broadcast targets every profile, including a
+  // device account like qr_code_maker (one page in its sidebar, no Message
+  // page at all), so this kept counting toward a badge that account can
+  // never open to clear. Gated the same way now: a role whose sidebar can't
+  // reach Message never contributes to its own unread count.
   const refreshUnreadMessages = useCallback(async () => {
-    if (!profile?.id) {
+    if (!profile?.id || !canAccessPage(getEffectivePages(profile, overrides), 'dashboard.message')) {
       setUnreadMessageCount(0)
       return
     }
@@ -394,7 +403,7 @@ export function AuthProvider({ children }) {
       .eq('profile_id', profile.id)
       .is('read_at', null)
     setUnreadMessageCount(count ?? 0)
-  }, [profile?.id])
+  }, [profile, overrides])
 
   useEffect(() => {
     refreshUnreadMessages()
