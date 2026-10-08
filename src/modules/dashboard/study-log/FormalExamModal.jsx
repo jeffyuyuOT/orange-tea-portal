@@ -25,10 +25,14 @@ import { recordFormalDefenseResult } from '../../../lib/trainingJourney'
 //    error-tolerance setting's worth of other misses is still a pass, same
 //    "non-must-know misses allowed" rule Master Exam already uses (added
 //    2026-10-07 — a defense attempt used to need a flat 100%) — see
-//    recordFormalDefenseResult. Jeff, 2026-10-07 (point 4): a single failed
-//    defense attempt now instantly disqualifies — the old 3-strike grace is
-//    gone. Error tolerance only applies to a defense attempt — the initial
-//    Formal Exam is still manager-reviewed/auto-pass, never self-graded.
+//    recordFormalDefenseResult. That error tolerance is PER-SITTING (how
+//    many questions you can miss in one attempt and still pass it); Jeff,
+//    2026-10-08 separately restored a grace period ACROSS sittings — 3
+//    attempts total before a failed defense actually disqualifies (see
+//    recordFormalDefenseResult's comment) — after point 4 (2026-10-07) had
+//    removed that same grace the same week. Error tolerance only applies to
+//    a defense attempt — the initial Formal Exam is still manager-
+//    reviewed/auto-pass, never self-graded.
 export default function FormalExamModal({ isDefense = false, onClose, onResult }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -72,7 +76,9 @@ export default function FormalExamModal({ isDefense = false, onClose, onResult }
       disqualified = outcome.disqualified
       message = passed
         ? 'Defense passed — you keep your Advanced title, and the clock resets.'
-        : "That defense didn't pass — you've lost your Advanced title and are back to Practitioner. Pass the Phase 3 Level-Up Exam to reclaim it — no new Formal Exam review needed."
+        : disqualified
+          ? "That defense didn't pass, and you're out of attempts — you've lost your Advanced title and are back to Practitioner. Pass the Phase 3 Level-Up Exam to reclaim it — no new Formal Exam review needed."
+          : `That defense didn't pass, but you still keep your Advanced title — you have ${outcome.attemptsRemaining} more attempt${outcome.attemptsRemaining === 1 ? '' : 's'} before you'd lose it. Retake the defense soon.`
     } else {
       const { data: freshProfile } = await supabase.from('profiles').select('qualified').eq('id', profile.id).single()
       const autoPassed = !!freshProfile?.qualified

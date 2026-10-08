@@ -239,12 +239,12 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
       )}
       {showFormalDefenseBanner && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ⚠️ Your Advanced title defense is due.
+          ⚠️ Your Advanced title defense is due — you have 7 days to pass it (up to 3 attempts) before you lose the title.
         </div>
       )}
       {showMasterDefenseBanner && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          ⚠️ Your Master title defense is due — tick every Phase 4 item as Memorized if you haven't already, then retake the Master Exam.
+          ⚠️ Your Master title defense is due — you have 7 days to pass it (up to 3 attempts) before you lose the title. Tick every Phase 4 item as Memorized if you haven't already, then retake the Master Exam.
         </div>
       )}
 
@@ -403,6 +403,7 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
         <LevelUpExamModal
           phaseNumber={levelUpPhase}
           phaseLabel={phases.find((p) => p.phase_number === levelUpPhase)?.label}
+          errorTolerance={phases.find((p) => p.phase_number === levelUpPhase)?.level_up_error_tolerance ?? 0}
           recoversQualified={levelUpPhase === 3 && !firstTimeAdvancing}
           onClose={() => setLevelUpPhase(null)}
           onPassed={() => {

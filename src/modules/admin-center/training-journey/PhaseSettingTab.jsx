@@ -20,6 +20,12 @@ import Button from '../../../components/ui/Button'
 // directly, no new manager review (point 8's original "Level-Up-Exam-only"
 // recovery) — so this field is still live and needed. See
 // TrainingJourneyPage.jsx / LevelUpExamModal.jsx.
+//
+// Jeff, 2026-10-08 (same day): "各個phase level up exam題數設置後面也新增容
+// 錯率題數設置" — each phase's question count now has an error-tolerance
+// count next to it (migration 0099, level_up_error_tolerance, default 0 =
+// the original all-correct behavior). How many of that phase's questions
+// can be wrong and still pass — see LevelUpExamModal.jsx.
 export default function PhaseSettingTab() {
   const [phases, setPhases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +57,7 @@ export default function PhaseSettingTab() {
             bg_color: p.bg_color,
             text_color: p.text_color,
             level_up_exam_question_count: p.phase_number <= 3 ? p.level_up_exam_question_count : null,
+            level_up_error_tolerance: p.phase_number <= 3 ? (p.level_up_error_tolerance ?? 0) : null,
           })
           .eq('phase_number', p.phase_number)
       )
@@ -69,9 +76,10 @@ export default function PhaseSettingTab() {
       <p className="mb-4 text-sm text-gray-500">
         Each phase's color (used on its Training Journey card, and — once a staff member reaches it — their roster
         name/time if System Setting's "Roster Name Display Format" is set to show titles), how many hours worked
-        fill it, and how many questions its Level-Up Exam draws. Phase 3's Level-Up Exam is only ever used to
-        recover a lost Advanced title after a failed defense — a first-time promotion into Advanced always goes
-        through the Formal Exam instead.
+        fill it, how many questions its Level-Up Exam draws, and how many of those can be wrong and still pass
+        (0 = every question must be correct). Phase 3's Level-Up Exam is only ever used to recover a lost Advanced
+        title after a failed defense — a first-time promotion into Advanced always goes through the Formal Exam
+        instead.
       </p>
 
       <div className="space-y-3">
@@ -119,6 +127,16 @@ export default function PhaseSettingTab() {
                     className="input w-20"
                     value={p.level_up_exam_question_count ?? ''}
                     onChange={(e) => update(p.phase_number, { level_up_exam_question_count: Number(e.target.value) })}
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                  Error tolerance
+                  <input
+                    type="number"
+                    min="0"
+                    className="input w-20"
+                    value={p.level_up_error_tolerance ?? 0}
+                    onChange={(e) => update(p.phase_number, { level_up_error_tolerance: Number(e.target.value) })}
                   />
                 </label>
               </>

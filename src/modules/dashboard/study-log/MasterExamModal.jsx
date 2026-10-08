@@ -18,9 +18,11 @@ import { recordMasterExamResult } from '../../../lib/trainingJourney'
 // title_defense_settings.error_tolerance instead (2026-10-07 — shared with
 // Advanced's Formal Exam defense, independent of this exam's own voluntary
 // setting) — examBuilders.js picks the right one, this modal just reads
-// whichever buildMasterExamQuestionSet returns. A failed DEFENSE (not a
-// voluntary retry) immediately drops Master back to Advanced — no 3-strike
-// grace like Formal Exam's defense.
+// whichever buildMasterExamQuestionSet returns. That tolerance is PER-
+// SITTING; Jeff, 2026-10-08 also restored a grace period ACROSS sittings,
+// shared with Formal Exam's defense — 3 attempts total before a failed
+// DEFENSE (not a voluntary retry) actually drops Master back to Advanced —
+// see recordMasterExamResult.
 export default function MasterExamModal({ isDefense = false, onClose, onResult }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -73,7 +75,7 @@ export default function MasterExamModal({ isDefense = false, onClose, onResult }
       if (error) console.error('Failed to save quiz answer detail:', error)
     }
     const outcome = await recordMasterExamResult(profile.id, passed, { wasDefense: isDefense })
-    setResult({ correct, total, passed, lostMaster: outcome.lostMaster })
+    setResult({ correct, total, passed, lostMaster: outcome.lostMaster, attemptsRemaining: outcome.attemptsRemaining })
     setSubmitting(false)
   }
 
@@ -94,9 +96,11 @@ export default function MasterExamModal({ isDefense = false, onClose, onResult }
           <p className="mt-1 text-sm text-gray-500">
             {result.passed
               ? '🏆 Passed — you hold the Master title.'
-              : result.lostMaster
-                ? "That defense didn't pass — you've lost the Master title and are back to Advanced. You can retake the Master Exam any time to earn it back."
-                : 'Not quite — every must-know question needs to be correct. Review and try again when ready.'}
+              : !isDefense
+                ? 'Not quite — every must-know question needs to be correct. Review and try again when ready.'
+                : result.lostMaster
+                  ? "That defense didn't pass, and you're out of attempts — you've lost the Master title and are back to Advanced. You can retake the Master Exam any time to earn it back."
+                  : `That defense didn't pass, but you still hold the Master title — you have ${result.attemptsRemaining} more attempt${result.attemptsRemaining === 1 ? '' : 's'} before you'd lose it.`}
           </p>
           <Button className="mt-4" onClick={finish}>
             Done

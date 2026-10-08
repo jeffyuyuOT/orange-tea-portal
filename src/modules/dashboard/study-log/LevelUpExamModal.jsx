@@ -8,11 +8,18 @@ import { buildLevelUpExamQuestionSet } from '../../../lib/examBuilders'
 import { gradeQuestion } from '../../../lib/quizGrading'
 import { startAdvancedDefenseClock } from '../../../lib/trainingJourney'
 
-// A Phase 1-3 Level-Up Exam — self-graded, every question must be correct
-// to pass (Jeff: "要全部都答對才能通過這個phase"). Drawn from must-know items
-// across every phase up to and including `phaseNumber`. On pass, bumps
+// A Phase 1-3 Level-Up Exam — self-graded. Drawn from must-know items across
+// every phase up to and including `phaseNumber`. On pass, bumps
 // profiles.training_journey_phase and tells the parent (TrainingJourneyPage)
 // to show the "🎉 Congratulations, Level-Up Unlocked!" celebration.
+//
+// Jeff originally: "要全部都答對才能通過這個phase" — every question had to be
+// correct, no tolerance. Jeff, 2026-10-08: "各個phase level up exam題數設置
+// 後面也新增容錯率題數設置" — each phase now has its own error-tolerance
+// count (`training_journey_phases.level_up_error_tolerance`, migration
+// 0099, admin-configurable in PhaseSettingTab.jsx), passed in as
+// `errorTolerance` and defaulting to 0 (the original all-correct behavior)
+// when unset.
 //
 // Jeff, 2026-10-07 (8-point phase-merge request, point 8): `recoversQualified`
 // is true only when a previously-qualified, now-disqualified profile is
@@ -26,7 +33,7 @@ import { startAdvancedDefenseClock } from '../../../lib/trainingJourney'
 // through Formal Exam instead), then reverted the same day once we confirmed
 // this — not a first-time promotion — was what Phase 3's setting was always
 // for. See PhaseSettingTab.jsx's comment for the full back-and-forth.
-export default function LevelUpExamModal({ phaseNumber, phaseLabel, recoversQualified, onClose, onPassed }) {
+export default function LevelUpExamModal({ phaseNumber, phaseLabel, errorTolerance = 0, recoversQualified, onClose, onPassed }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
   const [questions, setQuestions] = useState([])
@@ -52,7 +59,7 @@ export default function LevelUpExamModal({ phaseNumber, phaseLabel, recoversQual
       return row
     })
     const total = questions.length
-    const passed = correct === total
+    const passed = total - correct <= errorTolerance
 
     const { data: attempt } = await supabase
       .from('quiz_attempts')
@@ -99,8 +106,10 @@ export default function LevelUpExamModal({ phaseNumber, phaseLabel, recoversQual
           </p>
           <p className="mt-1 text-sm text-gray-500">
             {result.passed
-              ? 'Every question correct — you leveled up!'
-              : 'Every question needs to be correct to level up — give it another go once you review.'}
+              ? 'You leveled up!'
+              : errorTolerance > 0
+                ? `Up to ${errorTolerance} wrong answer${errorTolerance === 1 ? '' : 's'} is OK, but you missed more than that this time — give it another go once you review.`
+                : 'Every question needs to be correct to level up — give it another go once you review.'}
           </p>
           <Button className="mt-4" onClick={finish}>
             {result.passed ? 'Continue' : 'Close'}

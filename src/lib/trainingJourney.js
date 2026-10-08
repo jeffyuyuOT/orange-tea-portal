@@ -179,29 +179,55 @@ async function titleDefenseMonths() {
 // Called once profiles.qualified first becomes true (Formal Exam reviewed-
 // pass, or the manager's direct "Mark as Qualified") — starts the Advanced
 // title-defense clock. Jeff: "Qualified advanced跟master員工每三個月(從獲得
-// title或成功防衛title計算)會考一次試".
+// title或成功防衛title計算)會考一次試". Also resets title_defense_attempts_used
+// to 0 — a brand-new cycle starts with a clean slate (point 2 below).
 export async function startAdvancedDefenseClock(profileId) {
   const months = await titleDefenseMonths()
   const dueAt = new Date()
   dueAt.setMonth(dueAt.getMonth() + months)
-  await supabase.from('profiles').update({ title_defense_due_at: dueAt.toISOString() }).eq('id', profileId)
+  await supabase.from('profiles').update({ title_defense_due_at: dueAt.toISOString(), title_defense_attempts_used: 0 }).eq('id', profileId)
 }
 
 // A Formal Exam attempt taken as a title defense (profiles.qualified is
 // already true and the defense is due) — self-graded, all-correct required.
 // Jeff, 2026-10-07 (8-point phase-merge request, point 4): "lose advanced
-// title的user會直接disqualified" — the old 3-strike grace is gone; a single
-// failed defense attempt now instantly disqualifies, same no-grace rule
-// Master's own defense always had. Drops back to Practitioner (phase 2) and
-// stamps title_loss_* (point 5's one-time login popup reads these).
+// title的user會直接disqualified" — the old 3-strike grace was removed, a
+// single failed defense attempt instantly disqualified, same no-grace rule
+// Master's own defense always had.
+//
+// Jeff, 2026-10-08: brought the grace back — "title defense quiz失敗的話，
+// 應該還有2次機會，所以总共可以考3次" — 2 extra chances after a first
+// failure (3 attempts total) before disqualifying, tracked by
+// profiles.title_defense_attempts_used (re-added by migration 0099, same
+// column point 4 had dropped). A failed attempt that still has chances left
+// just increments the counter and leaves title_defense_due_at untouched —
+// still overdue, so "Defend Title" stays available to retry right away. Only
+// the 3rd consecutive failure actually disqualifies: drops back to
+// Practitioner (phase 2) and stamps title_loss_* (point 5's one-time login
+// popup reads these). Independently, migration 0099's daily
+// expire_overdue_title_defenses() pg_cron job disqualifies anyone who lets 7
+// days pass since becoming overdue without passing — whether or not they
+// have attempts left — so someone who never logs in to retry still gets
+// demoted, not just someone who fails 3 times.
 export async function recordFormalDefenseResult(profileId, passed) {
   if (passed) {
     const months = await titleDefenseMonths()
     const dueAt = new Date()
     dueAt.setMonth(dueAt.getMonth() + months)
-    await supabase.from('profiles').update({ title_defense_due_at: dueAt.toISOString() }).eq('id', profileId)
-    return { disqualified: false }
+    await supabase
+      .from('profiles')
+      .update({ title_defense_due_at: dueAt.toISOString(), title_defense_attempts_used: 0 })
+      .eq('id', profileId)
+    return { disqualified: false, attemptsRemaining: null }
   }
+
+  const { data: freshProfile } = await supabase.from('profiles').select('title_defense_attempts_used').eq('id', profileId).single()
+  const attemptsUsed = (freshProfile?.title_defense_attempts_used ?? 0) + 1
+  if (attemptsUsed < 3) {
+    await supabase.from('profiles').update({ title_defense_attempts_used: attemptsUsed }).eq('id', profileId)
+    return { disqualified: false, attemptsRemaining: 3 - attemptsUsed }
+  }
+
   await supabase
     .from('profiles')
     .update({
@@ -210,12 +236,13 @@ export async function recordFormalDefenseResult(profileId, passed) {
       training_journey_phase: 2,
       has_master_title: false,
       title_defense_due_at: null,
+      title_defense_attempts_used: 0,
       title_loss_from: 'Advanced',
       title_loss_to: 'Practitioner',
       title_loss_at: new Date().toISOString(),
     })
     .eq('id', profileId)
-  return { disqualified: true }
+  return { disqualified: true, attemptsRemaining: 0 }
 }
 
 // A Master Exam attempt — either the first-ever attempt (Phase 4 just
@@ -223,9 +250,12 @@ export async function recordFormalDefenseResult(profileId, passed) {
 // TrainingJourneyPage.jsx's showMasterVoluntary) or a title-defense re-sit.
 // Self-graded with error_tolerance (any must-know miss always fails
 // regardless). Jeff: passing always (re-)grants Master and resets the
-// shared title-defense cadence. A failed DEFENSE (not a voluntary retry)
-// drops straight back to Advanced (qualified stays true) — no grace, same
-// as Formal's defense post-merge — and stamps title_loss_*.
+// shared title-defense cadence (and title_defense_attempts_used — see
+// recordFormalDefenseResult's comment, 2026-10-08, for the full grace-period
+// story, which applies symmetrically here). A failed DEFENSE (not a
+// voluntary retry) gets the same 3-attempts-total grace as Formal's defense
+// before actually dropping back to Advanced (qualified stays true) and
+// stamping title_loss_*.
 export async function recordMasterExamResult(profileId, passed, { wasDefense }) {
   if (passed) {
     const months = await titleDefenseMonths()
@@ -237,11 +267,20 @@ export async function recordMasterExamResult(profileId, passed, { wasDefense }) 
         has_master_title: true,
         master_title_earned_at: new Date().toISOString(),
         title_defense_due_at: dueAt.toISOString(),
+        title_defense_attempts_used: 0,
       })
       .eq('id', profileId)
-    return { lostMaster: false }
+    return { lostMaster: false, attemptsRemaining: null }
   }
-  if (!wasDefense) return { lostMaster: false } // a voluntary attempt that just didn't pass yet — nothing changes
+  if (!wasDefense) return { lostMaster: false, attemptsRemaining: null } // a voluntary attempt that just didn't pass yet — nothing changes
+
+  const { data: freshProfile } = await supabase.from('profiles').select('title_defense_attempts_used').eq('id', profileId).single()
+  const attemptsUsed = (freshProfile?.title_defense_attempts_used ?? 0) + 1
+  if (attemptsUsed < 3) {
+    await supabase.from('profiles').update({ title_defense_attempts_used: attemptsUsed }).eq('id', profileId)
+    return { lostMaster: false, attemptsRemaining: 3 - attemptsUsed }
+  }
+
   const months = await titleDefenseMonths()
   const dueAt = new Date()
   dueAt.setMonth(dueAt.getMonth() + months)
@@ -250,12 +289,13 @@ export async function recordMasterExamResult(profileId, passed, { wasDefense }) 
     .update({
       has_master_title: false,
       title_defense_due_at: dueAt.toISOString(),
+      title_defense_attempts_used: 0,
       title_loss_from: 'Master',
       title_loss_to: 'Advanced',
       title_loss_at: new Date().toISOString(),
     })
     .eq('id', profileId)
-  return { lostMaster: true }
+  return { lostMaster: true, attemptsRemaining: 0 }
 }
 
 // --- Roster/Bulletin display (System Setting > Roster Name Display Format) -
