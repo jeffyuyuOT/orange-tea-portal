@@ -7,10 +7,21 @@ import { ROLE_LABELS, canAccessPage } from '../../lib/permissions'
 import { useClockInOut } from '../../lib/useClockInOut'
 import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
 import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
+import Modal from '../ui/Modal'
+import { supabase } from '../../lib/supabaseClient'
 
 export default function AppShell() {
-  const { profile, effectivePages, accessibleStores, signOut, unreadMessageCount, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates } =
-    useAuth()
+  const {
+    profile,
+    effectivePages,
+    accessibleStores,
+    signOut,
+    unreadMessageCount,
+    rosterUpdates,
+    hasFormulaUpdates,
+    hasBulletinUpdates,
+    refreshProfile,
+  } = useAuth()
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // Jeff, 2026-10-02: "桌面捷徑有辦法有訊息提示嗎" — a badge/dot on the
@@ -80,6 +91,27 @@ export default function AppShell() {
   useEffect(() => {
     setMobileNavOpen(false)
   }, [location.pathname])
+
+  // Jeff, 2026-10-08: "被qualified的員工，登入系統時中間會跳出視窗顯示
+  // Congratulations! You have officially qualified as an Advanced staff
+  // member." — a one-time congratulations popup, shown the next time a
+  // newly-Qualified staff member logs in (not immediately after passing the
+  // Formal Exam itself — that modal's result screen is unaffected). Unseen
+  // whenever qualified_popup_seen_at is missing or older than qualified_at,
+  // mirroring the title_loss popup's seen/at pair below it — so a staff
+  // member who loses and later re-earns the title (disqualify -> recover via
+  // Level-Up Exam) sees this again too, since recovering stamps a fresh
+  // qualified_at.
+  const showQualifiedPopup =
+    !!profile?.qualified &&
+    !!profile.qualified_at &&
+    (!profile.qualified_popup_seen_at || profile.qualified_popup_seen_at < profile.qualified_at)
+  const dismissQualifiedPopup = async () => {
+    if (profile?.id) {
+      await supabase.from('profiles').update({ qualified_popup_seen_at: new Date().toISOString() }).eq('id', profile.id)
+    }
+    refreshProfile?.()
+  }
 
   return (
     <div className="flex h-screen w-full flex-col bg-white">
@@ -194,6 +226,20 @@ export default function AppShell() {
           tapping 📷 again before they'd even registered the first result. */}
       {canClockInOut && clockInOut.feedback && (
         <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
+      )}
+
+      {showQualifiedPopup && (
+        <Modal open onClose={dismissQualifiedPopup} title="🎉 Congratulations!">
+          <p className="text-sm text-gray-700">You have officially qualified as an Advanced staff member.</p>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={dismissQualifiedPopup}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              OK
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )

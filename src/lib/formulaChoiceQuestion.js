@@ -27,6 +27,24 @@ function parseQuantity(text) {
   return { value: parseFloat(m[1]), suffix: m[2] }
 }
 
+// Jeff, 2026-10-08: two recorded quantity_text strings can mean the exact same
+// real-world amount while looking different ("1" vs "1.0" — e.g. Winter
+// Lemon's Sugar (M) is "1" while Gelato JTMGT's was typed "1.0") because
+// formula entry doesn't enforce one canonical format. A plain string compare
+// (`v !== quantityText`) doesn't catch that, so a distractor pool could hand
+// back an option that is numerically identical to the correct answer — two
+// choices a staff member has no real way to tell apart, since they're the
+// same quantity. This compares parsed numeric value + unit instead of raw
+// text, falling back to exact string equality when either side doesn't parse
+// as a number (e.g. "a pinch").
+function sameQuantity(a, b) {
+  if (a === b) return true
+  const pa = parseQuantity(a)
+  const pb = parseQuantity(b)
+  if (!pa || !pb) return false
+  return pa.value === pb.value && pa.suffix.trim() === pb.suffix.trim()
+}
+
 // Falls back to synthesized wrong answers (scaled versions of the real
 // quantity) when there aren't enough *other* real quantities on record for
 // this ingredient to use as distractors. `multipliers` controls how far off
@@ -68,7 +86,15 @@ function finish(questionText, quantityText, distractors) {
 // record and quantityText wasn't a parseable number to scale) — the caller
 // should keep the question as typed fill-in-the-blank in that case.
 export function buildQuantityChoiceQuestion({ questionText, quantityText, realPool }) {
-  const distractors = shuffle((realPool ?? []).filter((v) => v !== quantityText)).slice(0, 3)
+  const seen = [quantityText]
+  const candidates = shuffle((realPool ?? []).filter((v) => !sameQuantity(v, quantityText)))
+  const distractors = []
+  for (const v of candidates) {
+    if (distractors.length >= 3) break
+    if (seen.some((s) => sameQuantity(s, v))) continue // same real quantity already picked under a different string
+    seen.push(v)
+    distractors.push(v)
+  }
   if (distractors.length < 3) {
     distractors.push(...synthesizeDistractors(quantityText, 3 - distractors.length, [quantityText, ...distractors]))
   }
@@ -88,12 +114,23 @@ const HARD_SCALE_FACTORS = [0.8, 1.2, 0.9, 1.1, 0.85, 1.15, 0.7, 1.3]
 
 export function buildHardQuantityChoiceQuestion({ questionText, quantityText, realPool }) {
   const parsedCorrect = parseQuantity(quantityText)
-  const closest = (realPool ?? [])
-    .filter((v) => v !== quantityText)
+  const ranked = (realPool ?? [])
+    .filter((v) => !sameQuantity(v, quantityText))
     .map((v) => ({ v, parsed: parseQuantity(v) }))
     .filter(({ parsed }) => parsed && parsedCorrect && parsed.suffix === parsedCorrect.suffix)
     .sort((a, b) => Math.abs(a.parsed.value - parsedCorrect.value) - Math.abs(b.parsed.value - parsedCorrect.value))
     .map(({ v }) => v)
+
+  // Two "closest" candidates can still be the same real quantity typed two
+  // different ways (e.g. "1.2" recorded for more than one item) — dedupe by
+  // value, not just exact text, so the 4 choices never contain a repeat.
+  const seen = [quantityText]
+  const closest = []
+  for (const v of ranked) {
+    if (seen.some((s) => sameQuantity(s, v))) continue
+    seen.push(v)
+    closest.push(v)
+  }
 
   const distractors = closest.slice(0, 3)
   if (distractors.length < 3) {
