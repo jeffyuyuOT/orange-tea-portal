@@ -14,7 +14,10 @@ import { recordFormalDefenseResult } from '../../../lib/trainingJourney'
 //    manager/admin reviews the attempt in Learning Tracker and ticks Pass
 //    (which is what actually grants Qualified), UNLESS this profile is
 //    already qualified (re-attempting voluntarily before a defense is due),
-//    in which case it still auto-passes with no reviewer needed.
+//    in which case it still auto-passes with no reviewer needed. A staff
+//    member recovering from a lost Advanced title does NOT come back here —
+//    that's Phase 3's own Level-Up Exam (LevelUpExamModal's
+//    recoversQualified), not a new Formal Exam review (Jeff, point 8).
 //  - isDefense=true (the recurring title-defense re-sit, only reachable
 //    once title_defense_due_at has passed, cadence/question-count/error-
 //    tolerance from title_defense_settings): self-graded — a missed

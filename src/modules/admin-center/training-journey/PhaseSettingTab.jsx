@@ -9,6 +9,17 @@ import Button from '../../../components/ui/Button'
 // hours worked fill each phase (1-3 only; Phase 4/Master fills by memorized
 // items instead, see TrainingJourneyPage.jsx), and each phase's Level-Up
 // Exam question count.
+//
+// Jeff, 2026-10-08: briefly removed Phase 3's question-count field here
+// ("phase之後是take final exam，所以應該都是看final exam那邊的設定"), on the
+// assumption Phase 3 never has its own Level-Up Exam. Reverted the same day
+// once we confirmed what it actually gates: a first-time Phase-3 promotion
+// does skip straight to the Formal Exam (point 7, unaffected either way),
+// but a disqualified staff member RECOVERING the Advanced title retakes
+// Phase 3's own Level-Up Exam specifically — self-graded, restores Qualified
+// directly, no new manager review (point 8's original "Level-Up-Exam-only"
+// recovery) — so this field is still live and needed. See
+// TrainingJourneyPage.jsx / LevelUpExamModal.jsx.
 export default function PhaseSettingTab() {
   const [phases, setPhases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -58,7 +69,9 @@ export default function PhaseSettingTab() {
       <p className="mb-4 text-sm text-gray-500">
         Each phase's color (used on its Training Journey card, and — once a staff member reaches it — their roster
         name/time if System Setting's "Roster Name Display Format" is set to show titles), how many hours worked
-        fill it, and how many questions its Level-Up Exam draws.
+        fill it, and how many questions its Level-Up Exam draws. Phase 3's Level-Up Exam is only ever used to
+        recover a lost Advanced title after a failed defense — a first-time promotion into Advanced always goes
+        through the Formal Exam instead.
       </p>
 
       <div className="space-y-3">

@@ -48,7 +48,11 @@ import MasterExamModal from './MasterExamModal'
 // Exam. A staff member RECOVERING from a lost Advanced title (disqualified,
 // `qualified_at` already set) is excluded from that skip and instead sees
 // the ordinary Phase 3 Level-Up Exam button — passing it restores Qualified
-// directly, without a new Formal Exam review (point 8).
+// directly, without a new Formal Exam review (point 8). Jeff, 2026-10-08:
+// briefly tried collapsing both onto the Formal Exam ("phase之後是take
+// final exam，所以應該都是看final exam那邊的設定"), then reverted once we
+// confirmed the Level-Up Exam setting was specifically for this recovery
+// case, not a redundant first-timer path — see PhaseSettingTab.jsx.
 //
 // Jeff, 2026-10-07 (point 2): before opening either Formal or Master Exam
 // as a title defense, checks for any must-know item in an already-passed
@@ -56,9 +60,18 @@ import MasterExamModal from './MasterExamModal'
 // exist because the item was added AFTER that phase's own Level-Up Exam was
 // passed. If any are found, a blocking modal lists them (no "continue
 // anyway") instead of opening the exam.
+// Jeff, 2026-10-08: "先讓其他user的training journey可以看到內容" — this used
+// to hard-gate the whole page to the developer role only (`canView =
+// viewerProfile?.role === 'developer'`), showing everyone else a "Coming
+// Soon" placeholder no matter what — a soft-launch flag from while this was
+// still being built, left in place after it was actually finished. Removed
+// now that Jeff wants to test the real flow with a 'staff' account (and
+// everyone else to actually see their own journey) — isSelf/role-specific
+// behavior elsewhere in this file (exam buttons hidden on Learning Tracker's
+// manager view, etc.) is unaffected, this only controlled whether the page
+// showed real content AT ALL.
 export default function TrainingJourneyPage({ profileId, isSelf }) {
-  const { currentStoreId, profile: viewerProfile } = useAuth()
-  const canView = viewerProfile?.role === 'developer'
+  const { currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState(null)
   const [targetProfile, setTargetProfile] = useState(null)
@@ -71,10 +84,6 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   const [congrats, setCongrats] = useState(null)
 
   const reload = useCallback(async () => {
-    if (!canView) {
-      setLoading(false)
-      return
-    }
     setLoading(true)
     const [journeyData, { data: profileRow }] = await Promise.all([
       loadTrainingJourneyData(profileId, currentStoreId),
@@ -87,7 +96,7 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
     setData(journeyData)
     setTargetProfile(profileRow)
     setLoading(false)
-  }, [profileId, currentStoreId, canView])
+  }, [profileId, currentStoreId])
 
   useEffect(() => {
     reload()
@@ -100,16 +109,6 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
       .from(table)
       .upsert({ profile_id: profileId, [idField]: item.id, memorized: value, memorized_at: value ? new Date().toISOString() : null }, { onConflict: `profile_id,${idField}` })
     reload()
-  }
-
-  if (!canView) {
-    return (
-      <div className="rounded-2xl border border-brand-100 bg-white px-4 py-16 text-center">
-        <p className="text-2xl">🚧</p>
-        <p className="mt-2 text-lg font-semibold text-gray-700">Coming Soon</p>
-        <p className="mt-1 text-sm text-gray-400">Training Journey is still being tested — check back soon.</p>
-      </div>
-    )
   }
 
   if (loading || !data || !targetProfile) return <LoadingSpinner />

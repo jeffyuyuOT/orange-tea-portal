@@ -21,6 +21,11 @@ import { startAdvancedDefenseClock } from '../../../lib/trainingJourney'
 // Exam review. On pass in that case, this also restores `qualified: true`
 // and restarts the Advanced title-defense clock, without touching Formal
 // Exam at all.
+//
+// Jeff, 2026-10-08: briefly removed for Phase 3 entirely (recovery routed
+// through Formal Exam instead), then reverted the same day once we confirmed
+// this — not a first-time promotion — was what Phase 3's setting was always
+// for. See PhaseSettingTab.jsx's comment for the full back-and-forth.
 export default function LevelUpExamModal({ phaseNumber, phaseLabel, recoversQualified, onClose, onPassed }) {
   const { profile, currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
