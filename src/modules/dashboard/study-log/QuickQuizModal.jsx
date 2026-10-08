@@ -22,6 +22,17 @@ function itemLabel(item) {
   return item?.name_zh ? `${item.name_en} (${item.name_zh})` : item?.name_en ?? 'this item'
 }
 
+// Jeff, 2026-10-08 (examBuilders.js got the same fix — see its own comment):
+// a quantity_text of literal "see table" means the real amount depends on a
+// lookup table, not a fixed quantity, and gets typed inconsistently
+// ("See Table"/"see table"/"See table") — left in, it becomes a nonsense
+// question whose "wrong answers" are just other rows' own "see table" in a
+// different casing. Dropped from both the candidate pool and the real-
+// quantity distractor pool here too.
+function isSeeTablePlaceholder(quantityText) {
+  return (quantityText ?? '').trim().toLowerCase() === 'see table'
+}
+
 // Auto-generated "what's the quantity of this ingredient" questions, built
 // live from formula_item_ingredients rather than curated in the quiz bank —
 // any ingredient with a recorded quantity_text on a memorized item is fair
@@ -71,7 +82,11 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
   // questions, same convention menuExport.js already uses for "the"
   // ingredient list of an item (`!ing.is_hot`).
   const candidates = (rows ?? []).filter(
-    (r) => !excludedIds.has(r.ingredient_id) && !(sizedItemIds.has(r.formula_item_id) && !r.size_id) && !r.is_hot
+    (r) =>
+      !excludedIds.has(r.ingredient_id) &&
+      !(sizedItemIds.has(r.formula_item_id) && !r.size_id) &&
+      !r.is_hot &&
+      !isSeeTablePlaceholder(r.quantity_text)
   )
   if (!candidates.length) return []
 
@@ -79,6 +94,7 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
   // the pool of "real" wrong answers before falling back to synthesized ones.
   const byIngredient = {}
   ;(allRows ?? []).forEach((r) => {
+    if (isSeeTablePlaceholder(r.quantity_text)) return
     ;(byIngredient[r.ingredient_id] ??= new Set()).add(r.quantity_text)
   })
 

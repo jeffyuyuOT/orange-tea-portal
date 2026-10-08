@@ -12,6 +12,24 @@ function shuffle(arr) {
   return a
 }
 
+// Jeff, 2026-10-08: "15題如果遇到ingredient是see table這種就不要出題" — some
+// formula ingredient rows record quantity_text as the literal placeholder
+// "see table" (the real amount depends on a lookup table on the Formula
+// page, e.g. Milk Powder varying by hot-tea type — not a fixed quantity at
+// all), typed inconsistently ("See Table", "see table", "See table", ...).
+// Left in, these become a nonsense generated question: buildHardQuantityChoiceQuestion
+// still finds "other real quantities" to use as distractors (other rows'
+// own "see table" in a different casing), so the question's 4 choices all
+// just say "see table" with different capitalization — nothing a staff
+// member could actually answer about a real amount. Dropped entirely from
+// both the fill-blank candidate pool AND the real-quantity distractor pool
+// below, same treatment as an excluded ingredient (quiz_excluded_ingredients)
+// or a hot-serving row (is_hot) — never generate FROM it, never use it to
+// make some OTHER question's wrong answers look real.
+function isSeeTablePlaceholder(quantityText) {
+  return (quantityText ?? '').trim().toLowerCase() === 'see table'
+}
+
 // Jeff, 2026-10-07: "Must Appear in Exam的選項從商品編輯移除，重要的題目標註
 // important 1就好" — the per-item "guarantee this a slot" forcing mechanism
 // (migration 0093's must_appear_in_exam, and the splitForced/
@@ -84,6 +102,7 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
     .filter(
       (r) =>
         r.quantity_text?.trim() &&
+        !isSeeTablePlaceholder(r.quantity_text) &&
         r.ingredient_master?.name &&
         !r.is_hot &&
         !excludedIngredientIds.has(r.ingredient_id) &&
@@ -108,6 +127,7 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
     })
   const realQuantityPool = {}
   ;(allQuantityRows ?? []).forEach((r) => {
+    if (isSeeTablePlaceholder(r.quantity_text)) return
     ;(realQuantityPool[r.ingredient_id] ??= new Set()).add(r.quantity_text)
   })
   return { candidates, realQuantityPool }
