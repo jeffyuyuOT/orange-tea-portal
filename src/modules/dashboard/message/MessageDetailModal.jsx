@@ -17,6 +17,16 @@ function nameOf(p, nameByProfile) {
   return rosterDisplayName(withDisplayName) || p.email || 'Unknown'
 }
 
+// Jeff, 2026-10-08: a developer's "All — every store, every user" broadcast
+// (ComposeMessageModal's sendToAll, sender_name stamped literally 'System')
+// fans out to every staff member at every store, but a given viewer's RLS
+// visibility into `profiles` only covers their own store's colleagues — so
+// the "To:" line below resolved to a long "Unknown, Unknown, …" list for
+// every recipient outside the viewer's own store ("系統寄的信應該不用顯示收
+// 件者，要不然只是出現一堆unknown"). The recipient list isn't meaningful for
+// a company-wide broadcast anyway (everyone, by definition), so it's simply
+// hidden for a 'System'-sent message rather than attempted.
+
 // Jeff, 2026-09: opening a received Message can Reply / Reply All / Forward
 // — each just opens ComposeMessageModal pre-filled and linked back via
 // in_reply_to. No nested thread view — just a flat "new message that
@@ -192,7 +202,9 @@ export default function MessageDetailModal({ messageId, profile, onClose, onChan
       >
         <div className="mb-3 text-xs text-gray-500">
           <p>From: {message.sender_name}</p>
-          <p>To: {recipients.map((r) => nameOf(r.profiles, nameByProfile)).join(', ') || '—'}</p>
+          {message.sender_name !== 'System' && (
+            <p>To: {recipients.map((r) => nameOf(r.profiles, nameByProfile)).join(', ') || '—'}</p>
+          )}
           <p>{new Date(message.created_at).toLocaleString()}</p>
         </div>
 
