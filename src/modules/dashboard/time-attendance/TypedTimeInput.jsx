@@ -59,10 +59,24 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
   // empty time — same "not filled in yet" signal a blank native time input
   // gave callers before, so AttendanceCellEditModal's existing validation
   // (blocking Save on a new row with no time) keeps working unchanged.
+  //
+  // Jeff, 2026-10-08: "輸入分鐘的時候，輸入一個數字前面常會自動帶一個0...輸入2
+  // 後就會變成02，就沒辦法再輸入5" — typing a single minute digit like "2" was
+  // already a numerically valid 0-59 value, so commit() fired immediately with
+  // it, which round-tripped straight back through the `value` prop into the
+  // resync effect above — and THAT pads with `.padStart(2, '0')`, rewriting
+  // the box to "02" before a second digit could ever be typed. Hour never
+  // showed this because its own resync (`h % 12`) never adds a leading zero
+  // to a single digit, so the mid-type round-trip was invisible there; minute
+  // always zero-pads, so it wasn't. Requiring 2 digits before minute commits
+  // (same "wait for both digits" idea normalizeTypedHour already uses, just
+  // applied to timing instead of 24h-conversion) stops the premature
+  // round-trip; a deliberately single-digit minute (meaning e.g. "05") still
+  // gets padded and committed properly on blur — see minute's onBlur below.
   function commit(nextHour, nextMinute, nextAmpm) {
     const h12 = Number(nextHour)
     const m = Number(nextMinute)
-    if (!nextHour || h12 < 1 || h12 > 12 || !nextMinute || !Number.isFinite(m) || m < 0 || m > 59) {
+    if (!nextHour || h12 < 1 || h12 > 12 || !nextMinute || nextMinute.length < 2 || !Number.isFinite(m) || m < 0 || m > 59) {
       onChange('')
       return
     }
@@ -137,6 +151,16 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
           const v = digitsOnly(e.target.value)
           setMinute(v)
           commit(hour, v, ampm)
+        }}
+        onBlur={() => {
+          // A deliberately single-digit minute (meaning e.g. "05") never
+          // auto-commits while typing any more (see commit()'s comment) —
+          // finalize it here instead, once the person's done with this box.
+          if (minute.length === 1) {
+            const padded = minute.padStart(2, '0')
+            setMinute(padded)
+            commit(hour, padded, ampm)
+          }
         }}
       />
       {/* Jeff, 2026-10-07: "改staff time log的時候，還是看不到am跟pm" — tried
