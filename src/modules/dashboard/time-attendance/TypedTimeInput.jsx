@@ -125,32 +125,41 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
           commit(hour, v, ampm)
         }}
       />
-      {/* Jeff, 2026-10-07: "改staff time log的時候，還是看不到am跟pm" — on
-          some Android builds this select's own closed-box label renders
-          with no visible text at all (box + chevron show, "AM"/"PM" doesn't),
-          while the hour/minute text inputs right next to it (same .input
-          class) render fine — so this is specific to how that browser themes
-          a native <select>'s chrome, not a general padding/sizing problem.
-          Two things stacked here: !py-2 + leading-normal (was !py-1.5, maybe
-          too tight for some builds' select chrome to fit a label in), AND an
-          explicit color/background/color-scheme forced directly on the
-          select itself — some Android WebViews re-theme a native select's
-          text/background independently of the page's own CSS (which already
-          sets color-scheme: light only up in index.css) unless the control's
-          own color/background are set explicitly, which .input never did. */}
-      <select
-        className="input w-20 !py-2 leading-normal"
-        style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
-        disabled={disabled}
-        value={ampm}
-        onChange={(e) => {
-          setAmpm(e.target.value)
-          commit(hour, minute, e.target.value)
-        }}
-      >
-        <option value="AM">AM</option>
-        <option value="PM">PM</option>
-      </select>
+      {/* Jeff, 2026-10-07: "改staff time log的時候，還是看不到am跟pm" — tried
+          forcing an explicit color/background + more vertical padding on a
+          native <select> here, since on some Android builds its closed-box
+          label rendered with no visible text at all (box + chevron show,
+          "AM"/"PM" doesn't) while the hour/minute text inputs right next to
+          it (same .input class) rendered fine.
+          Jeff, 2026-10-08: still broken on his own phone after that — "手機
+          版改staff log time是am,pm還是現實不出來，應該是格子太小". A fixed-
+          width native select has no reliable way to control how much of
+          that width its own OS-drawn chrome (the dropdown arrow, and
+          per-device/per-skin built-in padding around it — these vary by
+          Android build and aren't addressable from CSS) eats before any is
+          left for the label text, so shrinking the font wouldn't have fixed
+          it everywhere either — just made it fail on a different box width.
+          Replaced the native select entirely with two plain buttons: a
+          segmented AM/PM toggle renders its own text exactly like any other
+          button label, immune to native-select theming on any device. */}
+      <div className="flex overflow-hidden rounded-lg border border-gray-300">
+        {['AM', 'PM'].map((period) => (
+          <button
+            key={period}
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setAmpm(period)
+              commit(hour, minute, period)
+            }}
+            className={`px-2.5 py-1.5 text-xs font-semibold ${
+              ampm === period ? 'bg-brand-500 text-white' : 'bg-white text-gray-600'
+            }`}
+          >
+            {period}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
