@@ -335,6 +335,14 @@ export default function MessagePage() {
   function renderRow(item, { nested = false, supportBadge = null, threadCount = 0, expanded = false, onToggle = null } = {}) {
     const unread = item.origin === 'received' && !item.readAt
     const isReply = !!item.in_reply_to
+    // Jeff, 2026-10-08: "developer的sent裡如果有系統公告信，後面的to誰統一寫
+    // 成to all user" — a developer's "All" broadcast (sender_name stamped
+    // 'System' — see ComposeMessageModal) fans out to every active user at
+    // every store, so joining every one of those names into this one-line
+    // row made it balloon to several lines tall. Collapsed to a fixed "To:
+    // All Users" for a System-sent row below; toNames (and the per-name
+    // lookup it drives) stays unused in that case, same as any other sent
+    // row whose actual recipient list isn't worth computing for display.
     const toNames = item.origin === 'sent' ? (item.toProfiles ?? []).map((p) => nameOf(p, item.store_id, nameByStoreProfile)) : []
     const selected = selectedIds.has(item.id)
     return (
@@ -395,8 +403,12 @@ export default function MessagePage() {
           {threadCount > 0 && !expanded && <span className="text-xs text-gray-400">+{threadCount} in thread</span>}
         </div>
         <span className="shrink-0 text-xs text-gray-400">
-          {item.origin === 'sent' ? `To: ${toNames.join(', ') || '—'}` : `From: ${item.sender_name}`} ·{' '}
-          {new Date(item.created_at).toLocaleString()}
+          {item.origin === 'sent'
+            ? item.sender_name === 'System'
+              ? 'To: All Users'
+              : `To: ${toNames.join(', ') || '—'}`
+            : `From: ${item.sender_name}`}{' '}
+          · {new Date(item.created_at).toLocaleString()}
         </span>
       </div>
     )
@@ -441,17 +453,27 @@ export default function MessagePage() {
           per Jeff's spec for managing messages across several stores at once. */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1.5">
-          {/* Jeff, 2026-10-02: "所有選日期的選項都要有防呆檢查" — same
-              native min/max guard AttendanceLogTable's own From/To date
-              filter already uses, so picking an end date earlier than the
-              start (or vice versa) simply isn't selectable in the date
-              picker, rather than silently returning zero/wrong results. */}
+          {/* Jeff, 2026-10-02: "所有選日期的選項都要有防呆檢查" — originally
+              given the same live min/max guard as AttendanceLogTable's own
+              From/To filter. Jeff, 2026-10-04 ("所有有時間選擇邏輯的都跟申請
+              leave一樣"): that live `max={dateTo}` on the start field had the
+              same shape as Apply Leave's old bug — it could lock this field
+              from moving past whatever dateTo already held. Picking a start
+              date past the current end now just pushes the end forward to
+              match, instead of trapping the picker; the end field keeps its
+              own live `min={dateFrom}` (never the problem side, and there's
+              no submit step here for a confirm-time check to defer to — an
+              inverted range here can only filter the list down to nothing,
+              never save bad data). */}
           <input
             type="date"
             className="input w-auto"
             value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value
+              setDateFrom(next)
+              if (dateTo && next > dateTo) setDateTo(next)
+            }}
           />
           <span className="text-sm text-gray-400">–</span>
           <input

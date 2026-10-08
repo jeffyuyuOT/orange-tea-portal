@@ -99,10 +99,15 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
     // Broadcast mode ignores the same-store candidate picker entirely — the
     // recipient set is every active user, every store, resolved fresh at
     // send time rather than from whatever happened to be in `candidates`.
+    // Jeff, 2026-10-08: "公告信不用寄給training, 2d maker跟accountant" — same
+    // NON_PICKABLE_STAFF_ROLES exclusion the same-store picker above already
+    // applies (training's a weekly-code account, qr_code_maker's a device
+    // account, accountant's an external bookkeeper's login — none of them a
+    // real front-line staff member a company-wide announcement is for).
     let finalRecipientIds = recipientIds
     if (sendToAll) {
-      const { data: allProfiles } = await supabase.from('profiles').select('id').eq('is_active', true).neq('id', senderProfile.id)
-      finalRecipientIds = (allProfiles ?? []).map((p) => p.id)
+      const { data: allProfiles } = await supabase.from('profiles').select('id, role').eq('is_active', true).neq('id', senderProfile.id)
+      finalRecipientIds = (allProfiles ?? []).filter((p) => !NON_PICKABLE_STAFF_ROLES.includes(p.role)).map((p) => p.id)
     }
 
     const { data: msg, error } = await supabase
