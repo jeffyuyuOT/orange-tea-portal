@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient'
 import { filterVisibleForStore } from './storeVisibility'
-import { weightedSample } from './quizSelection'
+import { weightedSampleOnePerGroup } from './quizSelection'
 import { buildHardQuantityChoiceQuestion, isNumericQuantity } from './formulaChoiceQuestion'
 
 function shuffle(arr) {
@@ -146,10 +146,24 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
 // unreliable typed answer — same rule applies to the Top-10-stays-typed
 // branch below, since "most rigorous, typed" only makes sense for an actual
 // number to type.
-function selectFillBlankQuestions({ candidates, fillBlankTarget, top10Weight, realQuantityPool, forceMultipleChoice = false }) {
+function selectFillBlankQuestions({
+  candidates,
+  fillBlankTarget,
+  top10Weight,
+  realQuantityPool,
+  forceMultipleChoice = false,
+  excludeDrinkIds,
+}) {
   if (!candidates.length || fillBlankTarget <= 0) return []
   const weightOf = (c) => (c.topTen ? top10Weight : 1)
-  const selected = weightedSample(candidates, weightOf, Math.min(fillBlankTarget, candidates.length))
+  // Jeff, 2026-10-08: "不要抓到同樣的飲料，除非可以抓的飲料比題數少" — group by
+  // drink (a candidate with no linked drink at all, e.g. a bank fill-blank
+  // question with no formula item, is never grouped with anything else —
+  // `|| c.localId` keeps it its own singleton group) so two fill-blank
+  // questions about the same drink only both get asked once every other
+  // eligible drink already has one.
+  const groupOf = (c) => c.formulaItemId || `solo-${c.localId}`
+  const selected = weightedSampleOnePerGroup(candidates, weightOf, groupOf, Math.min(fillBlankTarget, candidates.length), excludeDrinkIds)
   return selected
     .map((q) => {
       if (!q.isGenerated) return q
@@ -276,11 +290,16 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
   const shortfall = questionCount - mcSelected.length - fillBlankSelected.length
   if (shortfall > 0) {
     const usedIds = new Set(fillBlankSelected.map((f) => f.localId))
+    // excludeDrinkIds: fillBlankDrinkIds — this shortfall top-up is a SECOND
+    // selectFillBlankQuestions call for the same attempt, so without this it
+    // could land back on a drink the first call already used while another
+    // eligible drink was still sitting unused.
     const extra = selectFillBlankQuestions({
       candidates: allFillBlankCandidates.filter((f) => !usedIds.has(f.localId)),
       fillBlankTarget: shortfall,
       top10Weight,
       realQuantityPool,
+      excludeDrinkIds: fillBlankDrinkIds,
     })
     fillBlankSelected = [...fillBlankSelected, ...extra]
   }
@@ -344,6 +363,13 @@ export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
       localId: q.id,
       type: q.question_type === 'multi' ? 'multi' : q.question_type === 'fill_blank' ? 'fill_blank' : 'choice',
       isMustKnow: q.formula_item_id ? mustKnowFormulaIds.has(q.formula_item_id) : q.shop_training_item_id ? mustKnowTrainingIds.has(q.shop_training_item_id) : false,
+      // Jeff, 2026-10-08: selectFillBlankQuestions groups fill-blank
+      // candidates by `formulaItemId` (camelCase) to dedupe-by-drink — a
+      // bank-sourced fill-blank question only carries the DB's snake_case
+      // `formula_item_id` until tagged here, so without this it would fall
+      // through to its own `solo-${localId}` group and never be recognized
+      // as "the same drink" as a generated candidate for that drink.
+      formulaItemId: q.formula_item_id,
     }
   }
   const mcPool = filtered.filter((q) => q.question_type !== 'fill_blank').map(tag)
@@ -409,8 +435,16 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
 
   const questionCount = phaseRows?.level_up_exam_question_count ?? 10
 
+  // formulaItemId (camelCase): same reasoning as Master Exam's tag() above —
+  // needed so a bank fill-blank question groups by drink correctly in
+  // selectFillBlankQuestions' dedupe-by-drink logic.
   function tag(q) {
-    return { ...q, localId: q.id, type: q.question_type === 'multi' ? 'multi' : q.question_type === 'fill_blank' ? 'fill_blank' : 'choice' }
+    return {
+      ...q,
+      localId: q.id,
+      type: q.question_type === 'multi' ? 'multi' : q.question_type === 'fill_blank' ? 'fill_blank' : 'choice',
+      formulaItemId: q.formula_item_id,
+    }
   }
   const mcPool = filtered.filter((q) => q.question_type !== 'fill_blank').map(tag)
   const bankFillBlankVisible = filtered.filter((q) => q.question_type === 'fill_blank').map(tag)
