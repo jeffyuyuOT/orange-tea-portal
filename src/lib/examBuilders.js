@@ -112,7 +112,8 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
     .map((r) => {
       const sizeSuffix = r.drink_sizes?.name ? ` (${r.drink_sizes.name})` : ''
       const groupSuffix = r.group_label ? ` (${r.group_label})` : ''
-      const sugarSuffix = (r.ingredient_master.name ?? '').trim().toLowerCase() === 'sugar' ? ' (Full Sugar)' : ''
+      const isSugar = (r.ingredient_master.name ?? '').trim().toLowerCase() === 'sugar'
+      const sugarSuffix = isSugar ? ' (Full Sugar)' : ''
       return {
         type: 'fill_blank',
         isGenerated: true,
@@ -122,6 +123,9 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
         question: `${r.formula_items.name_en}${r.formula_items.name_zh ? ` · ${r.formula_items.name_zh}` : ''} — how much ${r.ingredient_master.name}${groupSuffix}${sizeSuffix}${sugarSuffix}?`,
         correctAnswer: r.quantity_text.trim(),
         topTen: top10Ids.has(r.formula_items.id),
+        // Jeff, 2026-10-08: "我覺得問sugar的題目好像偏多" — see
+        // selectFillBlankQuestions' weightOf, which deweights this.
+        isSugar,
         formulaItemId: r.formula_items.id,
       }
     })
@@ -170,12 +174,23 @@ function selectFillBlankQuestions({
   candidates,
   fillBlankTarget,
   top10Weight,
+  sugarWeight = 1,
   realQuantityPool,
   forceMultipleChoice = false,
   excludeDrinkIds,
 }) {
   if (!candidates.length || fillBlankTarget <= 0) return []
-  const weightOf = (c) => (c.topTen ? top10Weight : 1)
+  // Jeff, 2026-10-08: "我覺得問sugar的題目好像偏多" — Sugar has a recorded
+  // quantity on nearly every drink/size (140 eligible rows vs. the next-most-
+  // common ingredient's 24), so without this it keeps winning its drink's own
+  // "which ingredient gets asked" pick (see groupOf below) just by being
+  // everywhere, not because anything actually weighted it up. sugarWeight < 1
+  // makes it less likely to win against a non-Sugar candidate for the SAME
+  // drink; a drink whose only eligible candidate happens to be Sugar can
+  // still surface it (weightedSampleOnePerGroup's own fallback), same
+  // "unless there's nothing else to pick" exception the drink-dedupe above
+  // already uses.
+  const weightOf = (c) => (c.topTen ? top10Weight : 1) * (c.isSugar ? sugarWeight : 1)
   // Jeff, 2026-10-08: "不要抓到同樣的飲料，除非可以抓的飲料比題數少" — group by
   // drink (a candidate with no linked drink at all, e.g. a bank fill-blank
   // question with no formula item, is never grouped with anything else —
@@ -238,6 +253,7 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
   const ratio = settings?.importance_ratio ?? { 1: 50, 2: 30, 3: 20 }
   const fillBlankRatio = settings?.fill_in_blank_ratio ?? 20
   const top10Weight = settings?.top10_fill_blank_weight ?? 3
+  const sugarWeight = settings?.sugar_fill_blank_weight ?? 0.3
 
   const { data: itemFlagRows } = await supabase
     .from('formula_items')
@@ -289,7 +305,7 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
   fillBlankTarget = Math.min(fillBlankTarget, allFillBlankCandidates.length)
   let mcTarget = questionCount - fillBlankTarget
 
-  let fillBlankSelected = selectFillBlankQuestions({ candidates: allFillBlankCandidates, fillBlankTarget, top10Weight, realQuantityPool })
+  let fillBlankSelected = selectFillBlankQuestions({ candidates: allFillBlankCandidates, fillBlankTarget, top10Weight, sugarWeight, realQuantityPool })
 
   const fillBlankDrinkIds = new Set(fillBlankSelected.map((c) => c.formulaItemId).filter(Boolean))
   const mcPool = mcVisible.filter((q) => !fillBlankDrinkIds.has(q.formula_item_id))
@@ -318,6 +334,7 @@ export async function buildFormalExamQuestionSet(profileId, storeId, { isDefense
       candidates: allFillBlankCandidates.filter((f) => !usedIds.has(f.localId)),
       fillBlankTarget: shortfall,
       top10Weight,
+      sugarWeight,
       realQuantityPool,
       excludeDrinkIds: fillBlankDrinkIds,
     })
@@ -351,7 +368,7 @@ export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
       ? supabase.from('shop_training_items').select('id, is_must_know').eq('store_id', storeId)
       : Promise.resolve({ data: [] }),
     supabase.from('master_quiz_settings').select('*').maybeSingle(),
-    supabase.from('formal_quiz_settings').select('fill_in_blank_ratio, top10_fill_blank_weight').maybeSingle(),
+    supabase.from('formal_quiz_settings').select('fill_in_blank_ratio, top10_fill_blank_weight, sugar_fill_blank_weight').maybeSingle(),
   ])
   const visibleFormulaItems = filterVisibleForStore(formulaItemRows ?? [], drinkStoreRows ?? [], 'formula_item_id', storeId)
   const mustKnowFormulaIds = new Set(visibleFormulaItems.filter((i) => i.is_must_know).map((i) => i.id))
@@ -364,6 +381,7 @@ export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
   const errorTolerance = defenseSettings ? defenseSettings.errorTolerance : settings?.error_tolerance ?? 0
   const fillBlankRatio = formalSettings?.fill_in_blank_ratio ?? 20
   const top10Weight = formalSettings?.top10_fill_blank_weight ?? 3
+  const sugarWeight = formalSettings?.sugar_fill_blank_weight ?? 0.3
 
   const [{ candidates: fillBlankCandidates, realQuantityPool }, { data: candidateQuestions }] = await Promise.all([
     buildGeneratedFillBlankCandidates([...visibleFormulaIdSet], { requireMustKnow: false }),
@@ -402,6 +420,7 @@ export async function buildMasterExamQuestionSet(storeId, { isDefense } = {}) {
     candidates: allFillBlankCandidates,
     fillBlankTarget,
     top10Weight,
+    sugarWeight,
     realQuantityPool,
     forceMultipleChoice: true, // Master Exam isn't Formal Quiz — no typed-answer generated questions, even for a ⭐ Top 10 drink
   }).map((q) => (q.isMustKnow === undefined ? { ...q, isMustKnow: q.formulaItemId ? mustKnowFormulaIds.has(q.formulaItemId) : false } : q))
@@ -430,7 +449,7 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
       ? supabase.from('shop_training_items').select('id, training_journey_phase').eq('store_id', storeId).eq('is_must_know', true)
       : Promise.resolve({ data: [] }),
     supabase.from('training_journey_phases').select('phase_number, level_up_exam_question_count').eq('phase_number', upToPhase).maybeSingle(),
-    supabase.from('formal_quiz_settings').select('fill_in_blank_ratio, top10_fill_blank_weight').maybeSingle(),
+    supabase.from('formal_quiz_settings').select('fill_in_blank_ratio, top10_fill_blank_weight, sugar_fill_blank_weight').maybeSingle(),
   ])
   const visibleFormulaItems = filterVisibleForStore(formulaItemRows ?? [], drinkStoreRows ?? [], 'formula_item_id', storeId)
   const formulaIds = new Set(visibleFormulaItems.filter((i) => i.training_journey_phase && i.training_journey_phase <= upToPhase).map((i) => i.id))
@@ -441,6 +460,7 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
 
   const fillBlankRatio = formalSettings?.fill_in_blank_ratio ?? 20
   const top10Weight = formalSettings?.top10_fill_blank_weight ?? 3
+  const sugarWeight = formalSettings?.sugar_fill_blank_weight ?? 0.3
 
   const [{ candidates: fillBlankCandidates, realQuantityPool }, { data: candidateQuestions }] = await Promise.all([
     buildGeneratedFillBlankCandidates([...formulaIds], { requireMustKnow: true }),
@@ -476,6 +496,7 @@ export async function buildLevelUpExamQuestionSet(storeId, upToPhase) {
     candidates: allFillBlankCandidates,
     fillBlankTarget,
     top10Weight,
+    sugarWeight,
     realQuantityPool,
     forceMultipleChoice: true, // Level-Up Exam isn't Formal Quiz — no typed-answer generated questions, even for a ⭐ Top 10 drink
   })

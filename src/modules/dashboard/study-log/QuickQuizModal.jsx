@@ -46,7 +46,7 @@ function isSeeTablePlaceholder(quantityText) {
 // weightedSample (not a plain shuffle) means a Top 10 drink's questions
 // come up top10Weight times as often as everything else, without risking
 // the same question twice in one quiz.
-async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new Set(), top10Weight = 1) {
+async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new Set(), top10Weight = 1, sugarWeight = 1) {
   if (!targetCount || !memorizedIds.length) return []
 
   const [{ data: rows }, { data: allRows }, { data: excludedRows }, { data: sizedItemRows }] = await Promise.all([
@@ -98,7 +98,17 @@ async function buildFormulaQuestions(memorizedIds, targetCount, top10Ids = new S
     ;(byIngredient[r.ingredient_id] ??= new Set()).add(r.quantity_text)
   })
 
-  return weightedSample(candidates, (c) => (top10Ids.has(c.formula_item_id) ? top10Weight : 1), targetCount)
+  // Jeff, 2026-10-08: "我覺得問sugar的題目好像偏多" — Quick Quiz's own pool is a
+  // flat weightedSample over every eligible ingredient row (unlike
+  // examBuilders.js's per-drink pick), so Sugar's sheer numbers (a row on
+  // nearly every drink/size) make this bias even more direct here — same
+  // sugar_fill_blank_weight setting/reasoning, see examBuilders.js's
+  // selectFillBlankQuestions.
+  return weightedSample(
+    candidates,
+    (c) => (top10Ids.has(c.formula_item_id) ? top10Weight : 1) * ((c.ingredient_master?.name ?? '').trim().toLowerCase() === 'sugar' ? sugarWeight : 1),
+    targetCount
+  )
     .map((row) => {
       const sizeSuffix = row.drink_sizes?.name ? ` (${row.drink_sizes.name})` : ''
       // The recipe's recorded quantity for the plain "Sugar" ingredient is
@@ -208,6 +218,7 @@ async function buildQuizSet(profile, storeId) {
   // Top 10 drink gets boosted consistently in both quiz types, not just one.
   let top10Ids = new Set()
   let top10Weight = 1
+  let sugarWeight = 1
   // Jeff, 2026-09-30: "quik quiz跟formal quize在Formula fill-in-the-blank
   // questions的部分只會從menu item裡抓取(非menu item不會抓)" (the flag was
   // renamed the same day, before shipping, to "Must-Know Items") -- narrow
@@ -220,16 +231,17 @@ async function buildQuizSet(profile, storeId) {
   const formulaTarget = Math.round((questionCount * formulaRatio) / 100)
   if (formulaTarget > 0) {
     const [{ data: formalSettings }, { data: itemFlagRows }] = await Promise.all([
-      supabase.from('formal_quiz_settings').select('top10_fill_blank_weight').maybeSingle(),
+      supabase.from('formal_quiz_settings').select('top10_fill_blank_weight, sugar_fill_blank_weight').maybeSingle(),
       supabase.from('formula_items').select('id, top_10, is_must_know').in('id', memorizedIds),
     ])
     top10Weight = formalSettings?.top10_fill_blank_weight ?? 3
+    sugarWeight = formalSettings?.sugar_fill_blank_weight ?? 0.3
     top10Ids = new Set((itemFlagRows ?? []).filter((r) => r.top_10).map((r) => r.id))
     mustKnowIds = new Set((itemFlagRows ?? []).filter((r) => r.is_must_know).map((r) => r.id))
   }
   const mustKnowMemorizedIds = memorizedIds.filter((id) => mustKnowIds.has(id))
   const formulaQuestions =
-    formulaTarget > 0 ? await buildFormulaQuestions(mustKnowMemorizedIds, formulaTarget, top10Ids, top10Weight) : []
+    formulaTarget > 0 ? await buildFormulaQuestions(mustKnowMemorizedIds, formulaTarget, top10Ids, top10Weight, sugarWeight) : []
 
   const bankTarget = questionCount - formulaQuestions.length
   const bankQuestions = bankTarget > 0 ? await buildBankQuestions(memorizedIds, storeId, bankTarget, ratio) : []

@@ -97,6 +97,16 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 // by BOTH a Formal (Advanced) and Master title-defense attempt instead of
 // each exam's own voluntary-attempt tolerance, same "non-must-know misses
 // allowed" meaning Master Quiz's own field already has.
+//
+// Jeff, 2026-10-08: "我覺得問sugar的題目好像偏多" — confirmed: Sugar has a
+// recorded quantity on nearly every drink/size (140 eligible rows vs. the
+// next-most-common ingredient's 24), so it keeps winning the "one
+// fill-in-the-blank question per drink" pick simply by being everywhere, not
+// because anything weighted it up. New sugar_fill_blank_weight setting
+// (migration sugar_fill_blank_weight.sql), same shape/placement as Top 10
+// weight right next to it — a plain multiplier (< 1 makes Sugar LESS likely
+// to win against another ingredient for the same drink; it can still come up
+// when it's the only eligible candidate a drink has).
 export default function QuizSettingsTab() {
   // Quick Quiz's own setting (quiz_settings table).
   const [quickQuestionCount, setQuickQuestionCount] = useState(10)
@@ -133,6 +143,7 @@ export default function QuizSettingsTab() {
   // global ratio/weight, each bounded by its own item-pool scope).
   const [fillBlankRatio, setFillBlankRatio] = useState(20) // shared — % of quiz that's fill-in-the-blank
   const [top10Weight, setTop10Weight] = useState(3) // shared — see quizSelection.js
+  const [sugarWeight, setSugarWeight] = useState(0.3) // shared — see quizSelection.js/examBuilders.js
   const [showLogicDetails, setShowLogicDetails] = useState(false)
 
   const [saving, setSaving] = useState(false)
@@ -150,6 +161,7 @@ export default function QuizSettingsTab() {
       if (formal) {
         setFormalQuestionCount(formal.question_count)
         setTop10Weight(formal.top10_fill_blank_weight ?? 3)
+        setSugarWeight(formal.sugar_fill_blank_weight ?? 0.3)
       }
       if (master) {
         setMasterQuestionCount(master.question_count ?? 30)
@@ -189,6 +201,7 @@ export default function QuizSettingsTab() {
         importance_ratio: importanceRatio,
         fill_in_blank_ratio: fillBlankRatio,
         top10_fill_blank_weight: top10Weight,
+        sugar_fill_blank_weight: sugarWeight,
       }).eq('singleton', true),
       supabase.from('master_quiz_settings').update({
         question_count: masterQuestionCount,
@@ -396,6 +409,17 @@ export default function QuizSettingsTab() {
                 onChange={(e) => setTop10Weight(Number(e.target.value))}
               />
             </label>
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Sugar question weight (lower = less often)</span>
+              <input
+                type="number"
+                min="0.05"
+                step="0.05"
+                className="input"
+                value={sugarWeight}
+                onChange={(e) => setSugarWeight(Number(e.target.value))}
+              />
+            </label>
             {/* Jeff, 2026-09: "下面那一大段說明改成一個按鍵...按了在跳出說明就
                 好，要不然一大段很占版面" — the explanatory paragraph that used
                 to sit here permanently now only shows in a popup, on demand. */}
@@ -419,8 +443,12 @@ export default function QuizSettingsTab() {
             ingredient quantity" questions from Formula Database recipes, rather than ordinary questions pulled from
             the Quiz Bank (Admin + Branch, weighted by the Importance mix above). The Top 10 weight — how many times
             more likely a fill-in-the-blank question about a ⭐ Top 10 drink is to be picked, versus any other
-            memorized item (1 = no boost, 3 = default) — and the excluded-ingredients list below both apply the same
-            way to all quizzes. All quizzes' version (except Formal Quiz) of these questions is always multiple
+            memorized item (1 = no boost, 3 = default). The Sugar question weight does the same thing in reverse — a
+            Sugar amount is recorded on almost every drink, so without this it keeps winning "which ingredient gets
+            asked about this drink" just by being everywhere (0.3 = about 1/3 as likely to be picked over another
+            ingredient for the same drink; 1 = no penalty). It can still come up when Sugar is the only eligible
+            ingredient a drink has. These, and the excluded-ingredients list below, all apply the same way to all
+            quizzes. All quizzes' version (except Formal Quiz) of these questions is always multiple
             choice. Formal Quiz's is a mix: a ⭐ Top 10 drink's question stays typed (most rigorous, for the drinks
             staff most need to know cold); every other drink's question is shown as multiple choice instead, but
             with deliberately hard-to-guess wrong answers (the closest real quantities on record, not random ones).
