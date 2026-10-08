@@ -7,6 +7,9 @@
 // buildHardQuantityChoiceQuestion (Formal Quiz's non-⭐-Top-10 formula
 // questions — see FormalQuizModal.jsx — picks the wrong answers closest in
 // value to the correct one, deliberately harder to rule out on sight).
+// buildHardQuantityChoiceQuestion also falls back to the easy variant
+// whenever the correct quantity isn't a number at all (e.g. "half cup") —
+// see its own comment below.
 
 const CHOICE_KEYS = ['A', 'B', 'C', 'D']
 
@@ -20,11 +23,22 @@ function shuffle(arr) {
 }
 
 // "30g" -> { value: 30, suffix: "g" }; "2 pumps" -> { value: 2, suffix: " pumps" }.
-// Anything that doesn't start with a number (e.g. "a pinch") is unparseable.
+// Anything that doesn't start with a number (e.g. "half cup", "a pinch") is
+// unparseable.
 function parseQuantity(text) {
   const m = /^(\d+(?:\.\d+)?)(.*)$/.exec((text ?? '').trim())
   if (!m) return null
   return { value: parseFloat(m[1]), suffix: m[2] }
+}
+
+// Jeff, 2026-10-08: "formula某ingredient裡是文字敘述的就不考(或者是有辦法弄成
+// 類似選擇題)，像是fresh milk and herbal jelly的herbal jelly是half cup" — a
+// recorded quantity that doesn't even start with a number (not just one in
+// an unexpected unit) has no "closest value" to compute at all, so callers
+// use this to tell that case apart from an ordinary parseable quantity that
+// simply didn't have enough same-unit real alternatives on record.
+export function isNumericQuantity(text) {
+  return !!parseQuantity(text)
 }
 
 // Jeff, 2026-10-08: two recorded quantity_text strings can mean the exact same
@@ -114,6 +128,17 @@ const HARD_SCALE_FACTORS = [0.8, 1.2, 0.9, 1.1, 0.85, 1.15, 0.7, 1.3]
 
 export function buildHardQuantityChoiceQuestion({ questionText, quantityText, realPool }) {
   const parsedCorrect = parseQuantity(quantityText)
+  if (!parsedCorrect) {
+    // "Closest value" is meaningless for a free-text quantity like "half
+    // cup" — fall back to the easy variant's plain random-real-alternate
+    // strategy instead (e.g. other recipes' own recorded Herbal Jelly
+    // amounts become the wrong answers). Still returns null, same as
+    // below, when there isn't even one other real value on record for this
+    // ingredient — the caller drops the question rather than ask it as an
+    // unreliable typed free-text answer (no admin-curated accepted-answers
+    // list exists for an auto-generated candidate).
+    return buildQuantityChoiceQuestion({ questionText, quantityText, realPool })
+  }
   const ranked = (realPool ?? [])
     .filter((v) => !sameQuantity(v, quantityText))
     .map((v) => ({ v, parsed: parseQuantity(v) }))

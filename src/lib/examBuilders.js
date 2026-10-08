@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient'
 import { filterVisibleForStore } from './storeVisibility'
 import { weightedSample } from './quizSelection'
-import { buildHardQuantityChoiceQuestion } from './formulaChoiceQuestion'
+import { buildHardQuantityChoiceQuestion, isNumericQuantity } from './formulaChoiceQuestion'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -131,20 +131,37 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
 // `forceMultipleChoice: true` so even a Top 10 drink's generated question
 // gets converted — no typed-answer generated question anywhere outside
 // Formal Quiz.
+//
+// Jeff, 2026-10-08: "formula某ingredient裡是文字敘述的就不考(或者是有辦法弄成
+// 類似選擇題)，像是fresh milk and herbal jelly的herbal jelly是half cup" — a
+// recorded quantity that isn't a number at all (not just an unusual unit)
+// has no reliable typed-answer check: an auto-generated candidate has no
+// admin-curated accepted-answers list the way a hand-written Quiz Bank
+// question does, so "half cup" would otherwise demand that exact phrase.
+// buildHardQuantityChoiceQuestion already tries to turn it into multiple
+// choice instead (other real recorded amounts for the same ingredient as
+// the wrong answers — see its own comment); when even that isn't possible
+// (no other real amount on record for this ingredient at all), the
+// question is dropped from the exam entirely instead of falling back to an
+// unreliable typed answer — same rule applies to the Top-10-stays-typed
+// branch below, since "most rigorous, typed" only makes sense for an actual
+// number to type.
 function selectFillBlankQuestions({ candidates, fillBlankTarget, top10Weight, realQuantityPool, forceMultipleChoice = false }) {
   if (!candidates.length || fillBlankTarget <= 0) return []
   const weightOf = (c) => (c.topTen ? top10Weight : 1)
   const selected = weightedSample(candidates, weightOf, Math.min(fillBlankTarget, candidates.length))
-  return selected.map((q) => {
-    if (!q.isGenerated) return q
-    if (!forceMultipleChoice && q.topTen) return q
-    const built = buildHardQuantityChoiceQuestion({
-      questionText: q.question,
-      quantityText: q.quantityText,
-      realPool: [...(realQuantityPool[q.ingredientId] ?? [])],
+  return selected
+    .map((q) => {
+      if (!q.isGenerated) return q
+      if (!forceMultipleChoice && q.topTen) return isNumericQuantity(q.quantityText) ? q : null
+      const built = buildHardQuantityChoiceQuestion({
+        questionText: q.question,
+        quantityText: q.quantityText,
+        realPool: [...(realQuantityPool[q.ingredientId] ?? [])],
+      })
+      return built ? { ...q, type: 'choice', isGenerated: true, choices: built.choices, correct_choice: built.correct_choice } : null
     })
-    return built ? { ...q, type: 'choice', isGenerated: true, choices: built.choices, correct_choice: built.correct_choice } : q
-  })
+    .filter(Boolean)
 }
 
 // Formal Exam question set — shared by the real Formal Exam (initial
