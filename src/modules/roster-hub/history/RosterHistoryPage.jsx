@@ -63,8 +63,13 @@ export default function RosterHistoryPage() {
     supabase
       .from('roster_periods')
       .select('*')
-      .eq('store_id', currentStoreId)
-      .order('updated_at', { ascending: false })
+      // Jeff, 2026-10-09: "history的班表順序也是依時間排序，新的在上面，不是
+      // 按照儲存的時間" — this used to sort by `updated_at` (whenever a period
+      // was last saved/edited), so editing an OLD week's roster would bump it
+      // back up to the top of History, ahead of weeks that are actually more
+      // recent. Sort by the week's own date instead — the newest WEEK stays
+      // on top regardless of when it was last touched.
+      .order('week_start_date', { ascending: false })
       .then(({ data }) => {
         setPeriods(data ?? [])
         setLoading(false)
