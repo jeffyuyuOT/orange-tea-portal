@@ -305,18 +305,18 @@ async function loadExcelJS() {
   return mod.default ?? mod
 }
 
-// Jeff, 2026-10-04: "下面要出現對應的時間表...只是時間部分呈現正確時間" — the
-// second (clock-time) table's S/E cells show a real time like "9:30"/"22:45"
-// instead of the decimal hours (9.5/22.75) the app computes everything in —
-// same shape as decimalToTime above but no seconds and no zero-padded hour,
-// matching how Jeff's own hand-built sheet writes a clock time.
-function decimalToClockLabel(dec) {
-  if (dec === '' || dec === null || dec === undefined) return null
-  const n = Number(dec)
-  if (Number.isNaN(n)) return null
-  const h = Math.floor(n)
-  const m = Math.round((n - h) * 60)
-  return `${h}:${String(m).padStart(2, '0')}`
+// Converts a 1-based column index into its Excel column letter(s)
+// (1 → 'A', 17 → 'Q') — used below to build the cross-table cell
+// references the clock-time table's formulas point back at the hours
+// table with (see writeGridBlock's `formulaSourceRow`).
+function colLetter(n) {
+  let s = ''
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    s = String.fromCharCode(65 + rem) + s
+    n = Math.floor((n - 1) / 26)
+  }
+  return s
 }
 
 // Writes one 3-header-row + per-person grid block into `sheet`, starting at
@@ -343,19 +343,38 @@ function decimalToClockLabel(dec) {
 //    which stacks this function's output twice per sheet. `showTotals`
 //    drops the Total hr/WKD hr header+columns entirely for that second
 //    block (a decimal-hours sum that only means anything once, in the first
-//    table) and `formatValue` is what turns a raw decimal-hours value into
-//    whatever the cell actually shows — the identity function for the first
-//    table, decimalToClockLabel for the second. Returns the row right after
-//    this block (header + every person's 2 rows), with no trailing gap, so
-//    callers can stack more content below it themselves.
-function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, { showTotals, formatValue = (v) => v }) {
+//    table). Returns the row right after this block (header + every
+//    person's 2 rows), with no trailing gap, so callers can stack more
+//    content below it themselves.
+//
+// Jeff, 2026-10-10: "下面的時間能設成公式因為上面的表更改動而跟著改嗎" —
+// against his own reference file (same two-table shape, built by hand),
+// the second table's cells are real formulas pointing back at the first
+// table (`=IF(C4="","",(TEXT(C4/24,"H:MM")))` etc.), not a frozen copy of
+// whatever the first table held at export time — so editing the raw hours
+// in Excel after download updates the clock-time table underneath it
+// automatically. `formulaSourceRow` is this block's own date row in the
+// FIRST table, passed only for the second call: when set, every cell this
+// function would otherwise compute and write as a literal value instead
+// becomes a formula referencing the matching cell in the first table (same
+// column, source row offset by `formulaSourceRow - startRow` — valid
+// because both calls build the identical person order from the same
+// `staff`/`entries`, so row N here always lines up with the same person/day
+// in the first table).
+function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, { showTotals, formulaSourceRow }) {
   const lastCol = showTotals ? STYLED_WKD_COL : STYLED_LAST_DAY_COL
   const dateRow = startRow
   const labelRow = startRow + 1
   const subRow = startRow + 2
+  // Row N in this block ↔ row `toSourceRow(N)` in the first table — see the
+  // comment above. Undefined (table1 itself) just means "no source to
+  // reference", so callers never need an extra branch for that case.
+  const toSourceRow = formulaSourceRow ? (r) => r + (formulaSourceRow - dateRow) : null
 
   sheet.mergeCells(dateRow, STYLED_NAME_COL, dateRow, STYLED_BREAK_LABEL_COL)
-  sheet.getCell(dateRow, STYLED_NAME_COL).value = storeName || ''
+  sheet.getCell(dateRow, STYLED_NAME_COL).value = toSourceRow
+    ? { formula: `${colLetter(STYLED_NAME_COL)}${toSourceRow(dateRow)}` }
+    : storeName || ''
 
   sheet.mergeCells(labelRow, STYLED_NAME_COL, subRow, STYLED_BREAK_LABEL_COL)
   sheet.getCell(labelRow, STYLED_NAME_COL).value = 'Name'
@@ -370,7 +389,9 @@ function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, {
   weekDates.forEach((d, i) => {
     const c = STYLED_FIRST_DAY_COL + i * 2
     sheet.mergeCells(dateRow, c, dateRow, c + 1)
-    sheet.getCell(dateRow, c).value = format(parseISO(d), 'd-MMM')
+    sheet.getCell(dateRow, c).value = toSourceRow
+      ? { formula: `${colLetter(c)}${toSourceRow(dateRow)}` }
+      : format(parseISO(d), 'd-MMM')
     sheet.mergeCells(labelRow, c, labelRow, c + 1)
     sheet.getCell(labelRow, c).value = STYLED_DAY_LABELS[i]
     sheet.getCell(subRow, c).value = 'S'
@@ -403,7 +424,12 @@ function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, {
 
     sheet.mergeCells(shiftRow, STYLED_NAME_COL, breakRow, STYLED_NAME_COL)
     const nameCell = sheet.getCell(shiftRow, STYLED_NAME_COL)
-    nameCell.value = name
+    if (toSourceRow) {
+      const srcRef = `${colLetter(STYLED_NAME_COL)}${toSourceRow(shiftRow)}`
+      nameCell.value = { formula: `IF(${srcRef}="","",${srcRef})` }
+    } else {
+      nameCell.value = name
+    }
     nameCell.alignment = { vertical: 'middle', horizontal: 'center' }
     nameCell.font = unqualified ? { bold: true, color: RED_FONT } : { bold: true }
 
@@ -428,9 +454,27 @@ function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, {
       const breakCell = sheet.getCell(breakRow, c)
       breakCell.alignment = { vertical: 'middle', horizontal: 'center' }
 
-      if (entry) {
-        startCell.value = entry.startTime === '' || entry.startTime == null ? null : formatValue(entry.startTime)
-        endCell.value = entry.endTime === '' || entry.endTime == null ? null : formatValue(entry.endTime)
+      if (toSourceRow) {
+        // Formula mode: every cell gets a live reference back to the first
+        // table REGARDLESS of whether `entry` exists right now — a blank
+        // source cell today that gets hours typed into it later (directly
+        // in Excel) still needs the formula already sitting there to pick
+        // it up, same as Jeff's own reference file.
+        const srcShiftRow = toSourceRow(shiftRow)
+        const startRef = `${colLetter(c)}${srcShiftRow}`
+        const endRef = `${colLetter(c + 1)}${srcShiftRow}`
+        startCell.value = { formula: `IF(${startRef}="","",(TEXT(${startRef}/24,"H:MM")))` }
+        endCell.value = { formula: `IF(${endRef}="","",(TEXT(${endRef}/24,"H:MM")))` }
+        if (unqualified) {
+          startCell.font = { color: RED_FONT }
+          endCell.font = { color: RED_FONT }
+        }
+        const breakRef = `${colLetter(c)}${toSourceRow(breakRow)}`
+        breakCell.value = { formula: `IF(${breakRef}="","",${breakRef})` }
+        breakCell.font = { color: RED_FONT }
+      } else if (entry) {
+        startCell.value = entry.startTime === '' || entry.startTime == null ? null : entry.startTime
+        endCell.value = entry.endTime === '' || entry.endTime == null ? null : entry.endTime
         if (unqualified) {
           startCell.font = { color: RED_FONT }
           endCell.font = { color: RED_FONT }
@@ -439,6 +483,8 @@ function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, {
           breakCell.value = entry.breakHours
           breakCell.font = { color: RED_FONT }
         }
+      }
+      if (entry) {
         const h = dayHours(entry)
         total += h
         if (i === 5 || i === 6) wkd += h
@@ -493,7 +539,7 @@ function buildStyledSheet(workbook, storeName, staff, weekDates, entries) {
 
   writeGridBlock(sheet, storeName, staff, weekDates, entries, headingRow + 1, {
     showTotals: false,
-    formatValue: decimalToClockLabel,
+    formulaSourceRow: 1,
   })
 
   sheet.getColumn(STYLED_NAME_COL).width = 14
@@ -864,10 +910,13 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
 }
 
 // ---- export ---------------------------------------------------------------
-// Exports the current (already-computed) grid — real numbers, not
-// formulas, since the app has already done the arithmetic. Styled per
-// Jeff's spec (buildStyledSheet above): merged per-day Break cells in red,
-// an unqualified staff member's name+shift times in red, a double rule
+// Exports the current (already-computed) grid. The first (hours) table is
+// real numbers, not formulas — the app has already done that arithmetic —
+// but the second (clock-time) table underneath it IS formulas referencing
+// the first (see writeGridBlock's `formulaSourceRow`), so hand-edits to the
+// raw hours after download still flow through. Styled per Jeff's spec
+// (buildStyledSheet above): merged per-day Break cells in red, an
+// unqualified staff member's name+shift times in red, a double rule
 // between each person's block. Now async (ExcelJS's own writeBuffer is
 // promise-based) — both call sites already `await` their export call.
 export async function exportRosterGrid(storeName, staff, weekDates, entries, filename) {
