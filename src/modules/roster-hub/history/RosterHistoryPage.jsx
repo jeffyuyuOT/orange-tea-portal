@@ -63,12 +63,24 @@ export default function RosterHistoryPage() {
     supabase
       .from('roster_periods')
       .select('*')
-      // Jeff, 2026-10-09: "history的班表順序也是依時間排序，新的在上面，不是
-      // 按照儲存的時間" — this used to sort by `updated_at` (whenever a period
-      // was last saved/edited), so editing an OLD week's roster would bump it
-      // back up to the top of History, ahead of weeks that are actually more
-      // recent. Sort by the week's own date instead — the newest WEEK stays
-      // on top regardless of when it was last touched.
+      // Jeff, 2026-10-09: "為什麼重複的班表都列出來了" — this query was
+      // missing `.eq('store_id', ...)` entirely. An ordinary manager never
+      // noticed because row-level security already scopes them to their own
+      // store's rows regardless — but admin/developer accounts can read
+      // every store's roster_periods, so this page was quietly rendering
+      // every store's history merged together. Sorting by `updated_at`
+      // (the old order) scattered each store's rows by save time, so the
+      // mix-up wasn't obvious; sorting by week_start_date (below) clusters
+      // same-week rows from different stores right next to each other,
+      // which is what made it look like duplicates. Explicit filter closes
+      // the gap regardless of which role is viewing.
+      .eq('store_id', currentStoreId)
+      // "history的班表順序也是依時間排序，新的在上面，不是按照儲存的時間" —
+      // this used to sort by `updated_at` (whenever a period was last
+      // saved/edited), so editing an OLD week's roster would bump it back up
+      // to the top of History, ahead of weeks that are actually more recent.
+      // Sort by the week's own date instead — the newest WEEK stays on top
+      // regardless of when it was last touched.
       .order('week_start_date', { ascending: false })
       .then(({ data }) => {
         setPeriods(data ?? [])
