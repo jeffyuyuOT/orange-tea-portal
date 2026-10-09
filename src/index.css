@@ -71,6 +71,23 @@ body {
   border-color: var(--color-brand-400);
 }
 
+/* Jeff, 2026-10-10: "manage roster輸入時間跟break的上下箭頭取消，改直接數字
+   輸入，因為常常會誤按箭頭反而不好用" — the native up/down spin buttons on
+   the Start/End/Break number inputs (RosterEntryGrid.jsx's HourInput) were
+   easy to misclick, nudging the value by 1 instead of just typing over it.
+   Hides the spin buttons on any input tagged `.no-spinner` while leaving
+   type="number"/inputMode="decimal" in place, so the numeric keyboard on
+   mobile and basic numeric validation are unaffected — only the clickable
+   arrows are gone. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+}
+
 /* Simple rich-text content (formula steps, announcements, training docs).
    Tailwind's Preflight resets ul/ol to list-style:none site-wide, so without
    these the "• List"/"1. List" toolbar buttons in SimpleRichTextEditor

@@ -441,7 +441,7 @@ function HourInput({ value, onChange, onBlur, disabled, className = '', style, t
       inputMode="decimal"
       disabled={disabled}
       title={title}
-      className={`input !px-0.5 !py-0.5 text-center text-xs ${className}`}
+      className={`input no-spinner !px-0.5 !py-0.5 text-center text-xs ${className}`}
       style={style}
       value={value === '' || value == null ? '' : value}
       onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
