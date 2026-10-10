@@ -624,17 +624,35 @@ export function downloadRosterTemplate(storeName, staff, weekDates, filename) {
 // covers a template someone renamed by hand, or `storeName` not being
 // known yet. With more than one sheet, though, silently falling back to
 // "just take the first one" would recreate the exact bug this is fixing,
-// so that case throws instead, telling the caller which tabs actually
-// exist.
-function findStoreSheet(wb, storeName) {
+// so that case still throws unless one of the checks below actually names
+// this store somewhere.
+//
+// Jeff, 2026-10-11: "之前匯入分店是以tab名來分辨，現在改成檔名或tab名有分店
+// 名字都可以帶入" — loosened from "a tab must be named EXACTLY this store"
+// to "a tab name CONTAINS this store's name" (handles a tab renamed with
+// extra notes, a trailing space, etc. — his own multi-tab working files
+// aren't always named identically to what's in Admin). Checked before the
+// file-name fallback since a matching tab is the more specific signal.
+//
+// `fileName` (the UPLOADED file's own name, not a tab) is the new second
+// signal: when no tab mentions the store at all but Jeff named the FILE
+// itself after it (e.g. he saved the download as "Toowong-roster.xlsx"
+// with an untouched/generic tab name inside), that's still a deliberate,
+// explicit "this file is about this store" signal — not the old silent
+// "just take sheet[0] with zero signal" bug this function was written to
+// stop, since it only fires when the file name actually names the store.
+function findStoreSheet(wb, storeName, fileName) {
   if (wb.SheetNames.length === 1) return wb.Sheets[wb.SheetNames[0]]
   const target = (storeName || '').trim().slice(0, 31).toLowerCase()
   if (target) {
-    const matchName = wb.SheetNames.find((n) => n.trim().toLowerCase() === target)
-    if (matchName) return wb.Sheets[matchName]
+    const byTab = wb.SheetNames.find((n) => n.trim().toLowerCase().includes(target))
+    if (byTab) return wb.Sheets[byTab]
+    if ((fileName || '').trim().toLowerCase().includes(target)) {
+      return wb.Sheets[wb.SheetNames[0]]
+    }
   }
   throw new Error(
-    `Couldn't find a "${storeName || 'this store'}" tab in that file — it has: ${wb.SheetNames.join(', ')}. Make sure you're uploading the right file, and that the tab for this store is named exactly "${storeName}".`
+    `Couldn't find a "${storeName || 'this store'}" tab in that file — it has: ${wb.SheetNames.join(', ')}. Make sure you're uploading the right file, and that either the file name or the tab for this store mentions "${storeName}".`
   )
 }
 
@@ -740,7 +758,7 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array' })
-        const sheet = findStoreSheet(wb, storeName)
+        const sheet = findStoreSheet(wb, storeName, file?.name)
         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
         // SheetJS's array read only puts a value in a merged range's
         // TOP-LEFT cell — every other cell the merge covers comes back as
@@ -824,17 +842,36 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
         // "name" cells exactly like a genuinely new hour-less employee would
         // be — so without this, they'd now get pushed through as bogus
         // "new person" placeholders (Jeff would be asked to add a phantom
-        // "Brookside" and "Name" to Pending staff). Neither can ever be a
-        // real person's name, so both are skipped outright here, the same
-        // way "Total" already was.
-        const skipNames = new Set(['total', 'name', (storeName || '').trim().toLowerCase()].filter(Boolean))
+        // "Brookside" and "Name" to Pending staff).
+        //
+        // Jeff, 2026-10-11: "manage roster如果是upload excel的時候，確認一下
+        // 名字只會讀上面的表格Name下面表格框裡的名字" — hitting the store's own
+        // name or a bare "Name" header a second time doesn't just mean "skip
+        // this one row", it means the clock-time duplicate table
+        // (buildStyledSheet's second block, or the equivalent in Jeff's own
+        // hand-built file) has started — every row from here to the end of
+        // the sheet is that same first table shown again, so this now STOPS
+        // reading entirely rather than skipping row-by-row and leaning on
+        // the de-dup pass further down to quietly discard whatever comes
+        // after. Neither "Name" nor the store's own name can ever be a real
+        // person's name, so this is never mistaken for someone's actual
+        // last row. The de-dup pass stays in place too, as a safety net for
+        // any OTHER accidental duplicate shape this doesn't specifically
+        // recognize.
+        const TABLE_BOUNDARY_NAMES = new Set(['name', (storeName || '').trim().toLowerCase()].filter(Boolean))
 
         const entries = []
         let i = firstDataRow
         while (i < aoa.length) {
           const row = aoa[i] ?? []
           const name = String(row[NAME_COL] ?? '').trim()
-          if (!name || skipNames.has(name.toLowerCase())) {
+          if (!name) {
+            i += 1
+            continue
+          }
+          const nameLower = name.toLowerCase()
+          if (TABLE_BOUNDARY_NAMES.has(nameLower)) break
+          if (nameLower === 'total') {
             i += 1
             continue
           }
@@ -898,14 +935,14 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
         // block) — this app's sheet only ever has one such block and never
         // stops looking once it hits the bottom of it, so it kept right on
         // reading that second copy as if it were more staff rows, doubling
-        // every entry. There's no reliable, generic way to detect "a second
-        // copy of the same grid starts here" up front, so instead: this
-        // app's whole data model already only supports one shift per person
-        // per day (Total hr/WKD hr, dayHours() etc. all assume that), so
-        // de-duping down to one entry per (person, date) — keeping
-        // whichever comes FIRST in the file — is always safe and also
-        // guards against any other accidental duplicate row, not just this
-        // specific shape of file.
+        // every entry. The row loop above now stops outright the moment it
+        // sees that second block start (the repeated store name / "Name"
+        // header), so this no longer carries that case on its own — it's
+        // kept as a second line of defense for any OTHER accidental
+        // duplicate row this app's own data model (one shift per person per
+        // day — Total hr/WKD hr, dayHours() etc. all assume that) wouldn't
+        // otherwise catch, de-duping down to one entry per (person, date)
+        // and keeping whichever comes FIRST in the file.
         const seenPersonDate = new Set()
         const deduped = entries.filter((e) => {
           const key = `${e.profileId || e.staffName}::${e.date}`
