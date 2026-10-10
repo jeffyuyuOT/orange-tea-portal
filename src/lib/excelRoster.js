@@ -35,10 +35,14 @@ function round2(n) {
 // `suffix` is whatever this call site already appended (a period's status,
 // "all-stores") — still tacked on the end, just after the date range now
 // instead of right after the single start date.
+//
+// Jeff, 2026-10-11: "檔名也要改roster shift - 時間區間" — prefix changed
+// from "roster-" to "roster shift - " (the date range + suffix shape is
+// unchanged).
 export function rosterExportFilename(weekStart, suffix) {
   const start = format(parseISO(weekStart), 'yyyy_MM_dd')
   const end = format(addDays(parseISO(weekStart), 6), 'yyyy_MM_dd')
-  return `roster-${start}-${end}${suffix ? `-${suffix}` : ''}.xlsx`
+  return `roster shift - ${start}-${end}${suffix ? `-${suffix}` : ''}.xlsx`
 }
 
 // ---- decimal-hour ("11", "22.5") <-> "HH:MM:SS" (Postgres `time`) --------
@@ -371,13 +375,23 @@ function writeGridBlock(sheet, storeName, staff, weekDates, entries, startRow, {
   // reference", so callers never need an extra branch for that case.
   const toSourceRow = formulaSourceRow ? (r) => r + (formulaSourceRow - dateRow) : null
 
-  sheet.mergeCells(dateRow, STYLED_NAME_COL, dateRow, STYLED_BREAK_LABEL_COL)
-  sheet.getCell(dateRow, STYLED_NAME_COL).value = toSourceRow
-    ? { formula: `${colLetter(STYLED_NAME_COL)}${toSourceRow(dateRow)}` }
-    : storeName || ''
+  if (toSourceRow) {
+    // Jeff, 2026-10-11: "店名跟Name的那一個儲存格合併顯示Name就好，因為表格
+    // 上面有店名了" — this second (clock-time) table already sits right
+    // under its own storeName heading (buildStyledSheet's headingCell, one
+    // blank row above `startRow`), so repeating the store name again inside
+    // the grid's own corner cell was pure duplication — only the first
+    // table needs it there, since nothing else announces its store name.
+    // One merged cell across all 3 header rows, just labeled "Name".
+    sheet.mergeCells(dateRow, STYLED_NAME_COL, subRow, STYLED_BREAK_LABEL_COL)
+    sheet.getCell(dateRow, STYLED_NAME_COL).value = 'Name'
+  } else {
+    sheet.mergeCells(dateRow, STYLED_NAME_COL, dateRow, STYLED_BREAK_LABEL_COL)
+    sheet.getCell(dateRow, STYLED_NAME_COL).value = storeName || ''
 
-  sheet.mergeCells(labelRow, STYLED_NAME_COL, subRow, STYLED_BREAK_LABEL_COL)
-  sheet.getCell(labelRow, STYLED_NAME_COL).value = 'Name'
+    sheet.mergeCells(labelRow, STYLED_NAME_COL, subRow, STYLED_BREAK_LABEL_COL)
+    sheet.getCell(labelRow, STYLED_NAME_COL).value = 'Name'
+  }
 
   if (showTotals) {
     sheet.mergeCells(labelRow, STYLED_TOTAL_COL, subRow, STYLED_TOTAL_COL)
