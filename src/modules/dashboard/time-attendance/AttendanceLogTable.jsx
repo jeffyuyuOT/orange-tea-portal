@@ -13,6 +13,7 @@ import {
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Button from '../../../components/ui/Button'
 import AttendanceCellEditModal from './AttendanceCellEditModal'
+import { DISCREPANCY_WINDOW_DAYS } from '../../../lib/timeDiscrepancy'
 
 function todayStr() {
   return format(new Date(), 'yyyy-MM-dd')
@@ -79,14 +80,27 @@ function EditReasonIcon({ note }) {
 // its own box — with a store filter (locked to that one store if the
 // person only has one), and, when `canEdit`, the ability to correct/add
 // punches with a required reason plus a visible edit history per box.
+//
+// Jeff, 2026-10-12: "新增attendence logs的時間後，上面的time discrepancy警
+// 示視窗不會馬上更新" — this table has its own `load()` after a save, but
+// StaffTimeLogsPage's discrepancy warning box above it is separate state
+// that save never touched. `onRecordsChanged`, fired after every successful
+// add/edit (in addition to this table's own reload), is how the parent gets
+// told to refresh that.
 export default function AttendanceLogTable({
   profileId,
   canEdit = false,
   editor = null,
   editorAccessibleStoreIds = null,
   currentStoreId = null,
+  onRecordsChanged = null,
 }) {
-  const [from, setFrom] = useState(daysAgoStr(6)) // default: last 7 days, inclusive
+  // Jeff, 2026-10-12: "下面的時間篩選時間區間預設改為兩個禮拜(從今天往前
+  // 推)，這樣剛好符合警示視窗檢查兩個禮拜的區間" — was a hardcoded last-7-
+  // days default; now matches DISCREPANCY_WINDOW_DAYS exactly (14 days,
+  // inclusive of today) so Staff Time Logs' discrepancy warning box above
+  // and the punch list below always cover the same window by default.
+  const [from, setFrom] = useState(daysAgoStr(DISCREPANCY_WINDOW_DAYS - 1))
   const [to, setTo] = useState(todayStr())
   const [events, setEvents] = useState([])
   const [edits, setEdits] = useState([])
@@ -182,10 +196,33 @@ export default function AttendanceLogTable({
 
   return (
     <div>
+      {/* Jeff, 2026-10-04: "所有有時間選擇邏輯的都跟申請leave一樣" — From used
+          to carry a live `max={to}`, which (same shape as Apply Leave's old
+          bug) could lock From from moving past whatever To already held.
+          From's own bound is simply "not in the future" (same as To's own
+          `max={todayStr()}`) rather than anything tied to To; picking a From
+          past the current To now just pushes To forward to match, instead
+          of trapping the picker. To keeps its own live `min={from}` — that
+          side was never the problem (nobody sets To before touching From)
+          and there's no submit step here to defer a check to, so there's
+          nothing else for a confirm-time guard to do — an invalid range here
+          can only ever produce an empty/wrong-looking filtered list, never
+          bad data, so keeping To's min is just a convenience, not a safety
+          net like Leave's rangeInvalid message is. */}
       <div className="mb-4 flex flex-wrap items-end gap-2">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">From</span>
-          <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} max={to} />
+          <input
+            type="date"
+            className="input"
+            value={from}
+            max={todayStr()}
+            onChange={(e) => {
+              const next = e.target.value
+              setFrom(next)
+              if (next > to) setTo(next)
+            }}
+          />
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-500">To</span>
@@ -358,6 +395,7 @@ export default function AttendanceLogTable({
           onSaved={() => {
             setEditingCell(null)
             load()
+            onRecordsChanged?.()
           }}
         />
       )}
@@ -374,6 +412,7 @@ export default function AttendanceLogTable({
           onSaved={() => {
             setAddingRecord(false)
             load()
+            onRecordsChanged?.()
           }}
         />
       )}

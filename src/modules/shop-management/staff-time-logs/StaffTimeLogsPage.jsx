@@ -152,6 +152,21 @@ export default function StaffTimeLogsPage() {
     setTimeDiscrepancyHidden(subjectId, currentStoreId, day.date, hidden, profile.id).then(() => refreshTimeDiscrepancies?.())
   }
 
+  // Jeff, 2026-10-12: "新增attendence logs的時間後，上面的time discrepancy
+  // 警示視窗不會馬上更新" — `discrepancies` only ever got (re)loaded by the
+  // effect above, keyed off staff.length, so correcting or adding a punch
+  // via AttendanceLogTable below never touched it; the warning box kept
+  // showing the pre-edit numbers (or a now-resolved day) until leaving and
+  // re-entering this detail page. Passed to AttendanceLogTable as
+  // `onRecordsChanged`, fired after every successful save, re-deriving just
+  // this one subject's discrepancy and refreshing the Sidebar's red dot too.
+  async function refreshSelectedDiscrepancies() {
+    if (!currentStoreId || !selected) return
+    const d = await getStaffTimeDiscrepancies(currentStoreId, [selected.id])
+    setDiscrepancies((prev) => ({ ...prev, [selected.id]: d[selected.id] ?? { days: [], latestSignal: null } }))
+    refreshTimeDiscrepancies?.()
+  }
+
   const query = search.trim().toLowerCase()
   const filtered = query
     ? staff.filter((s) => `${s.first_name ?? ''} ${s.last_name ?? ''}`.toLowerCase().includes(query))
@@ -269,6 +284,7 @@ export default function StaffTimeLogsPage() {
           editor={editor}
           editorAccessibleStoreIds={editorAccessibleStoreIds}
           currentStoreId={currentStoreId}
+          onRecordsChanged={refreshSelectedDiscrepancies}
         />
       </div>
     )
