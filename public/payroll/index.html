@@ -2300,6 +2300,7 @@ function tab1Html(){
   let warnHtml = "";
   if(activeOutputStoreId){
     const sd = ws.stores[activeOutputStoreId];
+    sortRowsByEmployeeOrder(sd.rows);
     const unreg = sd.rows.filter(r=>r.unregistered);
     if(unreg.length){
       warnHtml = `<div class="helpbox">⚠️ 以下員工在班表中出現但尚未登記於「員工資料管理」，暫以空白費率計算：${unreg.map(r=>escapeHtml(r.baseName)).join("、")}</div>`;
@@ -2415,6 +2416,29 @@ function ageLabelEn(row){
   // left blank -- an employee with no recorded birthday is assumed adult.
   if(row.age===""||row.age==null) return "Adult";
   return row.age>=21 ? "Adult" : String(row.age);
+}
+// Jeff, 2026-10-11: "為什麼薪水計算表輸出的名字順序跟員工資料管理的員工順序
+// 不一樣" -- buildRowsForStore (and the cross-store transfer flow below)
+// builds each store's rows in whatever order the IMPORTED roster/attendance
+// data happened to list names in, which has nothing to do with the
+// manually-set up/down order Jeff curates in 員工資料管理
+// (currentEmployees[].order, see reorderEmp()). Sorts a store's rows to
+// match that order instead -- applied at the two places rows are actually
+// READ for display/export (Tab 1's live view just below, and
+// exportSheetToXlsx further down) rather than at wherever a row happens to
+// get built/pushed, so it's correct for every path (fresh import,
+// re-import, cross-store transfer, and an already-saved draft/history sheet
+// from before this fix) without having to chase every row-mutation call
+// site. A row with no matching (or no longer existing, e.g. deleted)
+// employee record -- an "未登記" row, or an orphaned employeeId -- sorts to
+// the end, keeping its prior relative order (sort is stable).
+function sortRowsByEmployeeOrder(rows){
+  const orderById = new Map(currentEmployees.map(e=>[e.id, e.order||0]));
+  rows.sort((a,b)=>{
+    const ao = (a.employeeId!=null && orderById.has(a.employeeId)) ? orderById.get(a.employeeId) : Infinity;
+    const bo = (b.employeeId!=null && orderById.has(b.employeeId)) ? orderById.get(b.employeeId) : Infinity;
+    return ao-bo;
+  });
 }
 // "總資料" -- the main on-screen/exported summary: one row per employee (all
 // payment types, CA included) with Total hr / Total amount / bank amount /
@@ -3387,6 +3411,7 @@ async function exportSheetToXlsx(sheet, opts){
   const cols = bucketCols(weekendSplit);
   const sheets = Object.values(sheet.stores).map(sd=>{
     sd.rows.forEach(r=>recalcRow(r, periodDays));
+    sortRowsByEmployeeOrder(sd.rows);
     let header, rows, sheetMerges;
     if(view==="accounting"){
       // Column layout: Name(0) Age(1), then a rate+hr pair per bucketCols()
