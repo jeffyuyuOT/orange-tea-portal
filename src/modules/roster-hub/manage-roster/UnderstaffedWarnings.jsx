@@ -1,5 +1,5 @@
 import { parseISO } from 'date-fns'
-import { timeToDecimal } from '../../../lib/excelRoster'
+import { decimalToTime, timeToDecimal } from '../../../lib/excelRoster'
 
 // Jeff's own example wording spells the day out in full ("Friday
 // 4pm-5pm..."), not abbreviated — see the formatClockLabel comment below.
@@ -54,47 +54,82 @@ function formatClockLabel(raw) {
 // true "fewest on the floor at once" figure a staffing minimum is actually
 // meant to guard, not a simple headcount of who clocks in at some point
 // during the slot.
-function minConcurrentCoverage(intervals, slotStart, slotEnd) {
-  if (slotEnd <= slotStart) return 0
+//
+// Jeff, 2026-10-11 (follow-up): "不是把設置時段的時間列出來，而是實際
+// understaff的時間，像這一個提醒應該是下午的某個時段人不夠，不是時段設置
+// 2-9pm整個時段不夠人" — this used to return just the single worst-moment
+// COUNT for the whole rule, and the warning then printed the rule's own
+// configured bounds (e.g. "2pm-9pm") even when only a narrow slice inside
+// that window was actually short-staffed. Now walks the same breakpoints
+// but keeps every sub-interval's own count, and merges the consecutive
+// ones that fall below the minimum into one or more actual understaffed
+// sub-ranges (e.g. just "4pm-5pm" out of a 2pm-9pm rule) — a single rule
+// can thus surface more than one warning if it dips below the minimum more
+// than once across the day with a fully-staffed gap in between.
+function findUnderstaffedRanges(intervals, slotStart, slotEnd, requiredMin) {
+  if (slotEnd <= slotStart) return []
   const points = new Set([slotStart, slotEnd])
   intervals.forEach(([s, e]) => {
     points.add(s)
     points.add(e)
   })
   const sorted = Array.from(points).sort((a, b) => a - b)
-  let min = Infinity
+  const ranges = []
+  let current = null
   for (let i = 0; i < sorted.length - 1; i++) {
     const segStart = sorted[i]
     const segEnd = sorted[i + 1]
     if (segEnd <= segStart) continue
     const mid = (segStart + segEnd) / 2
-    const covering = intervals.filter(([s, e]) => s <= mid && e >= mid).length
-    min = Math.min(min, covering)
+    const count = intervals.filter(([s, e]) => s <= mid && e >= mid).length
+    if (count < requiredMin) {
+      if (current && current.end === segStart) {
+        current.end = segEnd
+        current.count = Math.min(current.count, count)
+      } else {
+        if (current) ranges.push(current)
+        current = { start: segStart, end: segEnd, count }
+      }
+    } else if (current) {
+      ranges.push(current)
+      current = null
+    }
   }
-  return min === Infinity ? 0 : min
+  if (current) ranges.push(current)
+  return ranges
 }
 
 // Entries store Start/End as decimal hours (see excelRoster.js); rules
 // store their time slot as "HH:MM:SS" from the database, so slot bounds are
-// converted to decimal hours here before comparing/clipping.
+// converted to decimal hours here before comparing/clipping, and each
+// resulting understaffed sub-range is converted back to "HH:MM:SS" so it
+// renders the same way a rule's own bounds would.
 export function computeUnderstaffedWarnings(entries, rules) {
   if (!rules.length) return []
-  return rules
-    .map((rule) => {
-      const slotStart = timeToDecimal(rule.time_slot_start)
-      const slotEnd = timeToDecimal(rule.time_slot_end)
-      const intervals = entries
-        .filter((e) => {
-          if (!e.date || e.startTime === '' || e.endTime === '') return false
-          const weekday = parseISO(e.date).getDay()
-          if (weekday !== rule.weekday) return false
-          return e.startTime < slotEnd && e.endTime > slotStart
-        })
-        .map((e) => [Math.max(e.startTime, slotStart), Math.min(e.endTime, slotEnd)])
-      const count = minConcurrentCoverage(intervals, slotStart, slotEnd)
-      return { ...rule, count }
+  const warnings = []
+  rules.forEach((rule) => {
+    const slotStart = timeToDecimal(rule.time_slot_start)
+    const slotEnd = timeToDecimal(rule.time_slot_end)
+    const intervals = entries
+      .filter((e) => {
+        if (!e.date || e.startTime === '' || e.endTime === '') return false
+        const weekday = parseISO(e.date).getDay()
+        if (weekday !== rule.weekday) return false
+        return e.startTime < slotEnd && e.endTime > slotStart
+      })
+      .map((e) => [Math.max(e.startTime, slotStart), Math.min(e.endTime, slotEnd)])
+    const ranges = findUnderstaffedRanges(intervals, slotStart, slotEnd, rule.required_min)
+    ranges.forEach((range, idx) => {
+      warnings.push({
+        ...rule,
+        id: `${rule.id}-${idx}`,
+        count: range.count,
+        time_slot_start: decimalToTime(range.start),
+        time_slot_end: decimalToTime(range.end),
+      })
     })
-    .filter((r) => r.count < r.required_min)
+  })
+  return warnings
 }
 
 // Plain list of already-computed warnings — no Modal of its own; the
