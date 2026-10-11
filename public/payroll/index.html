@@ -2300,6 +2300,7 @@ function tab1Html(){
   let warnHtml = "";
   if(activeOutputStoreId){
     const sd = ws.stores[activeOutputStoreId];
+    refreshUnknownAgeRows(sd.rows, currentSettings, ws.dateTo);
     sortRowsByEmployeeOrder(sd.rows);
     const unreg = sd.rows.filter(r=>r.unregistered);
     if(unreg.length){
@@ -2416,6 +2417,47 @@ function ageLabelEn(row){
   // left blank -- an employee with no recorded birthday is assumed adult.
   if(row.age===""||row.age==null) return "Adult";
   return row.age>=21 ? "Adult" : String(row.age);
+}
+// Jeff, 2026-10-12: "Torin在員工資料裡有生日，為什麼薪水計算表裡又說生日不
+// 明，所以rate變成adult的" -- a row's age (and, for an AWARD-rate employee,
+// the rate itself) is computed ONCE at import time (makeRow/computeRowRates
+// in buildRowsForStore) and then just sits baked onto the row forever --
+// only a fresh re-import ever recomputes it. Torin's employee record had no
+// DOB on file yet the moment this row was first built (calcAge(null,...)
+// returns null -> row.age becomes "" -> computeRowRates has no age to look
+// a junior bracket up with, so it silently falls back to the Adult rate --
+// see ageLabelEn's own "unknown age -> Adult" rule just above), and Staff
+// Information only synced his real DOB in sometime AFTER that. The row
+// never found out.
+//
+// Re-importing the roster would fix it (buildRowsForStore reruns with the
+// now-known DOB), but shouldn't be the only way -- "age unknown" is never
+// a state Jeff would actually want to KEEP once real data shows up, unlike
+// e.g. a deliberately-set manual rate override, which this intentionally
+// leaves alone. So this narrowly refreshes ONLY rows still sitting at
+// "age unknown" whose matched employee now has a DOB on file -- applied at
+// the same two read points as sortRowsByEmployeeOrder above, for the same
+// reason (correct for every path, old saved drafts included, without
+// having to chase every row-mutation call site). Scope is deliberately
+// narrow: nothing else about an already-built row (hours, adj, bonus, a
+// manual/CA rate, an already-resolved birthday split) is ever touched.
+function refreshUnknownAgeRows(rows, settings, periodTo){
+  rows.forEach(row=>{
+    if(row.age!=="" || !row.employeeId) return; // only "unknown age" rows are ever touched
+    const match = currentEmployees.find(e=>e.id===row.employeeId);
+    if(!match || !match.dob) return; // still nothing to refresh FROM
+    const age = calcAge(match.dob, periodTo);
+    if(age==null) return;
+    row.age = age;
+    row.dob = match.dob;
+    // CA and a manual rate are fixed numbers Jeff set directly -- never
+    // age-derived to begin with (see computeRowRates), so there's no rate
+    // to recompute for those, only the age display above.
+    if(match.paymentType!=="CA" && match.rateMode!=="manual"){
+      const r = computeAwardRates(settings, match.level, match.paymentType, age);
+      row.rates = makeRatesObj(r.weekday, r.saturday, r.sunday, r.publicHoliday);
+    }
+  });
 }
 // Jeff, 2026-10-11: "為什麼薪水計算表輸出的名字順序跟員工資料管理的員工順序
 // 不一樣" -- buildRowsForStore (and the cross-store transfer flow below)
@@ -3410,6 +3452,7 @@ async function exportSheetToXlsx(sheet, opts){
   const weekendSplit = currentSettings.weekendSplit;
   const cols = bucketCols(weekendSplit);
   const sheets = Object.values(sheet.stores).map(sd=>{
+    refreshUnknownAgeRows(sd.rows, currentSettings, sheet.dateTo);
     sd.rows.forEach(r=>recalcRow(r, periodDays));
     sortRowsByEmployeeOrder(sd.rows);
     let header, rows, sheetMerges;
