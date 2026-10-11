@@ -1,7 +1,31 @@
 import { parseISO } from 'date-fns'
 import { timeToDecimal } from '../../../lib/excelRoster'
 
-const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Jeff's own example wording spells the day out in full ("Friday
+// 4pm-5pm..."), not abbreviated — see the formatClockLabel comment below.
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+// Jeff, 2026-10-11: "understaffed slot的提醒，除了禮拜幾以外，後面直接說出幾點
+// 到幾點是understaff，不用說時段的名稱，也不用說need多少，直接括號(target多
+// 少)，例如Friday 4pm-5pm only 2 staffs (target 3)" — the warning used to show
+// the rule's own time-slot LABEL ("Sunday open to close") plus a "needs N"
+// phrasing. Now it shows the actual clock-time range instead of the label,
+// and "only N staffs (target M)" instead of "needs". "HH:MM:SS"/"HH:MM" ->
+// "4pm" / "4:30pm" (no leading zero, no ":00" on the hour) — same casual
+// short form as the axis-tick labels on the Roster Settings coverage chart.
+//
+// Jeff, 2026-10-11 (follow-up): "時間跟only x staff中間加一個橫線，有點區分開
+// 的感覺" — added a " - " between the time range and "only N staffs" so the
+// two parts read as visually separate: "Friday 4pm-5pm - only 2 staffs
+// (target 3)".
+function formatClockLabel(raw) {
+  const [h, m] = (raw || '0:0').split(':').map(Number)
+  const h24 = h || 0
+  const mins = m || 0
+  const ampm = h24 >= 12 ? 'pm' : 'am'
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
+  return mins === 0 ? `${h12}${ampm}` : `${h12}:${String(mins).padStart(2, '0')}${ampm}`
+}
 
 // Jeff, 2026-10-01: "understaffed slots平常不顯示，在按Save和Submit才跳出視
 // 窗提示，但還是可以繼續儲存跟發布" — this used to render inline under the
@@ -82,9 +106,9 @@ export default function UnderstaffedWarnings({ warnings }) {
     <ul className="list-inside list-disc space-y-0.5 text-sm text-amber-800">
       {warnings.map((w) => (
         <li key={w.id}>
-          {WEEKDAY_LABELS[w.weekday]} {w.time_slot_label}: as few as {w.count} on at once, needs {w.required_min}
+          {WEEKDAY_LABELS[w.weekday]} {formatClockLabel(w.time_slot_start)}-{formatClockLabel(w.time_slot_end)} - only {w.count} staffs
           {' '}
-          (target: {w.required_counts_raw})
+          (target {w.required_counts_raw})
         </li>
       ))}
     </ul>
