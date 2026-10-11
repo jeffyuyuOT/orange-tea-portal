@@ -4132,6 +4132,93 @@ async function mergeEmployees(survivor, duplicate){
   currentEmployees = await idbAll("employees");
 }
 
+// Jeff, 2026-10-12: "為什麼annabelle一直會要問是否跟annabelle ho 套用，不是
+// 資料已經跟staff information同步了嗎" -- a sibling case of the duplicate-
+// employee bug above, but for someone who was never manually typed in
+// before Staff Information syncing existed, so there's no second "short
+// name" record for 🔀合併重複員工 to merge into -- Annabelle only ever had
+// the ONE record, auto-created by syncEmployeesFromStaffInfo with her full
+// legal name ("Annabelle Ho"), and that function deliberately never
+// touches an existing record's `.name` again on later syncs (see its own
+// comment -- that field is "由 Payroll 這邊自己維護"). Meanwhile the
+// roster import now correctly sends her actual roster DISPLAY name
+// ("Annabelle", see the fetchStoresFromRoster fix above), which isn't an
+// EXACT match to "Annabelle Ho" -- so every single import falls into the
+// fuzzy-typo-detection path (showFuzzyNameModal) and asks again, forever,
+// since confirming that modal only rewrites the name for THAT one import
+// (see its own comment above showFuzzyNameModal) -- nothing is ever saved
+// back to the employee record itself, so "already synced" doesn't help:
+// syncing only ever touches dob/tfn/email/phone/hireDate, never the name.
+//
+// "🏷 修正顯示名稱" finds every LINKED employee at this store whose payroll
+// `.name` doesn't match what OT Portal actually shows for them on the
+// roster (per-store user_stores.roster_display_name override first, same
+// as fetchStoresFromAttendance reads, then first name -- same priority
+// order as rosterDisplayName() in src/lib/excelRoster.js) and lets Jeff
+// rename them in bulk. This is a real, permanent fix (unlike re-confirming
+// the typo modal every time) because renaming the record here is the one
+// thing a later Staff Information sync will never overwrite.
+async function fetchRosterDisplayNamesForStore(realStoreId){
+  const { data, error } = await sb
+    .from('user_stores')
+    .select('profile_id, roster_display_name, profiles(first_name,last_name)')
+    .eq('store_id', realStoreId);
+  if(error){ console.error("fetchRosterDisplayNamesForStore failed", error); return new Map(); }
+  const out = new Map();
+  (data||[]).forEach(row=>{
+    const p = row.profiles;
+    if(!p) return;
+    const override = (row.roster_display_name||"").trim();
+    const first = (p.first_name||"").trim();
+    const full = `${p.first_name||""} ${p.last_name||""}`.trim();
+    out.set(row.profile_id, override || first || full || "(未命名)");
+  });
+  return out;
+}
+async function findMisnamedLinkedEmployees(storeId, realStoreId){
+  const displayNames = await fetchRosterDisplayNamesForStore(realStoreId);
+  const inStore = currentEmployees.filter(e=>e.storeId===storeId && e.profileId);
+  const out = [];
+  for(const emp of inStore){
+    const suggested = displayNames.get(emp.profileId);
+    // Not found at this real store at all (e.g. a multi-store profile whose
+    // user_stores row for THIS store is missing) -- nothing confident to
+    // suggest, leave it alone rather than guessing.
+    if(!suggested) continue;
+    if(suggested.trim().toLowerCase()!==(emp.name||"").trim().toLowerCase()) out.push({emp, suggested});
+  }
+  return out;
+}
+async function openFixDisplayNamesModal(storeId, onDone){
+  const store = currentStores.find(s=>s.id===storeId);
+  if(!store) return;
+  const real = findRealStore(store);
+  if(!real){ toast(`找不到跟「${store.name}」名稱完全相符的 Staff Information 分店，無法比對班表顯示名稱`); return; }
+  const mismatches = await findMisnamedLinkedEmployees(storeId, real.id);
+  if(!mismatches.length){ toast("這個分店目前沒有偵測到名稱跟班表顯示不一致的員工"); return; }
+  const rowsHtml = mismatches.map((m,i)=>`<tr>
+    <td><input type="checkbox" class="renamechk" data-idx="${i}" checked></td>
+    <td>${escapeHtml(m.emp.name)}</td>
+    <td>${escapeHtml(m.suggested)}</td>
+  </tr>`).join("");
+  const m = openModal(`
+    <div class="modal-header"><h3>🏷 修正顯示名稱</h3><button class="close-x" id="mclose">✕</button></div>
+    <p class="small muted">下列已連結 Staff Information 的員工，Payroll 這邊登記的姓名跟 OT Portal 班表上實際顯示的名稱不一樣，會導致每次匯入班表都被當成「可能拼字誤植」要你確認。改成跟班表一致可以一次解決，之後 Staff Information 同步也不會再把名稱改回去（同步只會更新生日/TFN/Email/電話/入職日期，不會動姓名）。請勾選要修正的項目：</p>
+    <div class="table-wrap" style="max-height:320px;"><table><thead><tr><th></th><th>目前 Payroll 姓名</th><th>班表實際顯示名稱</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    <div class="toolbar"><button class="primary" id="mconfirm">確認修正</button><button id="mcancel">取消</button></div>
+  `);
+  $("#mclose").onclick=closeModal; $("#mcancel").onclick=closeModal;
+  $("#mconfirm").onclick = async ()=>{
+    const checked = $all(".renamechk",m).filter(c=>c.checked).map(c=>mismatches[Number(c.dataset.idx)]);
+    closeModal();
+    if(!checked.length) return;
+    for(const {emp,suggested} of checked){ emp.name = suggested; await saveEmployee(emp); }
+    currentEmployees = await idbAll("employees");
+    toast(`已修正 ${checked.length} 位員工的顯示名稱`);
+    if(onDone) onDone(); else renderMain();
+  };
+}
+
 /* --- 3.2 員工資料管理 --- */
 async function renderEmpMgmt(container){
   if(!empListStoreId && currentStores.length) empListStoreId = currentStores[0].id;
@@ -4142,6 +4229,7 @@ async function renderEmpMgmt(container){
       <div class="row"><label class="small muted">分店</label><select id="empstoresel">${opts||'<option>（請先新增分店）</option>'}</select></div>
       <div class="row">
         <button id="mergeEmpBtn2" ${!empListStoreId?'disabled':''}>🔀 合併重複員工</button>
+        <button id="fixNameBtn2" ${!empListStoreId?'disabled':''}>🏷 修正顯示名稱</button>
         <button id="syncEmpBtn2" ${!empListStoreId?'disabled':''}>🔄 從 Staff Information 同步</button>
         <button class="primary" id="addEmpBtn2" ${!empListStoreId?'disabled':''}>新增員工</button>
       </div>
@@ -4157,6 +4245,8 @@ async function renderEmpMgmt(container){
   if(syncBtn) syncBtn.onclick = ()=>runEmpSync(true);
   const mergeBtn = $("#mergeEmpBtn2");
   if(mergeBtn) mergeBtn.onclick = ()=>openMergeDuplicatesModal(empListStoreId, ()=>renderEmpMgmt(container));
+  const fixNameBtn = $("#fixNameBtn2");
+  if(fixNameBtn) fixNameBtn.onclick = ()=>openFixDisplayNamesModal(empListStoreId, ()=>renderEmpMgmt(container));
   renderEmpList();
   if(empListStoreId) await runEmpSync(false);
 }
