@@ -1963,20 +1963,43 @@ async function syncEmployeesFromStaffInfo(store, real){
    modals for free, with no separate matching logic to maintain.
 
    Matching is still by NAME (ingestParsedStores' pipeline has always matched
-   by name, not profileId) -- but names here come from `profiles.first_name/
-   last_name`, the exact same convention fetchRealStaffForStore() already
-   uses to build a synced employee's `.name`, so an employee that's been
-   linked via "🔄 從 Staff Information 同步" (員工資料管理) matches exactly,
-   no typo-detection needed. Jeff asked whether the "找不到員工資料" prompt
-   would realistically ever fire now that employee data is linked to OT
-   Portal -- answer: yes, still can, in three real cases: (1) a store's
-   employees haven't been synced from Staff Information yet (that sync is a
-   manual button, not automatic); (2) a roster_entries row has no profile_id
-   at all (staff_name_raw fallback -- happens when that roster itself was
-   imported from an Excel sheet whose name didn't match a profile at the
-   time); (3) someone appears in OT Portal but was never added as a Payroll
-   employee at all. So the existing "未登記" confirmation modal below still
-   matters and is deliberately left in the pipeline, not bypassed.
+   by name, not profileId).
+
+   Jeff, 2026-10-11: "在payroll裡從OT portal班表匯入或是attendance log匯入
+   時，是要以班表上的display name去比對，現在是以員工全名(包含family name)
+   去比對，所以會把每一個都認成新員工" -- this used to build the name from
+   `profiles.first_name + " " + last_name` (the same full-legal-name
+   convention fetchRealStaffForStore() still uses, see its own comment, when
+   it CREATES a brand-new employee off a "🔄 從 Staff Information 同步"
+   click). That sounded consistent on paper, but in practice almost every
+   existing Payroll employee record's `.name` was typed in (or long ago
+   synced in) as whatever short name actually appears on the OT Portal
+   roster grid -- which defaults to FIRST NAME ONLY unless a per-store
+   display-name override is set (see src/lib/excelRoster.js's
+   rosterDisplayName(), which this static page can't import and so mirrors
+   by hand below) -- so comparing against the rebuilt full name made
+   virtually every real match fail and show up as "未登記". Now
+   fetchStoresFromRoster pulls the name straight off roster_entries.
+   staff_name_raw (ManageRosterPage.jsx writes this for every row, linked or
+   not, as exactly what the grid's Name cell showed at save time -- no
+   separate lookup needed), and fetchStoresFromAttendance looks up each
+   profile's per-store user_stores.roster_display_name override and falls
+   back to first_name, same priority order as rosterDisplayName(). This is
+   deliberately now a DIFFERENT convention than fetchRealStaffForStore()'s
+   sync-create path -- that path is unaffected by this fix, since changing
+   what NEW synced employee records get named wasn't part of what Jeff
+   asked for here.
+
+   Jeff asked whether the "找不到員工資料" prompt would realistically ever
+   fire now that employee data is linked to OT Portal -- answer: yes, still
+   can, in three real cases: (1) a store's employees haven't been synced
+   from Staff Information yet (that sync is a manual button, not
+   automatic); (2) a roster_entries row has no profile_id at all
+   (staff_name_raw fallback -- happens when that roster itself was imported
+   from an Excel sheet whose name didn't match a profile at the time); (3)
+   someone appears in OT Portal but was never added as a Payroll employee
+   at all. So the existing "未登記" confirmation modal below still matters
+   and is deliberately left in the pipeline, not bypassed.
 
    Break handling differs by source. roster_entries HAS a break column
    (break_half_hours, migration 0008 -- half-hour units, same as the Excel
@@ -1988,10 +2011,19 @@ async function syncEmployeesFromStaffInfo(store, real){
    day), which dailyHours already adds up correctly on its own -- so every
    dailyRaw from the Attendance source gets brk:0 and that's correct, not a
    gap. */
-function otPortalPersonName(prof){
+// rosterDisplayNameOverride, when given, is that profile's per-store
+// user_stores.roster_display_name (attendance path only -- the roster path
+// doesn't need this, it already has staff_name_raw). Priority mirrors
+// rosterDisplayName() in src/lib/excelRoster.js exactly: override, then
+// first name alone, then the full name, then email, never blank.
+function otPortalPersonName(prof, rosterDisplayNameOverride){
   if(!prof) return "(未命名)";
-  const n = `${prof.first_name||""} ${prof.last_name||""}`.trim();
-  return n || prof.email || "(未命名)";
+  const override = (rosterDisplayNameOverride||"").trim();
+  if(override) return override;
+  const first = (prof.first_name||"").trim();
+  if(first) return first;
+  const full = `${prof.first_name||""} ${prof.last_name||""}`.trim();
+  return full || prof.email || "(未命名)";
 }
 // Local reimplementation of src/lib/attendance.js's pairEventsIntoSessions --
 // this static page has no build step / ES module imports from src/, so the
@@ -2060,7 +2092,7 @@ async function fetchStoresFromRoster(dateFrom, dateTo){
     if(!row.start_time || !row.end_time){ continue; } // an entry with no times recorded contributes no hours
     const sH = timeToHours(row.start_time.slice(0,5));
     const eH = timeToHours(row.end_time.slice(0,5));
-    const name = row.profiles ? otPortalPersonName(row.profiles) : ((row.staff_name_raw||"").trim() || "(未命名)");
+    const name = (row.staff_name_raw||"").trim() || (row.profiles ? otPortalPersonName(row.profiles) : "(未命名)");
     if(sH==null || eH==null || eH<=sH){
       warnings.push(`[OT Portal 班表 / ${realStore.name}] ${name} 在 ${row.work_date} 的班表時間無法判讀（${row.start_time}–${row.end_time}），已略過這筆`);
       continue;
@@ -2104,6 +2136,15 @@ async function fetchStoresFromAttendance(dateFrom, dateTo){
     .in('store_id', storeIds)
     .order('occurred_at', { ascending: true });
   if(error) throw error;
+  // attendance_events has no per-entry name text the way roster_entries has
+  // staff_name_raw, so the per-store display-name override has to be looked
+  // up separately -- same user_stores.roster_display_name column, and same
+  // per-store key, RosterWeekTable.jsx/ManageRosterPage.jsx already read.
+  const { data: nameRows } = await sb
+    .from('user_stores')
+    .select('store_id, profile_id, roster_display_name')
+    .in('store_id', storeIds);
+  const rosterNameByKey = new Map((nameRows||[]).map(r=>[`${r.store_id}:${r.profile_id}`, r.roster_display_name]));
   const byProfile = new Map();
   (events||[]).forEach(ev=>{
     if(!byProfile.has(ev.profile_id)) byProfile.set(ev.profile_id, []);
@@ -2118,7 +2159,9 @@ async function fetchStoresFromAttendance(dateFrom, dateTo){
       if(!s.date || s.date<dateFrom || s.date>dateTo || s.minutes==null) continue;
       const realStore = realStores.find(rs=>rs.id===(s.clockIn.store_id||s.clockOut.store_id));
       if(!realStore) continue;
-      const name = otPortalPersonName(s.clockIn.profiles || s.clockOut.profiles);
+      const profileId = s.clockIn.profile_id || s.clockOut.profile_id;
+      const override = rosterNameByKey.get(`${realStore.id}:${profileId}`);
+      const name = otPortalPersonName(s.clockIn.profiles || s.clockOut.profiles, override);
       let bucket = byStore.get(realStore.id);
       if(!bucket){ bucket = {storeName: realStore.name, employees: new Map()}; byStore.set(realStore.id, bucket); }
       const key = name.trim().toLowerCase();
