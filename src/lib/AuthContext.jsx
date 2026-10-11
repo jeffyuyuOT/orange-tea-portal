@@ -3,7 +3,7 @@ import { addMonths } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { getEffectivePages, canAccessPage } from './permissions'
 import { getUnseenFormulaItems } from './formulaUpdates'
-import { getStaffTimeDiscrepancies, isUnreadDiscrepancy } from './timeDiscrepancy'
+import { getStaffTimeDiscrepancies, isUnreadDiscrepancy, hasVisibleDiscrepancy } from './timeDiscrepancy'
 import { DEFAULT_SIDEBAR_ORDER, fetchSidebarOrder } from './sidebarOrder'
 
 const AuthContext = createContext(null)
@@ -430,7 +430,9 @@ export function AuthProvider({ children }) {
       supabase.from('time_discrepancy_views').select('subject_profile_id, viewed_at').eq('viewer_id', profile.id).in('subject_profile_id', profileIds),
     ])
     const viewedAtBySubject = new Map((viewRows ?? []).map((r) => [r.subject_profile_id, r.viewed_at]))
-    const hasUnread = Object.entries(discrepancies).some(([subjectId, d]) => isUnreadDiscrepancy(d, viewedAtBySubject.get(subjectId)))
+    const hasUnread = Object.entries(discrepancies).some(
+      ([subjectId, d]) => hasVisibleDiscrepancy(d) && isUnreadDiscrepancy(d, viewedAtBySubject.get(subjectId))
+    )
     setHasTimeDiscrepancies(hasUnread)
   }, [profile, overrides, currentStoreId])
 

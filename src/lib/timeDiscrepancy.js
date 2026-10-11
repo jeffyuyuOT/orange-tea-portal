@@ -86,7 +86,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
   // date can begin up to 6 days before it.
   const periodsFrom = format(addDays(new Date(fromDate), -6), 'yyyy-MM-dd')
 
-  const [{ data: periodRows }, { data: eventRows }, { data: changeRows }, { data: breakRows }] = await Promise.all([
+  const [{ data: periodRows }, { data: eventRows }, { data: changeRows }, { data: breakRows }, { data: hideRows }] = await Promise.all([
     supabase
       .from('roster_periods')
       .select('id')
@@ -124,7 +124,23 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       .in('profile_id', profileIds)
       .gte('event_date', fromDate)
       .lte('event_date', today),
+    // Jeff, 2026-10-11: "每一筆的後面都新增Hide prompts，勾取的話此筆紀錄就
+    // 不會造成小紅點提示" — a per-(profile, day) dismissal, global across
+    // every viewer (see migration 0100's comment for why this is shaped
+    // differently from time_discrepancy_views below, which is per-viewer).
+    // A hidden day still comes back in `days` (so the checkbox can be shown
+    // and unchecked again later) — it's just marked `hidden: true` so
+    // callers can exclude it from the red-dot/unread computation.
+    supabase
+      .from('time_discrepancy_hides')
+      .select('profile_id, work_date')
+      .eq('store_id', storeId)
+      .in('profile_id', profileIds)
+      .gte('work_date', fromDate)
+      .lte('work_date', today),
   ])
+
+  const hiddenKeys = new Set((hideRows ?? []).map((h) => `${h.profile_id}|${h.work_date}`))
 
   const periodIds = (periodRows ?? []).map((p) => p.id)
   if (!periodIds.length) return {}
@@ -209,6 +225,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       rosterStartTime: entry.start_time,
       rosterEndTime: entry.end_time,
       rosterBreakHalfHours: entry.break_half_hours,
+      hidden: hiddenKeys.has(`${entry.profile_id}|${entry.work_date}`),
     })
   }
   for (const profileId in result) {
@@ -226,6 +243,38 @@ export function isUnreadDiscrepancy(discrepancy, viewedAt) {
   if (!viewedAt) return true
   if (!discrepancy.latestSignal) return false // nothing timestamped to compare — treat a prior read as still covering it
   return discrepancy.latestSignal > viewedAt
+}
+
+// Jeff, 2026-10-11: a subject should only get the red dot while it has at
+// least one flagged day that hasn't been individually hidden ("Hide
+// prompts") — a profile whose only discrepancies are all hidden is no
+// different from one with none at all.
+export function hasVisibleDiscrepancy(discrepancy) {
+  return !!discrepancy?.days?.some((d) => !d.hidden)
+}
+
+// Toggles the global per-(profile, store, day) "Hide prompts" flag — see
+// migration 0100. Existence of a row = hidden, so checking the box inserts
+// one and unchecking it deletes it; unlike markTimeDiscrepancySeen below,
+// this is NOT scoped to the caller — every manager/admin viewer sees the
+// same hidden state for this day from now on.
+export async function setTimeDiscrepancyHidden(profileId, storeId, workDate, hidden, hiddenBy) {
+  if (!profileId || !storeId || !workDate) return
+  if (hidden) {
+    await supabase
+      .from('time_discrepancy_hides')
+      .upsert(
+        { profile_id: profileId, store_id: storeId, work_date: workDate, hidden_by: hiddenBy ?? null, hidden_at: new Date().toISOString() },
+        { onConflict: 'profile_id,store_id,work_date' }
+      )
+  } else {
+    await supabase
+      .from('time_discrepancy_hides')
+      .delete()
+      .eq('profile_id', profileId)
+      .eq('store_id', storeId)
+      .eq('work_date', workDate)
+  }
 }
 
 // Called when a manager/admin opens a staff member's Staff Time Logs detail

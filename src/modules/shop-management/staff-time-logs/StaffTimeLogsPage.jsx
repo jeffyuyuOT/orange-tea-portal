@@ -10,7 +10,9 @@ import { formatMinutes, formatBreakUnits } from '../../../lib/attendance'
 import {
   getStaffTimeDiscrepancies,
   isUnreadDiscrepancy,
+  hasVisibleDiscrepancy,
   markTimeDiscrepancySeen,
+  setTimeDiscrepancyHidden,
   DISCREPANCY_WINDOW_DAYS,
 } from '../../../lib/timeDiscrepancy'
 import AttendanceLogTable from '../../dashboard/time-attendance/AttendanceLogTable'
@@ -121,11 +123,33 @@ export default function StaffTimeLogsPage() {
 
   function selectStaff(s) {
     setSelected(s)
-    if (discrepancies[s.id] && isUnreadDiscrepancy(discrepancies[s.id], viewedAtBySubject.get(s.id))) {
+    if (discrepancies[s.id] && hasVisibleDiscrepancy(discrepancies[s.id]) && isUnreadDiscrepancy(discrepancies[s.id], viewedAtBySubject.get(s.id))) {
       const now = new Date().toISOString()
       setViewedAtBySubject((prev) => new Map(prev).set(s.id, now))
       markTimeDiscrepancySeen(profile.id, s.id).then(() => refreshTimeDiscrepancies?.())
     }
+  }
+
+  // Jeff, 2026-10-11: "每一筆的後面都新增Hide prompts，勾取的話此筆紀錄就不
+  // 會造成小紅點提示" — checking a day's box stops THAT day from counting
+  // toward the red dot (hasVisibleDiscrepancy below), for every viewer, not
+  // just this one (see timeDiscrepancy.js / migration 0100). Updated
+  // optimistically in local state so the checkbox and the sidebar's red dot
+  // both reflect it immediately; refreshTimeDiscrepancies() picks up the
+  // AuthContext-level copy used for the nav badge.
+  function toggleHidePrompt(subjectId, day, hidden) {
+    setDiscrepancies((prev) => {
+      const subject = prev[subjectId]
+      if (!subject) return prev
+      return {
+        ...prev,
+        [subjectId]: {
+          ...subject,
+          days: subject.days.map((d) => (d.date === day.date ? { ...d, hidden } : d)),
+        },
+      }
+    })
+    setTimeDiscrepancyHidden(subjectId, currentStoreId, day.date, hidden, profile.id).then(() => refreshTimeDiscrepancies?.())
   }
 
   const query = search.trim().toLowerCase()
@@ -164,32 +188,55 @@ export default function StaffTimeLogsPage() {
               Clocked time differs from rostered time by 15+ minutes on {discrepancies[selected.id].days.length}{' '}
               {discrepancies[selected.id].days.length === 1 ? 'day' : 'days'} (last {DISCREPANCY_WINDOW_DAYS} days):
             </p>
-            <ul className="space-y-1 text-sm text-red-700">
-              {discrepancies[selected.id].days.map((d) => (
-                <li key={d.date} className="flex flex-wrap items-center justify-between gap-2">
-                  <span>{format(parseISO(d.date), 'EEE, MMM d')}</span>
-                  <span>
-                    {/* Jeff, 2026-10-07: "Rostered time的地方點擊跳出視窗顯示
-                        roster上的時間跟break次數" — "Rostered Xh Ym" here is
-                        just a netted DURATION; clicking it shows the actual
-                        scheduled start/end clock time and break count it was
-                        computed from. */}
-                    <button
-                      type="button"
-                      onClick={() => setRosterDetailDay(d)}
-                      className="underline decoration-dotted underline-offset-2 hover:text-red-900"
-                    >
-                      Rostered {formatMinutes(d.scheduledMinutes)}
-                    </button>{' '}
-                    · Clocked {formatMinutes(d.actualMinutes)} ·{' '}
-                    <span className="font-medium">
-                      {d.diffMinutes > 0 ? '+' : ''}
-                      {formatMinutes(Math.abs(d.diffMinutes))} {d.diffMinutes > 0 ? 'more' : 'less'}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <table className="w-full text-sm text-red-700">
+              <thead>
+                <tr className="text-left text-xs font-medium uppercase tracking-wide text-red-400">
+                  <th className="w-0 pb-1 pr-2">Hide prompts</th>
+                  <th className="pb-1">Day</th>
+                  <th className="pb-1 text-right">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {discrepancies[selected.id].days.map((d) => (
+                  <tr key={d.date} className={d.hidden ? 'opacity-50' : ''}>
+                    <td className="py-1 pr-2 align-top">
+                      {/* Jeff, 2026-10-11: "每一筆的後面都新增Hide prompts，
+                          勾取的話此筆紀錄就不會造成小紅點提示" / "勾取欄上面
+                          用Hide prompts的圖示" — the checkbox column itself,
+                          headed "Hide prompts" per that follow-up. Checking
+                          it is global (see timeDiscrepancy.js), not just for
+                          this viewer. */}
+                      <input
+                        type="checkbox"
+                        checked={!!d.hidden}
+                        onChange={(e) => toggleHidePrompt(selected.id, d, e.target.checked)}
+                        title="Hide this day — it will no longer trigger the red dot prompt for anyone"
+                      />
+                    </td>
+                    <td className="py-1 align-top">{format(parseISO(d.date), 'EEE, MMM d')}</td>
+                    <td className="py-1 text-right align-top">
+                      {/* Jeff, 2026-10-07: "Rostered time的地方點擊跳出視窗顯示
+                          roster上的時間跟break次數" — "Rostered Xh Ym" here is
+                          just a netted DURATION; clicking it shows the actual
+                          scheduled start/end clock time and break count it was
+                          computed from. */}
+                      <button
+                        type="button"
+                        onClick={() => setRosterDetailDay(d)}
+                        className="underline decoration-dotted underline-offset-2 hover:text-red-900"
+                      >
+                        Rostered {formatMinutes(d.scheduledMinutes)}
+                      </button>{' '}
+                      · Clocked {formatMinutes(d.actualMinutes)} ·{' '}
+                      <span className="font-medium">
+                        {d.diffMinutes > 0 ? '+' : ''}
+                        {formatMinutes(Math.abs(d.diffMinutes))} {d.diffMinutes > 0 ? 'more' : 'less'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
@@ -250,7 +297,10 @@ export default function StaffTimeLogsPage() {
           ) : (
             <div className="mb-5 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
               {filtered.map((s) => {
-                const unread = discrepancies[s.id] && isUnreadDiscrepancy(discrepancies[s.id], viewedAtBySubject.get(s.id))
+                const unread =
+                  discrepancies[s.id] &&
+                  hasVisibleDiscrepancy(discrepancies[s.id]) &&
+                  isUnreadDiscrepancy(discrepancies[s.id], viewedAtBySubject.get(s.id))
                 return (
                   <button
                     key={s.id}
