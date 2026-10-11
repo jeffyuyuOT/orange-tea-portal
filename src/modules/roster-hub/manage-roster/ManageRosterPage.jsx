@@ -62,6 +62,20 @@ export default function ManageRosterPage() {
   // since it's about a different risk (wiping a LIVE published roster, not
   // staffing levels) and can apply even when staffing itself looks fine.
   const [loadedPeriodStatus, setLoadedPeriodStatus] = useState(null)
+  // Jeff, 2026-10-12: "brookside的10/12-10/18的班表...今天早上在bulletin的
+  // roster裡看不見了" — root-caused to a race in the "already published" Save
+  // block right below: it compares against `loadedPeriodStatus`, which only
+  // gets set once the week-loading effect's fetch resolves. Switching to an
+  // already-published week and clicking "Save (not published)" before that
+  // fetch finishes meant the block was still comparing against the PREVIOUS
+  // week's (or the initial null) status, so a plain Save could slip through
+  // and silently demote a live, published week back to draft (status +
+  // submitted_at get overwritten by the very next doPersist, with no
+  // deletion and no trace left behind — exactly why the roster itself still
+  // looked intact everywhere else, just missing from Bulletin's "submitted
+  // only" Roster tab). `loadingPeriod` tracks that fetch so Save/Submit can
+  // be disabled until it's actually known which status this week is at.
+  const [loadingPeriod, setLoadingPeriod] = useState(false)
   const [clearedFromPublished, setClearedFromPublished] = useState(false)
   const [clearPublishConfirm, setClearPublishConfirm] = useState(null)
   // Jeff, 2026-10-03: "已經publish的班表，只能用publish蓋過，不能用save(not
@@ -258,6 +272,10 @@ export default function ManageRosterPage() {
     // tracking fresh — whatever was cleared before belongs to the PREVIOUS
     // week being edited, not this one.
     setClearedFromPublished(false)
+    // See loadingPeriod's declaration above — Save/Submit stay disabled
+    // until this fetch resolves, so the "already published" block a few
+    // lines below is never checked against a stale/not-yet-loaded status.
+    setLoadingPeriod(true)
     ;(async () => {
       const { data: period } = await supabase
         .from('roster_periods')
@@ -267,6 +285,7 @@ export default function ManageRosterPage() {
         .maybeSingle()
       if (cancelled) return
       setLoadedPeriodStatus(period?.status ?? null)
+      setLoadingPeriod(false)
       if (!period) {
         setEntries([])
         setNotes('')
@@ -734,11 +753,15 @@ export default function ManageRosterPage() {
             />
           </label>
 
-          <Button variant="secondary" disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('draft')}>
+          <Button
+            variant="secondary"
+            disabled={saving || !!importReview || loadingPeriod}
+            onClick={() => handleSaveOrSubmit('draft')}
+          >
             <span className="sm:hidden">Save</span>
             <span className="hidden sm:inline">Save (not published)</span>
           </Button>
-          <Button disabled={saving || !!importReview} onClick={() => handleSaveOrSubmit('submitted')}>
+          <Button disabled={saving || !!importReview || loadingPeriod} onClick={() => handleSaveOrSubmit('submitted')}>
             <span className="sm:hidden">Submit</span>
             <span className="hidden sm:inline">Submit & Publish</span>
           </Button>
