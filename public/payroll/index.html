@@ -3987,6 +3987,126 @@ function openEmployeeCreateModal(storeId, onDone){
   };
 }
 
+// Jeff, 2026-10-11: "現在員工資料管理會有duplicate的情形，可能是直接從OT
+// portal弄過來的關係，可以把兩邊的資料合併成一個名字嗎" -- same root cause
+// as the name-matching bug just fixed above (see "在payroll裡從OT portal
+// 班表匯入..." near fetchStoresFromRoster): a store set up by hand BEFORE
+// Staff Information syncing existed already has its own short-name employee
+// records (no profileId, typed in to match the roster). Syncing only ever
+// matches an EXISTING record by profileId (byProfileId map in
+// syncEmployeesFromStaffInfo) -- a hand-typed record has none, so sync never
+// found it and just created a second, full-legal-name record (profileId
+// set, 🔗) alongside it, every single sync (every page load).
+//
+// "合併" keeps the OLD unlinked record -- right id, right short name that
+// actually matches the roster, right payment type/level/rates/bank details
+// Jeff already configured -- and only pulls the Staff Information link
+// (profileId) + synced fields (dob/tfn/email/phone/hireDate) across from
+// the duplicate, which is then deleted. Keeping the OLD record's id instead
+// of the new one matters twice over: its NAME is the one future roster
+// imports actually match (the duplicate's full-name would just recreate
+// today's bug), and once its profileId is set, syncEmployeesFromStaffInfo's
+// byProfileId lookup finds IT on the very next sync instead of re-creating
+// the duplicate it just absorbed.
+function firstToken(name){ return (name||"").trim().split(/\s+/)[0] || ""; }
+// Greedy, one-to-one per store: each unlinked record pairs with at most one
+// linked record (its closest match) and vice versa, so three people with
+// similar names can't all get suggested against the same duplicate.
+// "kind" is exact name match, unlinked name matches the linked name's FIRST
+// token (the common case -- "Jeff" vs synced "Jeff Chuang"), or a close
+// (edit-distance <= 2) near-match of that first token, for a likely typo
+// between the two records (e.g. "Hainess" vs synced "Haines Lin") -- same
+// levenshtein() already used for roster-name typo detection elsewhere.
+function findDuplicateEmployeePairs(storeId){
+  const inStore = currentEmployees.filter(e=>e.storeId===storeId);
+  const unlinked = inStore.filter(e=>!e.profileId);
+  const linked = inStore.filter(e=>e.profileId);
+  const usedLinked = new Set();
+  const pairs = [];
+  for(const u of unlinked){
+    const uName = (u.name||"").trim().toLowerCase();
+    if(!uName) continue;
+    let best=null, bestDist=Infinity, bestKind="";
+    for(const l of linked){
+      if(usedLinked.has(l.id)) continue;
+      const lFull = (l.name||"").trim().toLowerCase();
+      if(uName===lFull){ best=l; bestDist=-2; bestKind="exact"; break; }
+      const lFirst = firstToken(l.name).toLowerCase();
+      if(uName===lFirst){ if(bestDist>-1){ best=l; bestDist=-1; bestKind="first-name"; } continue; }
+      const d = levenshtein(uName, lFirst);
+      if(d<=2 && d<bestDist){ best=l; bestDist=d; bestKind="similar"; }
+    }
+    if(best){ usedLinked.add(best.id); pairs.push({unlinked:u, linked:best, kind:bestKind}); }
+  }
+  return pairs;
+}
+const MERGE_KIND_LABEL = {exact:"姓名完全相符", "first-name":"名字對得上開頭", similar:"名字很接近，可能是同一人"};
+function openMergeDuplicatesModal(storeId, onDone){
+  const pairs = findDuplicateEmployeePairs(storeId);
+  if(!pairs.length){ toast("這個分店目前沒有偵測到看起來重複的員工"); return; }
+  const rowsHtml = pairs.map((p,i)=>`<tr>
+    <td><input type="checkbox" class="mergechk" data-idx="${i}" checked></td>
+    <td>${escapeHtml(p.unlinked.name)}</td>
+    <td>${escapeHtml(p.linked.name)} <span class="small muted" title="已與 Staff Information 連結">🔗</span></td>
+    <td class="small muted">${MERGE_KIND_LABEL[p.kind]||''}</td>
+  </tr>`).join("");
+  const m = openModal(`
+    <div class="modal-header"><h3>🔀 合併重複員工</h3><button class="close-x" id="mclose">✕</button></div>
+    <p class="small muted">下列配對看起來是同一個人重複登記了兩筆資料（手動輸入的舊資料 + 從 Staff Information 同步進來的新資料）。確認合併後會保留「保留」那欄的資料（姓名、付款方式、Level、費率、銀行資訊都不變），把「併入後刪除」那欄的 Staff Information 連結、生日、TFN、Email、電話、入職日期併進去，再把那筆重複的刪除。已提交/儲存的薪水計算表紀錄不受影響。請勾選要合併的項目：</p>
+    <div class="table-wrap" style="max-height:320px;"><table><thead><tr><th></th><th>保留</th><th>併入後刪除</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    <div class="toolbar"><button class="primary" id="mconfirm">確認合併</button><button id="mcancel">取消</button></div>
+  `);
+  $("#mclose").onclick=closeModal; $("#mcancel").onclick=closeModal;
+  $("#mconfirm").onclick = async ()=>{
+    const checked = $all(".mergechk",m).filter(c=>c.checked).map(c=>pairs[Number(c.dataset.idx)]);
+    closeModal();
+    if(!checked.length) return;
+    for(const p of checked){ await mergeEmployees(p.unlinked, p.linked); }
+    currentEmployees = await idbAll("employees");
+    toast(`已合併 ${checked.length} 位重複員工`);
+    if(onDone) onDone(); else renderMain();
+  };
+}
+// employeeId only matters for two LIVE/in-progress things: rowCarryKey's
+// carry-forward of hand-typed adj/bonus across a re-import (see
+// buildRowsForStore), and the cross-store transfer row lookups
+// (`.employeeId===` near pendingTransfers/Direct-row handling above). A
+// "completed"/submitted calc sheet is a locked historical snapshot (see
+// openDeleteEmpModal's own comment on this) and is deliberately left
+// untouched here, exactly like a straight employee deletion already leaves
+// it untouched -- merging is not allowed to be less safe than deleting.
+async function repointEmployeeIdInDraftSheets(fromId, toId){
+  const sheets = await idbAll("calcSheets");
+  for(const s of sheets){
+    if(s.status==="completed") continue;
+    let changed = false;
+    Object.values(s.stores||{}).forEach(sd=>{
+      (sd.rows||[]).forEach(r=>{ if(r.employeeId===fromId){ r.employeeId=toId; changed=true; } });
+    });
+    if(changed) await idbPut("calcSheets", s);
+  }
+  // idbAll above returns fresh copies, not the live in-memory workingSheet
+  // object Tab 1 may currently have open/rendered -- repoint that too so an
+  // already-open draft reflects the merge immediately, no reload needed.
+  if(workingSheet && workingSheet.status!=="completed"){
+    Object.values(workingSheet.stores||{}).forEach(sd=>{
+      (sd.rows||[]).forEach(r=>{ if(r.employeeId===fromId) r.employeeId=toId; });
+    });
+  }
+}
+async function mergeEmployees(survivor, duplicate){
+  survivor.profileId = duplicate.profileId;
+  survivor.dob = duplicate.dob;
+  survivor.tfn = duplicate.tfn;
+  survivor.email = duplicate.email;
+  survivor.phone = duplicate.phone;
+  survivor.hireDate = duplicate.hireDate;
+  await saveEmployee(survivor);
+  await repointEmployeeIdInDraftSheets(duplicate.id, survivor.id);
+  await idbDelete("employees", duplicate.id);
+  currentEmployees = await idbAll("employees");
+}
+
 /* --- 3.2 員工資料管理 --- */
 async function renderEmpMgmt(container){
   if(!empListStoreId && currentStores.length) empListStoreId = currentStores[0].id;
@@ -3996,6 +4116,7 @@ async function renderEmpMgmt(container){
     <div class="row between">
       <div class="row"><label class="small muted">分店</label><select id="empstoresel">${opts||'<option>（請先新增分店）</option>'}</select></div>
       <div class="row">
+        <button id="mergeEmpBtn2" ${!empListStoreId?'disabled':''}>🔀 合併重複員工</button>
         <button id="syncEmpBtn2" ${!empListStoreId?'disabled':''}>🔄 從 Staff Information 同步</button>
         <button class="primary" id="addEmpBtn2" ${!empListStoreId?'disabled':''}>新增員工</button>
       </div>
@@ -4009,6 +4130,8 @@ async function renderEmpMgmt(container){
   if(addBtn) addBtn.onclick = ()=>openEmployeeCreateModal(empListStoreId, ()=>renderEmpMgmt(container));
   const syncBtn = $("#syncEmpBtn2");
   if(syncBtn) syncBtn.onclick = ()=>runEmpSync(true);
+  const mergeBtn = $("#mergeEmpBtn2");
+  if(mergeBtn) mergeBtn.onclick = ()=>openMergeDuplicatesModal(empListStoreId, ()=>renderEmpMgmt(container));
   renderEmpList();
   if(empListStoreId) await runEmpSync(false);
 }
