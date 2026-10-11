@@ -34,6 +34,10 @@ const REASON_PRESETS = [
   { value: 'forgot_in', label: 'Forgot to clock in at beginning of shift' },
   { value: 'forgot_out', label: 'Forgot to clock out at end of shift' },
   { value: 'forgot_in_out', label: 'Forgot to clock in/out at the shift' },
+  // Jeff, 2026-10-12: "更改時間的原因新增一個forgot to check in/out during
+  // break" — a fourth preset for the break-specific case (distinct from the
+  // three above, which are all about the shift's own start/end punches).
+  { value: 'forgot_break', label: 'Forgot to check in/out during break' },
   { value: 'custom', label: 'Add reasons…' },
 ]
 const PRESET_LABELS = Object.fromEntries(REASON_PRESETS.filter((p) => p.value !== 'custom').map((p) => [p.value, p.label]))
