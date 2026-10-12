@@ -135,6 +135,11 @@ export const SECTIONS = {
     label: 'Developer',
     pages: {
       payroll: 'Payroll',
+      // Jeff, 2026-10-12: bookkeeping (記帳) page — Sales figure + U帳 so far.
+      // Developer-only exactly like payroll: excluded from the admin and
+      // shop_manager defaults below, and the real boundary is is_developer()
+      // RLS on the bk_* tables (migration 0101_bk_bookkeeping.sql).
+      bk: 'BK',
     },
   },
 }
@@ -152,7 +157,7 @@ const ROLE_DEFAULTS = {
   // payroll app, whether by role default or by a permission_overrides
   // grant (UserDetailModal's Page Access section also hides that
   // checkbox from non-developer viewers, so admin can't grant it either).
-  admin: ALL.filter((key) => key !== 'developer_tools.payroll'),
+  admin: ALL.filter((key) => key !== 'developer_tools.payroll' && key !== 'developer_tools.bk'),
 
   // The developer role is admin's superset: same full access, PLUS the
   // payroll app. Hidden everywhere else (see visibleRoleEntries/
@@ -196,6 +201,7 @@ const ROLE_DEFAULTS = {
         'admin_center.training_journey_setting',
         'shop_management.qr_code',
         'developer_tools.payroll',
+        'developer_tools.bk',
       ].includes(key)
   ),
 

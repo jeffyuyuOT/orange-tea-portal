@@ -39,6 +39,7 @@ import SystemSettingPage from '../modules/admin-center/system-setting/SystemSett
 import AdminTrainingJourneySettingPage from '../modules/admin-center/training-journey/AdminTrainingJourneySettingPage'
 
 import PayrollPage from '../modules/developer/payroll/PayrollPage'
+import BkPage from '../modules/developer/bk/BkPage'
 
 // Jeff, 2026-09: Quiz Bank + Shop Training Database merged into a "Training
 // Centre" tab bar (TrainingCentreLayout.jsx), which itself lives inside
@@ -154,6 +155,7 @@ export default function AppRoutes() {
         />
 
         <Route path="/developer-tools/payroll" element={guarded('developer_tools.payroll', <PayrollPage />)} />
+        <Route path="/developer-tools/bk" element={guarded('developer_tools.bk', <BkPage />)} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
