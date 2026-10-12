@@ -270,6 +270,24 @@ export function shiftConflictsWithAvailability(startDecHour, endDecHour, dayRow,
   return cursor < shiftEnd
 }
 
+// Manage Roster's per-shift LEAVE check ("Manage Roaster compares not only
+// with my availability time but also with leave time, prioritizing leave
+// time") — true if any part of the shift overlaps ANY of that day's leave
+// windows (from leaveWindowOnDate), independent of whatever's separately
+// declared as available. Checked separately from, and takes priority over,
+// shiftConflictsWithAvailability above: a declared availability pattern
+// can't be trusted to already exclude leave on its own (e.g. "Lock time
+// pattern" auto-copies a pattern forward every week regardless of leave
+// registered afterwards — see describeDayWithLeave's own comment), so this
+// only ever looks at actual leave_requests rows, never at what the person
+// separately marked as available/unavailable that day.
+export function shiftConflictsWithLeave(startDecHour, endDecHour, leaveWindowsForDay) {
+  const shiftStart = Math.round(startDecHour * 60)
+  const shiftEnd = Math.round(endDecHour * 60)
+  if (!(shiftEnd > shiftStart)) return false
+  return (leaveWindowsForDay ?? []).some((lw) => windowsOverlap({ start: shiftStart, end: shiftEnd }, lw))
+}
+
 // Every date in the 7-day week starting `weekStartStr` ('yyyy-MM-dd'),
 // Monday through Sunday — same convention as ManageRosterPage's weekDates.
 export function weekDatesFrom(weekStartStr) {

@@ -112,6 +112,13 @@ export default function ManageRosterPage() {
   // (task 29) — refetched whenever the staff list or the week being edited
   // changes, so the check is always against the right week's declarations.
   const [availabilityByProfile, setAvailabilityByProfile] = useState({})
+  // Jeff, 2026-10-12: "Manage Roaster compares not only with my availability
+  // time but also with leave time, prioritizing leave time" — same idea
+  // StaffAvailabilityModal already applies to its read-only display
+  // (describeDayWithLeave), now extended to RosterEntryGrid's live per-shift
+  // warning too. { profileId: [leave_requests rows] } for this week's active
+  // leave, fetched alongside availability below.
+  const [leavesByProfile, setLeavesByProfile] = useState({})
 
   useEffect(() => {
     if (!actionMenuOpen) return
@@ -320,14 +327,33 @@ export default function ManageRosterPage() {
   useEffect(() => {
     if (!weekStart || !staff.length) {
       setAvailabilityByProfile({})
+      setLeavesByProfile({})
       return
     }
     let cancelled = false
-    loadWeekAvailabilityForProfiles(
-      staff.map((s) => s.id),
-      weekStart
-    ).then((result) => {
-      if (!cancelled) setAvailabilityByProfile(result)
+    const profileIds = staff.map((s) => s.id)
+    // Same "active leave touching this week" query StaffAvailabilityModal
+    // already uses, fetched alongside availability so both are ready
+    // together for RosterEntryGrid's per-shift check.
+    const weekStartDate = parseISO(weekStart)
+    const weekEndExclusive = addDays(weekStartDate, 7)
+    Promise.all([
+      loadWeekAvailabilityForProfiles(profileIds, weekStart),
+      supabase
+        .from('leave_requests')
+        .select('*')
+        .in('profile_id', profileIds)
+        .eq('status', 'active')
+        .lt('start_at', weekEndExclusive.toISOString())
+        .gt('end_at', weekStartDate.toISOString()),
+    ]).then(([avail, { data: leaves }]) => {
+      if (cancelled) return
+      setAvailabilityByProfile(avail)
+      const grouped = {}
+      ;(leaves ?? []).forEach((l) => {
+        ;(grouped[l.profile_id] ??= []).push(l)
+      })
+      setLeavesByProfile(grouped)
     })
     return () => {
       cancelled = true
@@ -916,6 +942,7 @@ export default function ManageRosterPage() {
         setEntries={setEntries}
         onHideStaff={persistHideStaff}
         availabilityByProfile={availabilityByProfile}
+        leavesByProfile={leavesByProfile}
       />
 
       <label className="mt-4 block">

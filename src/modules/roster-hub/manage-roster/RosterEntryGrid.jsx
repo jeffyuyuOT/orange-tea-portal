@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { dayHours, rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
-import { shiftConflictsWithAvailability, minutesToLabel } from '../../../lib/availability'
+import { shiftConflictsWithAvailability, shiftConflictsWithLeave, leaveWindowOnDate, minutesToLabel } from '../../../lib/availability'
 import { loadRosterDisplaySettings, rosterTitleStyle } from '../../../lib/trainingJourney'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
@@ -43,6 +43,12 @@ export default function RosterEntryGrid({
   // (still loading, or nobody's declared anything) just means the check
   // never fires — never blocks entering hours.
   availabilityByProfile,
+  // Jeff, 2026-10-12: "Manage Roaster compares not only with my availability
+  // time but also with leave time, prioritizing leave time" —
+  // { profileId: [leave_requests rows] } for this week's active leave (see
+  // ManageRosterPage), checked independently of and ahead of the
+  // availability check below.
+  leavesByProfile,
 }) {
   // "+ Add row" placeholders for a casual/one-off name not in Staff
   // Information yet. Keyed by a stable id (not by the typed name) so
@@ -74,15 +80,26 @@ export default function RosterEntryGrid({
   }, [])
 
   function checkConflict(row, date) {
-    if (!row.profileId || !availabilityByProfile) return
+    if (!row.profileId) return
     const entry = entries.find((e) => matches(row, e) && e.date === date)
     const start = entry?.startTime
     const end = entry?.endTime
     if (start === '' || start == null || end === '' || end == null) return
+    // Leave is checked first and wins — a shift overlapping approved leave
+    // is flagged as that, never just folded into (or masked by) the plain
+    // availability check below, even when the person's own declared
+    // availability doesn't separately flag it (see shiftConflictsWithLeave's
+    // comment for why those two can disagree).
+    const leaveWindowsForDay = (leavesByProfile?.[row.profileId] ?? []).map((l) => leaveWindowOnDate(l, date)).filter(Boolean)
+    if (shiftConflictsWithLeave(Number(start), Number(end), leaveWindowsForDay)) {
+      setConflictWarning({ type: 'leave', name: row.name, date, start: Number(start), end: Number(end) })
+      return
+    }
+    if (!availabilityByProfile) return
     const avail = availabilityByProfile[row.profileId]?.[date]
     if (!avail) return
     if (shiftConflictsWithAvailability(Number(start), Number(end), avail.dayRow, avail.windows)) {
-      setConflictWarning({ name: row.name, date, start: Number(start), end: Number(end) })
+      setConflictWarning({ type: 'availability', name: row.name, date, start: Number(start), end: Number(end) })
     }
   }
 
@@ -413,7 +430,7 @@ export default function RosterEntryGrid({
       <Modal
         open={!!conflictWarning}
         onClose={() => setConflictWarning(null)}
-        title="Outside declared availability"
+        title={conflictWarning?.type === 'leave' ? 'Scheduled during approved leave' : 'Outside declared availability'}
         footer={
           <Button variant="secondary" onClick={() => setConflictWarning(null)}>
             OK, schedule it anyway
@@ -421,11 +438,20 @@ export default function RosterEntryGrid({
         }
       >
         {conflictWarning && (
-          <p className="text-sm text-gray-600">
+          <p className={`text-sm ${conflictWarning.type === 'leave' ? 'text-red-600' : 'text-gray-600'}`}>
             {conflictWarning.name}'s shift on {format(parseISO(conflictWarning.date), 'EEE d MMM')} (
-            {minutesToLabel(Math.round(conflictWarning.start * 60))} – {minutesToLabel(Math.round(conflictWarning.end * 60))}) falls
-            outside the availability they declared for that day. You can still keep this shift — this is just a
-            heads-up in case their availability changed but hasn't been updated here yet.
+            {minutesToLabel(Math.round(conflictWarning.start * 60))} – {minutesToLabel(Math.round(conflictWarning.end * 60))}){' '}
+            {conflictWarning.type === 'leave' ? (
+              <>
+                falls during leave they have approved for that day. You can still keep this shift — this is just a
+                heads-up in case the leave was since cancelled but hasn't been updated here yet.
+              </>
+            ) : (
+              <>
+                falls outside the availability they declared for that day. You can still keep this shift — this is
+                just a heads-up in case their availability changed but hasn't been updated here yet.
+              </>
+            )}
           </p>
         )}
       </Modal>
