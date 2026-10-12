@@ -206,7 +206,7 @@ export default function StaffTimeLogsPage() {
             <table className="w-full text-sm text-red-700">
               <thead>
                 <tr className="text-left text-xs font-medium uppercase tracking-wide text-red-400">
-                  <th className="w-0 pb-1 pr-2">Hide prompts</th>
+                  <th className="w-0 pb-1 pr-2">Noted</th>
                   <th className="pb-1">Day</th>
                   <th className="pb-1 text-right">Details</th>
                 </tr>
@@ -217,15 +217,18 @@ export default function StaffTimeLogsPage() {
                     <td className="py-1 pr-2 align-top">
                       {/* Jeff, 2026-10-11: "每一筆的後面都新增Hide prompts，
                           勾取的話此筆紀錄就不會造成小紅點提示" / "勾取欄上面
-                          用Hide prompts的圖示" — the checkbox column itself,
-                          headed "Hide prompts" per that follow-up. Checking
-                          it is global (see timeDiscrepancy.js), not just for
-                          this viewer. */}
+                          用Hide prompts的圖示" — the checkbox column itself.
+                          Checking it is global (see timeDiscrepancy.js), not
+                          just for this viewer. Jeff, 2026-10-12: column label
+                          changed from "Hide prompts" to "Noted" (behavior
+                          unchanged — checking it still excludes this day from
+                          the red dot everywhere, per hasVisibleDiscrepancy in
+                          timeDiscrepancy.js). */}
                       <input
                         type="checkbox"
                         checked={!!d.hidden}
                         onChange={(e) => toggleHidePrompt(selected.id, d, e.target.checked)}
-                        title="Hide this day — it will no longer trigger the red dot prompt for anyone"
+                        title="Mark as noted — it will no longer trigger the red dot prompt for anyone"
                       />
                     </td>
                     <td className="py-1 align-top">{format(parseISO(d.date), 'EEE, MMM d')}</td>
