@@ -162,14 +162,27 @@ async function buildGeneratedFillBlankCandidates(eligibleFormulaIds, { requireMu
 // has no reliable typed-answer check: an auto-generated candidate has no
 // admin-curated accepted-answers list the way a hand-written Quiz Bank
 // question does, so "half cup" would otherwise demand that exact phrase.
+//
 // buildHardQuantityChoiceQuestion already tries to turn it into multiple
 // choice instead (other real recorded amounts for the same ingredient as
 // the wrong answers — see its own comment); when even that isn't possible
-// (no other real amount on record for this ingredient at all), the
-// question is dropped from the exam entirely instead of falling back to an
-// unreliable typed answer — same rule applies to the Top-10-stays-typed
-// branch below, since "most rigorous, typed" only makes sense for an actual
-// number to type.
+// (no other GENUINELY DIFFERENT amount on record for this ingredient at
+// all), the question is dropped from the exam entirely instead of falling
+// back to an unreliable typed answer — same rule applies to the Top-10-
+// stays-typed branch below, since "most rigorous, typed" only makes sense
+// for an actual number to type.
+//
+// Jeff, 2026-10-13: "你要出full是沒關係，但要把類似的答案避開，像Full跟To
+// full就是一樣的意思，不能出現在兩個選項" — "genuinely different" above used
+// to just mean "a different string": Milk's "Full" on one drink and "To
+// full" on another are the same real instruction, not two amounts a staff
+// member could tell apart, and nothing caught that, so a Taro Mash Milk
+// question ended up offering both as if they were different answers. Fixed
+// in formulaChoiceQuestion.js's sameQuantity — two free-text quantities now
+// normalize a leading "to " away before comparing, so "Full"/"To full"
+// collapse to one value and can never both appear as choices (one is still
+// free to come up as the question's correct answer; the other just can't
+// also show up as its own wrong answer).
 function selectFillBlankQuestions({
   candidates,
   fillBlankTarget,

@@ -7,9 +7,18 @@
 // buildHardQuantityChoiceQuestion (Formal Quiz's non-⭐-Top-10 formula
 // questions — see FormalQuizModal.jsx — picks the wrong answers closest in
 // value to the correct one, deliberately harder to rule out on sight).
-// buildHardQuantityChoiceQuestion also falls back to the easy variant
-// whenever the correct quantity isn't a number at all (e.g. "half cup") —
-// see its own comment below.
+//
+// Jeff, 2026-10-13: "之前不是說內容是文字的不會出成考題嗎? 為什麼這一題taro
+// mash milk的milk又變考題了，而且答案還有full跟to full令人混淆" then "你要出
+// full是沒關係，但要把類似的答案避開，像Full跟To full就是一樣的意思，不能出
+// 現在兩個選項" — a free-text quantity like "Full" is still fair game for a
+// question; the actual bug was that "Full" and "To full" (recorded for the
+// same Milk ingredient on two different drinks) are the exact same real
+// instruction typed two different ways, and nothing recognized that, so one
+// got picked as a "wrong answer" against the other. Fixed in sameQuantity
+// below: two free-text quantities now count as the same answer (and so can
+// never both appear as choices) once a leading "to " is normalized away —
+// "Full" and "To full" collapse to the same thing, "little" still doesn't.
 
 const CHOICE_KEYS = ['A', 'B', 'C', 'D']
 
@@ -41,6 +50,14 @@ export function isNumericQuantity(text) {
   return !!parseQuantity(text)
 }
 
+// "To full" -> "full"; "Full" -> "full"; "little" -> "little". Strips a
+// leading "to " restatement (and case/whitespace) so free-text quantities
+// that are really the same instruction worded two different ways collapse
+// to one value — see sameQuantity below.
+function normalizeFreeText(text) {
+  return (text ?? '').trim().toLowerCase().replace(/^to\s+/, '')
+}
+
 // Jeff, 2026-10-08: two recorded quantity_text strings can mean the exact same
 // real-world amount while looking different ("1" vs "1.0" — e.g. Winter
 // Lemon's Sugar (M) is "1" while Gelato JTMGT's was typed "1.0") because
@@ -49,14 +66,22 @@ export function isNumericQuantity(text) {
 // back an option that is numerically identical to the correct answer — two
 // choices a staff member has no real way to tell apart, since they're the
 // same quantity. This compares parsed numeric value + unit instead of raw
-// text, falling back to exact string equality when either side doesn't parse
-// as a number (e.g. "a pinch").
+// text for two parseable quantities.
+//
+// Jeff, 2026-10-13: the same problem exists for free text — Milk's "Full" on
+// one drink and "To full" on another are the same real instruction, not two
+// different amounts, so Taro Mash Milk's "Full" question ended up with "To
+// full" as a confusingly-identical wrong answer. When neither side parses as
+// a number, fall back to the normalized free-text compare above instead of
+// treating them as different just because the strings don't match exactly.
+// A number and a free-text value are never the same, regardless.
 function sameQuantity(a, b) {
   if (a === b) return true
   const pa = parseQuantity(a)
   const pb = parseQuantity(b)
-  if (!pa || !pb) return false
-  return pa.value === pb.value && pa.suffix.trim() === pb.suffix.trim()
+  if (pa && pb) return pa.value === pb.value && pa.suffix.trim() === pb.suffix.trim()
+  if (pa || pb) return false
+  return normalizeFreeText(a) === normalizeFreeText(b)
 }
 
 // Falls back to synthesized wrong answers (scaled versions of the real
@@ -95,10 +120,14 @@ function finish(questionText, quantityText, distractors) {
 // answers: other real quantities recorded anywhere for the same ingredient
 // first (still plausible-looking, harder to rule out on sight than an
 // obviously-synthesized number), picked at random, and only synthesized
-// (scaled) ones when there isn't enough real variety on record. Returns null
-// when neither source produced any distractor at all (no real alternative on
-// record and quantityText wasn't a parseable number to scale) — the caller
-// should keep the question as typed fill-in-the-blank in that case.
+// (scaled, which only works for a parseable number — see
+// synthesizeDistractors) ones when there isn't enough real variety on
+// record. sameQuantity's free-text normalizing (above) keeps a same-meaning
+// restatement like "To full" from ever being offered as a wrong answer
+// against "Full". Returns null when neither source produced any distractor
+// at all (no genuinely-different real alternative on record and
+// quantityText wasn't a parseable number to scale) — the caller should keep
+// the question as typed fill-in-the-blank in that case.
 export function buildQuantityChoiceQuestion({ questionText, quantityText, realPool }) {
   const seen = [quantityText]
   const candidates = shuffle((realPool ?? []).filter((v) => !sameQuantity(v, quantityText)))
@@ -132,11 +161,14 @@ export function buildHardQuantityChoiceQuestion({ questionText, quantityText, re
     // "Closest value" is meaningless for a free-text quantity like "half
     // cup" — fall back to the easy variant's plain random-real-alternate
     // strategy instead (e.g. other recipes' own recorded Herbal Jelly
-    // amounts become the wrong answers). Still returns null, same as
-    // below, when there isn't even one other real value on record for this
-    // ingredient — the caller drops the question rather than ask it as an
-    // unreliable typed free-text answer (no admin-curated accepted-answers
-    // list exists for an auto-generated candidate).
+    // amounts become the wrong answers). buildQuantityChoiceQuestion's
+    // sameQuantity check now filters out a same-meaning restatement (e.g.
+    // Milk's "To full" against a "Full" correct answer) before it ever gets
+    // offered as a choice. Still returns null, same as below, when there
+    // isn't even one other *genuinely different* real value on record for
+    // this ingredient — the caller drops the question rather than ask it as
+    // an unreliable typed free-text answer (no admin-curated accepted-
+    // answers list exists for an auto-generated candidate).
     return buildQuantityChoiceQuestion({ questionText, quantityText, realPool })
   }
   const ranked = (realPool ?? [])

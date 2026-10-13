@@ -36,9 +36,13 @@ function isSeeTablePlaceholder(quantityText) {
 // Auto-generated "what's the quantity of this ingredient" questions, built
 // live from formula_item_ingredients rather than curated in the quiz bank —
 // any ingredient with a recorded quantity_text on a memorized item is fair
-// game. Wrong answers are, first choice, other real quantities recorded for
-// that same ingredient elsewhere (still plausible-looking), and only
-// synthesized (scaled up/down) when there isn't enough real variety.
+// game, free-text amounts (e.g. "Full") included. Wrong answers are, first
+// choice, other real quantities recorded for that same ingredient elsewhere
+// (still plausible-looking), and only synthesized (scaled up/down) when
+// there isn't enough real variety — buildQuantityChoiceQuestion's
+// sameQuantity check (formulaChoiceQuestion.js) keeps a same-meaning
+// restatement of a free-text amount (Milk's "To full" vs. "Full") from ever
+// being offered as a wrong answer against it.
 // `top10Ids`/`top10Weight`: same ⭐ Top 10 boost Formal Quiz already applied
 // to its fill-in-the-blank pool (formal_quiz_settings.top10_fill_blank_weight)
 // — now shared across both quiz types, see the "Formula fill-in-the-blank
