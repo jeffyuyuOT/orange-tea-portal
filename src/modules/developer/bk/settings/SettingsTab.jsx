@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
-import { Notice, SubTabs } from '../bkUi'
+import { Notice, SubTabs, inputCls } from '../bkUi'
 import { listWorkbookSheetNames } from '../bkImport'
 import { loadDividendData } from '../bkDividendData'
 import { exportBkBackup, restoreBkBackup } from '../bkBackup'
@@ -63,6 +63,7 @@ const ENTRIES_SHEET_RE = /收支|entries?/i
 //   separate from the portal-wide 備份 under 系統設定).
 export default function SettingsTab({ stores }) {
   const [sub, setSub] = useState('import')
+  const [templateChoice, setTemplateChoice] = useState(TEMPLATES[0][0])
   const [file, setFile] = useState(null)
   const [kind, setKind] = useState(null)
   const [uSheets, setUSheets] = useState(null)
@@ -157,12 +158,25 @@ export default function SettingsTab({ stores }) {
 
           <div className="space-y-2 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-sm font-semibold text-brand-900">下載匯入範本</div>
-            <div className="flex flex-wrap gap-2">
-              {TEMPLATES.map(([label, fn]) => (
-                <Button key={label} variant="secondary" onClick={() => fn()}>
-                  {label} 範本
-                </Button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className={inputCls}
+                value={templateChoice}
+                onChange={(e) => setTemplateChoice(e.target.value)}
+                aria-label="選擇範本"
+              >
+                {TEMPLATES.map(([label]) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="secondary"
+                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1]()}
+              >
+                下載範本
+              </Button>
             </div>
           </div>
 
