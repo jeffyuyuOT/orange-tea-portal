@@ -7,7 +7,7 @@ import { EventEditor, EventTable, NoteModal, PayoutForm, StatCard } from './bonu
 import { SettlementModal } from './SettlementParts'
 import DividendExcelImport from './DividendExcelImport'
 
-// 分紅記錄: all-time figures per party (總共 / 已領取 / 可領) and the payouts
+// 收成記錄: all-time figures per party (總共 / 已領取 / 可領) and the payouts
 // made to each, filterable by date and method.
 export default function PayoutPanel({ view }) {
   const { combined: c, stores, storeId, storeNames, partyNames, data, reload, storesInView } = view
@@ -89,7 +89,7 @@ export default function PayoutPanel({ view }) {
           }}
         />
       )}
-      <p className="text-xs text-gray-500">這裡是從開始到現在的全部資料（不受分紅完全結算影響）。總共分紅 = (所有入金 − Cost) × 加權；可領分紅 = 總共分紅 − 已領取分紅。</p>
+      <p className="text-xs text-gray-500">這裡是從開始到現在的全部資料（不受收成完全結算影響）。總共收成 = (所有入金 − Cost) × 加權；可領收成 = 總共收成 − 已領取收成。</p>
       {data.parties.length === 0 && <Notice kind="info">還沒有設定任何 party。請先到「設定」新增。</Notice>}
 
       {c.allTimeParties.map((p) => {
@@ -98,9 +98,9 @@ export default function PayoutPanel({ view }) {
           <section key={p.key} className="space-y-2 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-base font-semibold text-brand-900">{p.name}</div>
             <div className="grid gap-3 sm:grid-cols-3">
-              <StatCard label="可領分紅" value={p.claimable} />
-              <StatCard label="已領取分紅" value={p.paid} />
-              <StatCard label="總共分紅" value={p.total} />
+              <StatCard label="可領收成" value={p.claimable} />
+              <StatCard label="已領取收成" value={p.paid} />
+              <StatCard label="總共收成" value={p.total} />
             </div>
             <EventTable
               events={rows}
@@ -118,16 +118,16 @@ export default function PayoutPanel({ view }) {
       <Modal open={adding === 'choose'} onClose={() => setAdding(null)} title="新增">
         <div className="grid gap-3 sm:grid-cols-2">
           <button type="button" onClick={() => setAdding('payout')} className="rounded-xl border border-brand-200 p-4 text-left hover:bg-brand-50">
-            <div className="font-semibold text-brand-800">分紅紀錄</div>
-            <div className="mt-1 text-xs text-gray-500">記錄某個 party 領了多少分紅（Bank 從 Jeff B 扣、Cash 從 Mao保 扣）。</div>
+            <div className="font-semibold text-brand-800">收成紀錄</div>
+            <div className="mt-1 text-xs text-gray-500">記錄某個 party 領了多少收成（Bank 從 Jeff B 扣、Cash 從 Mao保 扣）。</div>
           </button>
           <button type="button" onClick={() => setAdding('settle')} className="rounded-xl border border-brand-200 p-4 text-left hover:bg-brand-50">
-            <div className="font-semibold text-brand-800">分紅結算紀錄</div>
-            <div className="mt-1 text-xs text-gray-500">對照每個 party 的可領取分紅和擁有的金庫資產，只供參考，不改數據。</div>
+            <div className="font-semibold text-brand-800">收成結算紀錄</div>
+            <div className="mt-1 text-xs text-gray-500">對照每個 party 的可領取收成和擁有的金庫資產，只供參考，不改數據。</div>
           </button>
         </div>
       </Modal>
-      <Modal open={adding === 'payout'} onClose={() => setAdding(null)} title="新增分紅紀錄">
+      <Modal open={adding === 'payout'} onClose={() => setAdding(null)} title="新增收成紀錄">
         <PayoutForm
           stores={stores}
           storeId={storeId}

@@ -44,7 +44,7 @@ export function ConfirmDelete({ open, text, onCancel, onConfirm }) {
       }
     >
       <p className="whitespace-pre-wrap text-sm text-gray-700">{text}</p>
-      <p className="mt-2 text-xs text-red-600">刪除後無法復原，金庫和分紅的數字會跟著重新計算。</p>
+      <p className="mt-2 text-xs text-red-600">刪除後無法復原，金庫和收成的數字會跟著重新計算。</p>
     </Modal>
   )
 }
@@ -135,7 +135,7 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
   )
 }
 
-// 新增 / 編輯分紅記錄.
+// 新增 / 編輯收成記錄.
 export function PayoutForm({ stores, storeId, parties, initial = null, onSaved, onCancel, onDelete }) {
   const editing = !!initial?.id
   const [store, setStore] = useState(initial?.store ?? storeId ?? stores[0]?.id ?? '')
@@ -193,8 +193,8 @@ export function PayoutForm({ stores, storeId, parties, initial = null, onSaved, 
       <label className="flex items-start gap-2 text-sm text-gray-700">
         <input type="checkbox" className="mt-1" checked={settle} onChange={(e) => setSettle(e.target.checked)} />
         <span>
-          分紅結算
-          <span className="block text-xs text-gray-400">勾選後，如果這筆之後金庫總額剛好歸零，會顯示為「分紅完全結算」，金庫從下一筆重新計算。</span>
+          收成結算
+          <span className="block text-xs text-gray-400">勾選後，如果這筆之後金庫總額剛好歸零，會顯示為「收成完全結算」，金庫從下一筆重新計算。</span>
         </span>
       </label>
       <Field label="附註（選填）">
@@ -223,13 +223,13 @@ export function PayoutForm({ stores, storeId, parties, initial = null, onSaved, 
 }
 
 // A list of events. `signed` shows payouts / cost as negative (vault detail).
-// Rows of 分紅頁 data are clickable to edit; U帳 入金 rows are read-only.
+// Rows of 收成頁 data are clickable to edit; U帳 入金 rows are read-only.
 export function EventTable({ events, storeNames, showStore, partyNames, fullKeys, signed = false, onOpen, onNote }) {
   if (events.length === 0) return <p className="py-6 text-center text-sm text-gray-400">沒有紀錄。</p>
   const describe = (ev) => {
     if (ev.type === 'income') return `入金 · ${BUCKET_LABELS[ev.bucket] ?? ev.bucket}${ev.source === 'ucash' ? '（U帳）' : ''}`
     if (ev.type === 'cost') return 'Cost'
-    return `分紅 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'} · ${METHOD_LABELS[ev.method] ?? ev.method}`
+    return `收成 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'} · ${METHOD_LABELS[ev.method] ?? ev.method}`
   }
   return (
     <div className="overflow-x-auto rounded-xl border border-brand-100">
@@ -264,7 +264,7 @@ export function EventTable({ events, storeNames, showStore, partyNames, fullKeys
                 <td className="px-3 py-2">
                   {describe(ev)}
                   {label && (
-                    <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${label === '分紅完全結算' ? 'bg-green-100 text-green-700' : 'bg-brand-100 text-brand-700'}`}>
+                    <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${label === '收成完全結算' ? 'bg-green-100 text-green-700' : 'bg-brand-100 text-brand-700'}`}>
                       {label}
                     </span>
                   )}
@@ -293,7 +293,7 @@ export function EventEditor({ ev, stores, parties, onClose, onChanged, onDelete 
   const isPayout = ev.type === 'payout'
   return (
     <>
-      <Modal open={!confirming} onClose={onClose} title={isPayout ? '編輯分紅記錄' : ev.type === 'cost' ? '編輯 Cost' : '編輯入金'}>
+      <Modal open={!confirming} onClose={onClose} title={isPayout ? '編輯收成記錄' : ev.type === 'cost' ? '編輯 Cost' : '編輯入金'}>
         {isPayout ? (
           <PayoutForm
             stores={stores}
@@ -317,7 +317,7 @@ export function EventEditor({ ev, stores, parties, onClose, onChanged, onDelete 
       </Modal>
       <ConfirmDelete
         open={confirming}
-        text={`${ev.date}　${isPayout ? '分紅' : ev.type === 'cost' ? 'Cost' : '入金'}　${fmtMoney(ev.amount)}`}
+        text={`${ev.date}　${isPayout ? '收成' : ev.type === 'cost' ? 'Cost' : '入金'}　${fmtMoney(ev.amount)}`}
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           await onDelete(ev)

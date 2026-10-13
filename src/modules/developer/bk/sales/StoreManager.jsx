@@ -184,7 +184,7 @@ export default function StoreManager({ stores, onChanged }) {
             {hasData ? (
               <Notice kind="error">
                 刪除後，這間分店在 BK 的所有資料會一併永久消失、無法復原：Sales figure {deleting.counts.sfMonths} 個月、U帳每日紀錄{' '}
-                {deleting.counts.cashDays} 天、收支 {deleting.counts.entries} 筆、分紅 party {deleting.counts.parties} 個、分紅入金/cost {deleting.counts.dividendEntries} 筆、分紅記錄 {deleting.counts.payouts} 筆，以及 payment type 設定與期初餘額。
+                {deleting.counts.cashDays} 天、收支 {deleting.counts.entries} 筆、收成 party {deleting.counts.parties} 個、收成入金/cost {deleting.counts.dividendEntries} 筆、收成記錄 {deleting.counts.payouts} 筆，以及 payment type 設定與期初餘額。
               </Notice>
             ) : (
               <Notice kind="info">這間分店在 BK 還沒有任何資料（只會移除它的 payment type 設定）。</Notice>

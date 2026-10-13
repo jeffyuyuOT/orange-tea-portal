@@ -17,18 +17,24 @@ import EntriesExcelImport from '../ucash/EntriesExcelImport'
 import DividendExcelImport from '../bonus/DividendExcelImport'
 import JeffOwedExcelImport from './JeffOwedExcelImport'
 import EmmaClaimExcelImport from './EmmaClaimExcelImport'
+import SfMaintenance from '../sales/SfMaintenance'
+import PartySettings from '../bonus/PartySettings'
 
 const SUBTABS = [
   ['import', '匯入'],
   ['backup', '備份'],
+  ['sf', 'SF'],
+  ['bonus', '收成'],
 ]
 
+// SF's template has one tab per store (each with that store's own payment-
+// type columns), so it needs the full store list; the others are generic.
 const TEMPLATES = [
-  ['SF', downloadSfTemplate],
-  ['U帳', downloadUAccountTemplate],
-  ['分紅', downloadDividendTemplate],
-  ['積欠 Jeff', downloadJeffOwedTemplate],
-  ['積欠 Emma', downloadEmmaClaimTemplate],
+  ['SF', (stores) => downloadSfTemplate(stores)],
+  ['U帳', () => downloadUAccountTemplate()],
+  ['收成', () => downloadDividendTemplate()],
+  ['積欠 Jeff', () => downloadJeffOwedTemplate()],
+  ['積欠 Emma', () => downloadEmmaClaimTemplate()],
 ]
 
 // Filename -> which pipeline to run, checked in this order (Jeff/Emma first
@@ -36,7 +42,7 @@ const TEMPLATES = [
 const ROUTES = [
   ['jeff', /jeff/i, '積欠 Jeff'],
   ['emma', /emma/i, '積欠 Emma'],
-  ['bonus', /分紅|dividend|bonus/i, '分紅'],
+  ['bonus', /收成|dividend|bonus/i, '收成'],
   ['u', /u\s*帳|u\s*account|ucash|分店現金|收支/i, 'U帳'],
   ['sf', /\bsf\b|sales\s*figure/i, 'SF'],
 ]
@@ -56,12 +62,17 @@ const ENTRIES_SHEET_RE = /收支|entries?/i
 //   匯入: download the 5 templates, then upload a file — routed to the right
 //   importer by its filename (falling back to a manual chooser when the name
 //   doesn't say). SF and U帳 > 分店現金 are sheet-style grids and ask for a
-//   Store + 年月 first (via BackfillGridImport); U帳 > 收支, 分紅 and 積欠 are
+//   Store + 年月 first (via BackfillGridImport); U帳 > 收支, 收成 and 積欠 are
 //   append-only ledgers that write straight to the database with automatic
 //   dedup, no separate 儲存 step.
 //   備份: BK's own export/restore (see bkBackup.js for why this is kept
 //   separate from the portal-wide 備份 under 系統設定).
-export default function SettingsTab({ stores }) {
+//   SF / 收成: SfMaintenance (payment types + 分店管理) and PartySettings
+//   (收成 party 設置), moved here from the Sales figure / 收成 tabs — those
+//   are configuration, not day-to-day entry, so they live alongside the rest
+//   of this tab's setup-and-maintenance surfaces instead of cluttering the
+//   tabs people use every day.
+export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesChanged }) {
   const [sub, setSub] = useState('import')
   const [templateChoice, setTemplateChoice] = useState(TEMPLATES[0][0])
   const [file, setFile] = useState(null)
@@ -94,8 +105,10 @@ export default function SettingsTab({ stores }) {
     }
   }, [file, kind, uSheets])
 
+  // 收成's data is needed both by the 匯入 pipeline (dedup against existing
+  // rows) and by the 收成 sub-tab's party settings — loaded once, shared.
   useEffect(() => {
-    if (kind !== 'bonus' || dividendData) return
+    if ((kind !== 'bonus' && sub !== 'bonus') || dividendData) return
     let cancelled = false
     ;(async () => {
       try {
@@ -108,7 +121,15 @@ export default function SettingsTab({ stores }) {
     return () => {
       cancelled = true
     }
-  }, [kind, dividendData])
+  }, [kind, sub, dividendData])
+
+  async function reloadDividendData() {
+    try {
+      setDividendData(await loadDividendData())
+    } catch (e) {
+      setError(e.message)
+    }
+  }
 
   function pickFile(f) {
     setError('')
@@ -173,17 +194,23 @@ export default function SettingsTab({ stores }) {
               </select>
               <Button
                 variant="secondary"
-                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1]()}
+                disabled={templateChoice === 'SF' && stores.length === 0}
+                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores)}
               >
                 下載範本
               </Button>
             </div>
+            {templateChoice === 'SF' && (
+              <div className="text-xs text-gray-500">
+                {stores.length === 0 ? '還沒有任何分店，無法產生 SF 範本。' : 'SF 範本每個分店各自一個分頁，欄位是該分店目前設定的 payment type。'}
+              </div>
+            )}
           </div>
 
           <div className="space-y-3 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-sm font-semibold text-brand-900">上傳檔案</div>
             <div className="text-xs text-gray-500">
-              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「U帳」「分紅」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
+              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
             </div>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
               選擇 Excel 檔案
@@ -280,7 +307,7 @@ export default function SettingsTab({ stores }) {
 
                 {kind === 'bonus' &&
                   (stores.length === 0 ? (
-                    <Notice kind="info">還沒有任何分店，無法匯入分紅。</Notice>
+                    <Notice kind="info">還沒有任何分店，無法匯入收成。</Notice>
                   ) : !dividendData ? (
                     <LoadingSpinner label="讀取資料…" />
                   ) : (
@@ -289,7 +316,7 @@ export default function SettingsTab({ stores }) {
                       stores={stores}
                       data={dividendData}
                       onClose={reset}
-                      onImported={(count) => imported(count, '分紅')}
+                      onImported={(count) => imported(count, '收成')}
                     />
                   ))}
 
@@ -354,6 +381,24 @@ export default function SettingsTab({ stores }) {
           )}
         </div>
       )}
+
+      <div className={sub === 'sf' ? '' : 'hidden'}>
+        <SfMaintenance
+          stores={stores}
+          sfStoreId={stores[0]?.id ?? null}
+          active={sub === 'sf'}
+          onChanged={onPaymentTypesChanged}
+          onStoresChanged={onStoresChanged}
+        />
+      </div>
+
+      <div className={sub === 'bonus' ? '' : 'hidden'}>
+        {!dividendData ? (
+          <LoadingSpinner label="讀取資料…" />
+        ) : (
+          <PartySettings stores={stores} data={dividendData} reload={reloadDividendData} />
+        )}
+      </div>
     </div>
   )
 }

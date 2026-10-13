@@ -8,9 +8,9 @@ import { fmtMoney } from '../bkUtils'
 
 const KINDS = [
   ['income', '入金紀錄'],
-  ['payout', '分紅紀錄'],
+  ['payout', '收成紀錄'],
   ['cost', 'Cost 紀錄'],
-  ['settlement', '分紅結算紀錄'],
+  ['settlement', '收成結算紀錄'],
 ]
 
 // 歷史紀錄: every record (all time), by kind, filterable by date and store.
@@ -111,7 +111,7 @@ export default function BonusHistory({ view }) {
       </div>
       {kind === 'settlement' ? (
         <>
-          <p className="text-xs text-gray-500">共 {settlements.length} 筆。分紅結算只是結算參考，不會更動任何金庫和分紅數據。點一筆看內容。</p>
+          <p className="text-xs text-gray-500">共 {settlements.length} 筆。收成結算只是結算參考，不會更動任何金庫和收成數據。點一筆看內容。</p>
           {settlements.length === 0 ? (
             <p className="py-6 text-center text-sm text-gray-400">沒有紀錄。</p>
           ) : (

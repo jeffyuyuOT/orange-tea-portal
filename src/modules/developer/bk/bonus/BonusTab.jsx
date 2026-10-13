@@ -1,32 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { combineReports, storeReport } from '../bkDividend'
 import { loadDividendData } from '../bkDividendData'
 import { Notice, StoreTabs, SubTabs } from '../bkUi'
-import BonusHistory from './BonusHistory'
-import PartySettings from './PartySettings'
 import PayoutPanel from './PayoutPanel'
 import VaultOverview from './VaultOverview'
 
 const SUBTABS = [
   ['vault', '金庫概況'],
-  ['payout', '分紅記錄'],
-  ['history', '歷史紀錄'],
-  ['settings', '設定'],
+  ['payout', '收成記錄'],
 ]
 
-// 分紅: 金庫概況 | 分紅記錄 | 歷史紀錄 | 設定. The store filter (or 全部分店) is
-// shared by the first three; 設定 has its own per-store tabs and stays mounted
-// so unsaved party edits aren't lost when switching sub-tabs.
+// 收成: 金庫概況 | 收成記錄. 歷史紀錄 moved to the top-level 歷史紀錄 tab
+// (history/HistoryBonusView.jsx) and 設定 (party 設置) moved to 系統設置
+// (settings/SettingsTab.jsx) — both still read/write the same bk_* tables via
+// bkDividendData.js, just from a different page. The store filter (or
+// 全部分店) is shared by the two sub-tabs left here.
 export default function BonusTab({ stores, topActive = true }) {
   const [sub, setSub] = useState('vault')
   const [storeId, setStoreId] = useState(null) // null = 全部分店
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
-  const settingsDirty = useRef(false)
-  const onDirtyChange = useCallback((d) => {
-    settingsDirty.current = d
-  }, [])
 
   const reload = useCallback(async () => {
     try {
@@ -61,7 +55,7 @@ export default function BonusTab({ stores, topActive = true }) {
   }, [data, stores, storeId, reload])
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何分店。請先到 Sales figure › 資料維護 › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
   }
 
   return (
@@ -71,13 +65,9 @@ export default function BonusTab({ stores, topActive = true }) {
       {!data && !error && <LoadingSpinner />}
       {data && view && (
         <>
-          {sub !== 'settings' && <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />}
+          <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />
           {sub === 'vault' && <VaultOverview view={view} />}
           {sub === 'payout' && <PayoutPanel view={view} />}
-          {sub === 'history' && <BonusHistory view={view} />}
-          <div className={sub === 'settings' ? '' : 'hidden'}>
-            <PartySettings stores={stores} data={data} reload={reload} onDirtyChange={onDirtyChange} />
-          </div>
         </>
       )}
     </div>

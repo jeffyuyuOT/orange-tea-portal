@@ -7,11 +7,11 @@ import { bulkImportDividendRows } from '../bkDividendData'
 import { fmtMoney } from '../bkUtils'
 import { Notice } from '../bkUi'
 
-const KIND_LABEL = { income: '入金', cost: 'Cost', payout: '分紅' }
+const KIND_LABEL = { income: '入金', cost: 'Cost', payout: '收成' }
 const METHOD_LABEL = { bank: 'Bank', cash: 'Cash' }
 
-// Point 5: backfill 分紅's manual 入金/Cost 紀錄 (bk_dividend_entries) and
-// 分紅紀錄/payouts (bk_payouts) from Excel. Writes straight to the database
+// Point 5: backfill 收成's manual 入金/Cost 紀錄 (bk_dividend_entries) and
+// 收成紀錄/payouts (bk_payouts) from Excel. Writes straight to the database
 // (these are append-only records), so duplicates — same store/date/kind(or
 // party+method)/amount — are skipped automatically and can't be forced.
 export default function DividendExcelImport({ file, stores, data, onImported, onClose }) {
@@ -73,7 +73,7 @@ export default function DividendExcelImport({ file, stores, data, onImported, on
       open
       wide
       onClose={onClose}
-      title="匯入 Excel — 分紅"
+      title="匯入 Excel — 收成"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

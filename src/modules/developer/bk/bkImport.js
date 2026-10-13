@@ -594,12 +594,12 @@ export function markLedgerDuplicates(rows, existing) {
   })
 }
 
-// 分紅: manual 入金/Cost entries (bk_dividend_entries) and payouts
+// 收成: manual 入金/Cost entries (bk_dividend_entries) and payouts
 // (bk_payouts). Same flat-candidate-list shape as the ledger parser above.
 const DIVIDEND_KIND_ALIASES = [
   ['income', ['income', '入金', 'ruju']],
   ['cost', ['cost']],
-  ['payout', ['payout', '分紅', '分紅紀錄']],
+  ['payout', ['payout', '收成', '收成紀錄']],
 ]
 function parseDividendKindCell(v) {
   const n = norm(v)
@@ -795,7 +795,7 @@ export function markJeffOwedDuplicates(rows, existing) {
 // (the submitted date, total amount and note are all that's known about it).
 const EMMA_CLAIM_HEADER_MAP = [
   ['date', ['date', '日期', '日', 'submitted', '提交日期']],
-  ['amount', ['amount', '金額', 'bonus', '分紅金額']],
+  ['amount', ['amount', '金額', 'bonus', '收成金額']],
   ['note', ['note', '附註', '備註']],
 ]
 

@@ -4,6 +4,8 @@
 // guesses which importer to use from the uploaded file's name, and these are
 // what that file is named if the person re-uploads it unchanged.
 import { newWorkbook, download } from './bkExcel'
+import { loadPaymentTypes } from './bkData'
+import { buildColumns } from './bkUtils'
 
 function headerRow(ws, headers) {
   const row = ws.addRow(headers)
@@ -27,15 +29,48 @@ async function buildTemplate(sheets) {
   return wb
 }
 
-export async function downloadSfTemplate() {
-  const wb = await buildTemplate([
-    {
-      name: 'SF',
-      note: '只支援 Date / Store / O.CA / O.POST 這幾個通用欄位（不含各分店自訂的 payment type 明細）。要匯入某個分店某個月份完整的 SF 明細，請到 Sales figure 那個月份的頁面用「匯入 Excel」。',
-      headers: ['Date', 'Store', 'O.CA', 'O.POST'],
-      example: ['2026-10-05', 'Sunnybank', 1234.56, 1500],
-    },
-  ])
+// Excel worksheet names can't be blank, can't exceed 31 chars, and can't
+// contain \ / ? * [ ] : — exported so BackfillGridImport.jsx can derive the
+// exact same name from a store to look its tab back up on import.
+const FORBIDDEN_SHEET_CHARS = /[\\/?*[\]:]/g
+export function sheetNameForStore(name) {
+  return String(name).replace(FORBIDDEN_SHEET_CHARS, ' ').trim().slice(0, 31) || 'Store'
+}
+
+// Same header shape parseSfRows() actually reads for a given store's
+// payment types: Cash / Pos total are computed (never typed into), a column
+// with subs is typed via its subs (each labelled "Sub (Parent)" same as the
+// sheet's own export), and a plain column is typed directly.
+function sfTemplateHeaders(columns) {
+  const headers = ['Date']
+  for (const col of columns) {
+    if (col.name === 'Cash' || col.name === 'Pos total') continue
+    if (col.subs.length > 0) {
+      for (const sub of col.subs) headers.push(`${sub.name} (${col.name})`)
+    } else {
+      headers.push(col.name)
+    }
+  }
+  headers.push('O.CA', 'O.POST')
+  return headers
+}
+
+// One tab per store, each with that store's own payment-type columns (not
+// just the generic Date/O.CA/O.POST fields) — so this template round-trips
+// through BackfillGridImport exactly like a single store's own Sales figure
+// 匯入 Excel would, for every store at once.
+export async function downloadSfTemplate(stores) {
+  const wb = await newWorkbook()
+  for (const store of stores) {
+    const types = await loadPaymentTypes(store.id)
+    const columns = buildColumns(types)
+    const headers = sfTemplateHeaders(columns)
+    const ws = wb.addWorksheet(sheetNameForStore(store.name))
+    ws.addRow([`${store.name} — 這個分店目前設定的 payment type 欄位`]).font = { italic: true, color: { argb: 'FF888888' } }
+    ws.addRow([])
+    headerRow(ws, headers)
+    ws.addRow(headers.map((h) => (h === 'Date' ? '2026-10-05' : h === 'O.CA' ? 1234.56 : h === 'O.POST' ? 1500 : 0)))
+  }
   await download(wb, 'BK匯入範本_SF.xlsx')
 }
 
@@ -60,13 +95,13 @@ export async function downloadUAccountTemplate() {
 export async function downloadDividendTemplate() {
   const wb = await buildTemplate([
     {
-      name: '分紅',
+      name: '收成',
       note: 'Type 填 income / cost / payout。payout 另外需要 Party（這個分店設定好的 party 名稱）跟 Method（Bank / Cash）。',
       headers: ['Date', 'Store', 'Type', 'Party', 'Method', 'Amount', 'Note'],
       example: ['2026-10-05', 'Sunnybank', 'cost', '', '', 300, '維修費'],
     },
   ])
-  await download(wb, 'BK匯入範本_分紅.xlsx')
+  await download(wb, 'BK匯入範本_收成.xlsx')
 }
 
 export async function downloadJeffOwedTemplate() {

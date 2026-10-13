@@ -9,6 +9,7 @@ import {
   brisbaneTodayStr,
   computeCashDay,
   computeCashSummary,
+  daysInMonth,
   dwSigned,
   fmtMoney,
   monthDates,
@@ -17,6 +18,7 @@ import {
   round2,
   sfOcaMapFromRows,
   toNum,
+  ymd,
 } from '../bkUtils'
 import { listCashDayRows, listCashMonths, listEntries, loadCashMonth } from '../bkData'
 import { exportCashXlsx, exportPlXlsx } from '../bkExcel'
@@ -462,9 +464,25 @@ function PlHistory({ stores, initialStoreId, active }) {
   const [storeId, setStoreId] = useState(initialStoreId) // null = 全部分店
   const [from, setFrom] = useState(monthStart(t.year, t.month))
   const [to, setTo] = useState(brisbaneTodayStr())
+  const [fyMode, setFyMode] = useState(false)
+  // AU financial year: starting year Y covers Y-07-01 to (Y+1)-06-30 — "24-25FY"
+  // for Y=2024. Default to whichever FY today falls in.
+  const [fyStartYear, setFyStartYear] = useState(t.month >= 7 ? t.year : t.year - 1)
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const fyLabel = `${String(fyStartYear).slice(-2)}-${String(fyStartYear + 1).slice(-2)}FY`
+  const fyYearOptions = Array.from({ length: 8 }, (_, i) => t.year + 1 - i)
+
+  // Selecting a FY, or changing its start year, drives from/to directly —
+  // same date-range state the manual 從/到 pickers use, just computed instead
+  // of typed.
+  useEffect(() => {
+    if (!fyMode) return
+    setFrom(monthStart(fyStartYear, 7))
+    setTo(ymd(fyStartYear + 1, 6, daysInMonth(fyStartYear + 1, 6)))
+  }, [fyMode, fyStartYear])
 
   useEffect(() => {
     if (!active) return
@@ -508,7 +526,8 @@ function PlHistory({ stores, initialStoreId, active }) {
   async function doExport() {
     setError('')
     try {
-      const title = storeId ? `${stores.find((s) => s.id === storeId)?.name ?? ''} P_L` : '全部分店 P_L'
+      const storeLabel = storeId ? stores.find((s) => s.id === storeId)?.name ?? '' : '全部分店'
+      const title = fyMode ? `${storeLabel} P_L ${fyLabel}` : `${storeLabel} P_L`
       await exportPlXlsx({
         title,
         showStore: !storeId,
@@ -537,12 +556,46 @@ function PlHistory({ stores, initialStoreId, active }) {
           ))}
         </select>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          <input type="checkbox" checked={fyMode} onChange={(e) => setFyMode(e.target.checked)} />
+          FY
+        </label>
+        {fyMode && (
+          <label className="flex items-center gap-1.5 text-sm text-gray-600">
+            起始年度
+            <select
+              className={inputCls}
+              value={fyStartYear}
+              onChange={(e) => setFyStartYear(Number(e.target.value))}
+              aria-label="FY 起始年度"
+            >
+              {fyYearOptions.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+            <span className="font-medium text-brand-700">{fyLabel}</span>
+          </label>
+        )}
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
           從
-          <input type="date" className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input
+            type="date"
+            className={`${inputCls} ${fyMode ? 'bg-gray-50 text-gray-400' : ''}`}
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            disabled={fyMode}
+          />
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           到
-          <input type="date" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} />
+          <input
+            type="date"
+            className={`${inputCls} ${fyMode ? 'bg-gray-50 text-gray-400' : ''}`}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            disabled={fyMode}
+          />
         </label>
         <Button variant="secondary" onClick={doExport} disabled={rows.length === 0}>
           匯出 Excel
@@ -555,7 +608,7 @@ function PlHistory({ stores, initialStoreId, active }) {
       ) : (
         <>
           <div className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm">
-            Total P/L：
+            Total P/L{fyMode && <span className="ml-1 text-gray-500">（{fyLabel}）</span>}：
             <span className={`text-lg font-semibold tabular-nums ${total < 0 ? 'text-red-600' : 'text-brand-900'}`}>{fmtMoney(total)}</span>
           </div>
           {rows.length === 0 ? (

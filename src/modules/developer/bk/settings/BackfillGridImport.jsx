@@ -12,15 +12,21 @@ import {
 import { loadCashMonth, loadPaymentTypes, loadSfMonth, saveCashDays, saveSfMonth } from '../bkData'
 import { brisbaneToday, buildColumns, cashDaysFromRows, monthLabel, sfDaysFromRows } from '../bkUtils'
 import { Notice, StoreTabs, YearMonthPicker } from '../bkUi'
+import { sheetNameForStore } from '../bkImportTemplates'
 
 const LABEL = { sf: 'SF', cashday: 'U帳 > 分店現金' }
 
 // 系統設置 > 匯入's SF / 分店現金 pipeline: both are per-store, per-month grids,
-// so unlike 收支/分紅/積欠 this needs a Store + 年月 picker before it can even
+// so unlike 收支/收成/積欠 this needs a Store + 年月 picker before it can even
 // read the file against the right existing data. Writes straight to the
 // database (this is a backfill tool, not the live sheet — no separate 儲存
 // step), reusing the exact same load/save functions and keep-existing-by-
 // default rule as each page's own 匯入 Excel.
+//
+// SF's own downloadable template (bkImportTemplates.js) puts every store on
+// its own tab, named after the store, each with that store's own payment-type
+// columns — so for kind === 'sf' the worksheet to read is picked by the
+// currently selected store's name, not just "whichever sheet comes first".
 export default function BackfillGridImport({ file, kind, stores, sheetNames, onImported, onClose }) {
   const t = brisbaneToday()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
@@ -37,8 +43,11 @@ export default function BackfillGridImport({ file, kind, stores, sheetNames, onI
     setState({ loading: true })
     ;(async () => {
       try {
-        const sheet = await readWorkbookRows(await file.arrayBuffer(), { sheetNames })
         if (kind === 'sf') {
+          const storeName = stores.find((s) => s.id === storeId)?.name
+          const sheet = await readWorkbookRows(await file.arrayBuffer(), {
+            sheetNames: storeName ? [sheetNameForStore(storeName)] : sheetNames,
+          })
           const types = await loadPaymentTypes(storeId)
           const columns = buildColumns(types)
           const result = parseSfRows(sheet.rows, { year, month, columns })
@@ -46,6 +55,7 @@ export default function BackfillGridImport({ file, kind, stores, sheetNames, onI
           const days = sfDaysFromRows(existing.days)
           if (!cancelled) setState({ result, sheetName: sheet.name, existing, days })
         } else {
+          const sheet = await readWorkbookRows(await file.arrayBuffer(), { sheetNames })
           const result = parseCashDayRows(sheet.rows, { year, month })
           const existing = await loadCashMonth(storeId, year, month)
           const days = cashDaysFromRows(existing.cashDays)
@@ -58,7 +68,7 @@ export default function BackfillGridImport({ file, kind, stores, sheetNames, onI
     return () => {
       cancelled = true
     }
-  }, [file, kind, storeId, year, month, sheetNames])
+  }, [file, kind, storeId, year, month, sheetNames, stores])
 
   const { result, days } = state
   const kept = useMemo(() => {
@@ -122,6 +132,7 @@ export default function BackfillGridImport({ file, kind, stores, sheetNames, onI
         </div>
         <Notice kind="info">
           這裡直接寫入資料庫（不像分店現金/SF頁面需要再按「儲存」）— 請先選對分店跟月份，檔案裡的日期要落在這個月份內才會匯入。
+          {kind === 'sf' && '切換分店會改讀檔案裡同名的那個工作表（SF 範本每個分店各自一個分頁）。'}
         </Notice>
 
         {state.loading && <LoadingSpinner label="讀取檔案…" />}

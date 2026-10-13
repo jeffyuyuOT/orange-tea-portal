@@ -1,19 +1,20 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { brisbaneToday } from '../bkUtils'
 import { Notice, SubTabs } from '../bkUi'
 import StoreCashPanel from './StoreCashPanel'
 import EntriesManager from './EntriesManager'
-import UHistory from './UHistory'
 
 const SUBTABS = [
   ['cash', '分店現金'],
   ['entries', '新增編輯收支'],
-  ['history', '歷史紀錄'],
 ]
 
-// U帳: 分店現金 | 新增編輯收支 | 歷史紀錄. 分店現金 stays mounted while the
-// other sub-tabs are open so typed-in 實 CA / D values aren't lost.
-export default function UAccountTab({ stores, topActive = true }) {
+// U帳: 分店現金 | 新增編輯收支. 歷史紀錄 moved to the top-level 歷史紀錄 tab
+// (history/HistoryTab.jsx), which re-uses this page's own UHistory.jsx —
+// jumping "載入" from there comes back in here via `jumpTarget` (set by
+// BkPage) rather than a local sub-tab. 分店現金 stays mounted while 新增編輯收支
+// is open so typed-in 實 CA / D values aren't lost.
+export default function UAccountTab({ stores, topActive = true, jumpTarget, onJumpHandled }) {
   const today = brisbaneToday()
   const [sub, setSub] = useState('cash')
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
@@ -35,9 +36,16 @@ export default function UAccountTab({ stores, topActive = true }) {
     return true
   }, [])
 
+  // 歷史紀錄's "載入" (now on a different top-level tab) asks to jump here.
+  useEffect(() => {
+    if (!jumpTarget) return
+    if (navigate(jumpTarget)) setSub('cash')
+    onJumpHandled?.()
+  }, [jumpTarget, navigate, onJumpHandled])
+
   const store = stores.find((s) => s.id === storeId) ?? stores[0]
   if (!store) {
-    return <Notice kind="info">還沒有任何分店。請先到 Sales figure › 資料維護 › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
   }
   const bump = () => setEntriesVersion((v) => v + 1)
 
@@ -66,14 +74,6 @@ export default function UAccountTab({ stores, topActive = true }) {
           onEntriesChanged={bump}
         />
       )}
-      <div className={sub === 'history' ? '' : 'hidden'}>
-        <UHistory
-          stores={stores}
-          storeId={store.id}
-          active={topActive && sub === 'history'}
-          onLoad={(target) => navigate(target) && setSub('cash')}
-        />
-      </div>
     </div>
   )
 }

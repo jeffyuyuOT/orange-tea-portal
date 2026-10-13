@@ -6,19 +6,34 @@ import SalesFigureTab from './sales/SalesFigureTab'
 import UAccountTab from './ucash/UAccountTab'
 import BonusTab from './bonus/BonusTab'
 import OwedPage from './owed/OwedPage'
+import HistoryTab from './history/HistoryTab'
 import SettingsTab from './settings/SettingsTab'
 
 // BK (記帳) — developer-only bookkeeping page. Gated by RequirePage on
 // developer_tools.bk (routes.jsx), which only the developer role has; the real
 // boundary is is_developer() RLS on the bk_* tables (migration 0101; the store list is bk_stores, 0102).
 //
-// Five top tabs per the spec. Every tab stays mounted once opened (hidden,
+// Six top tabs per the spec. Every tab stays mounted once opened (hidden,
 // not unmounted) so switching top tabs never throws away unsaved typing.
+//
+// SF / U帳's own history sub-tabs moved into 歷史紀錄 (history/HistoryTab.jsx,
+// re-using sales/SfHistory.jsx and ucash/UHistory.jsx unchanged); SF's 資料維護
+// and 收成's 設定 moved into 系統設置 (settings/SettingsTab.jsx, re-using
+// sales/SfMaintenance.jsx and bonus/PartySettings.jsx unchanged). Two bits of
+// state used to live inside the tab that moved, and now have to be lifted up
+// here so the pieces still talk to each other across tabs:
+//   - typesVersion: bumped by 系統設置's SF payment-type editor, read by
+//     SalesFigureTab's SfSheet so it re-reads its columns after a change made
+//     from the other tab.
+//   - sfJumpTarget / cashJumpTarget: set by 歷史紀錄's "載入" button (which
+//     used to just switch a local sub-tab back to the sheet, now has to jump
+//     to a different top-level tab AND tell it which store/month to open).
 const TABS = [
   ['sf', 'Sales figure'],
   ['u', 'U帳'],
-  ['bonus', '分紅'],
+  ['bonus', '收成'],
   ['owed', '積欠'],
+  ['history', '歷史紀錄'],
   ['settings', '系統設置'],
 ]
 
@@ -27,6 +42,9 @@ export default function BkPage() {
   const [visited, setVisited] = useState(() => new Set(['sf']))
   const [stores, setStores] = useState(null)
   const [error, setError] = useState('')
+  const [typesVersion, setTypesVersion] = useState(0)
+  const [sfJumpTarget, setSfJumpTarget] = useState(null)
+  const [cashJumpTarget, setCashJumpTarget] = useState(null)
 
   // Re-read BK's store list; called after 分店管理 adds / renames / deletes one.
   const reloadStores = useCallback(async () => {
@@ -45,6 +63,15 @@ export default function BkPage() {
   function select(key) {
     setTab(key)
     setVisited((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
+  }
+
+  function loadSf(target) {
+    setSfJumpTarget(target)
+    select('sf')
+  }
+  function loadCash(target) {
+    setCashJumpTarget(target)
+    select('u')
   }
 
   return (
@@ -73,12 +100,24 @@ export default function BkPage() {
         <>
           {visited.has('sf') && (
             <div className={tab === 'sf' ? '' : 'hidden'}>
-              <SalesFigureTab stores={stores} topActive={tab === 'sf'} onStoresChanged={reloadStores} />
+              <SalesFigureTab
+                stores={stores}
+                topActive={tab === 'sf'}
+                typesVersion={typesVersion}
+                jumpTarget={sfJumpTarget}
+                onJumpHandled={() => setSfJumpTarget(null)}
+                onStoresChanged={reloadStores}
+              />
             </div>
           )}
           {visited.has('u') && (
             <div className={tab === 'u' ? '' : 'hidden'}>
-              <UAccountTab stores={stores} topActive={tab === 'u'} />
+              <UAccountTab
+                stores={stores}
+                topActive={tab === 'u'}
+                jumpTarget={cashJumpTarget}
+                onJumpHandled={() => setCashJumpTarget(null)}
+              />
             </div>
           )}
           {visited.has('bonus') && (
@@ -91,9 +130,18 @@ export default function BkPage() {
               <OwedPage stores={stores} topActive={tab === 'owed'} />
             </div>
           )}
+          {visited.has('history') && (
+            <div className={tab === 'history' ? '' : 'hidden'}>
+              <HistoryTab stores={stores} topActive={tab === 'history'} onLoadSf={loadSf} onLoadCash={loadCash} />
+            </div>
+          )}
           {visited.has('settings') && (
             <div className={tab === 'settings' ? '' : 'hidden'}>
-              <SettingsTab stores={stores} />
+              <SettingsTab
+                stores={stores}
+                onStoresChanged={reloadStores}
+                onPaymentTypesChanged={() => setTypesVersion((v) => v + 1)}
+              />
             </div>
           )}
         </>

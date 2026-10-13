@@ -16,7 +16,7 @@ function ResultTable({ rows }) {
         <thead className="bg-brand-100 text-left text-xs text-gray-700">
           <tr>
             <th className="px-3 py-2">Party</th>
-            <th className="px-3 py-2 text-right">可領取分紅</th>
+            <th className="px-3 py-2 text-right">可領取收成</th>
             <th className="px-3 py-2 text-right">擁有金庫資產</th>
             <th className="px-3 py-2 text-right">結算</th>
           </tr>
@@ -42,8 +42,8 @@ function ResultTable({ rows }) {
   )
 }
 
-// 分紅記錄 > 新增 > 分紅結算: shows each party's 可領取分紅 against the vault pot
-// it owns. Reference only — saving it changes no vault or 分紅 figure.
+// 收成記錄 > 新增 > 收成結算: shows each party's 可領取收成 against the vault pot
+// it owns. Reference only — saving it changes no vault or 收成 figure.
 export function SettlementModal({ open, view, onClose, onSaved }) {
   const [date, setDate] = useState(brisbaneTodayStr())
   const [error, setError] = useState('')
@@ -67,7 +67,7 @@ export function SettlementModal({ open, view, onClose, onSaved }) {
       open={open}
       onClose={onClose}
       wide
-      title="分紅結算紀錄"
+      title="收成結算紀錄"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -81,7 +81,7 @@ export function SettlementModal({ open, view, onClose, onSaved }) {
       }
     >
       <div className="space-y-3">
-        <Notice kind="info">結算 = 可領取分紅 − 擁有金庫資產（Jeff 對 Jeff B，Mao 對 Mao保）。這裡只是結算參考，不會更動任何金庫和分紅數據；數字還是要靠入金、分紅記錄去改。</Notice>
+        <Notice kind="info">結算 = 可領取收成 − 擁有金庫資產（Jeff 對 Jeff B，Mao 對 Mao保）。這裡只是結算參考，不會更動任何金庫和收成數據；數字還是要靠入金、收成記錄去改。</Notice>
         <Field label="日期">
           <input type="date" className={`${inputCls} w-48`} value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
@@ -92,7 +92,7 @@ export function SettlementModal({ open, view, onClose, onSaved }) {
   )
 }
 
-// A saved 分紅結算 from 歷史紀錄.
+// A saved 收成結算 from 歷史紀錄.
 export function SettlementDetail({ s, storeNames, onClose, onChanged }) {
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
@@ -103,7 +103,7 @@ export function SettlementDetail({ s, storeNames, onClose, onChanged }) {
         open={!confirming}
         onClose={onClose}
         wide
-        title={`分紅結算 — ${s.settle_date}`}
+        title={`收成結算 — ${s.settle_date}`}
         footer={
           <>
             <Button variant="danger" onClick={() => setConfirming(true)}>
@@ -138,7 +138,7 @@ export function SettlementDetail({ s, storeNames, onClose, onChanged }) {
       </Modal>
       <ConfirmDelete
         open={confirming}
-        text={`${s.settle_date} 分紅結算（${STATUS_LABELS[s.status]}）`}
+        text={`${s.settle_date} 收成結算（${STATUS_LABELS[s.status]}）`}
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           try {

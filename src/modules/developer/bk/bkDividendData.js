@@ -1,4 +1,4 @@
-// Supabase access for the 分紅 tab (tables from migration 0107; U帳 入金 is read
+// Supabase access for the 收成 tab (tables from migration 0107; U帳 入金 is read
 // straight from bk_cash_entries). Everything is RLS-locked to is_developer().
 import { supabase } from '../../../lib/supabaseClient'
 import { toNum } from './bkUtils'
@@ -20,7 +20,7 @@ async function fetchAll(build) {
   return out
 }
 
-// All 分紅 data of every store; the tab filters by store in memory.
+// All 收成 data of every store; the tab filters by store in memory.
 export async function loadDividendData() {
   const [ruju, manual, payouts, parties, settlements] = await Promise.all([
     fetchAll(() =>
@@ -34,7 +34,7 @@ export async function loadDividendData() {
   return { ruju, manual, payouts, parties, settlements }
 }
 
-// 入金 / cost typed on the 分紅 tab.
+// 入金 / cost typed on the 收成 tab.
 export async function saveDividendEntry(storeId, form) {
   const payload = {
     entry_date: form.entry_date,
@@ -51,7 +51,7 @@ export async function deleteDividendEntry(id) {
   unwrap(await supabase.from('bk_dividend_entries').delete().eq('id', id))
 }
 
-// A payout (分紅記錄).
+// A payout (收成記錄).
 export async function savePayout(storeId, form) {
   const payload = {
     party_id: form.party_id,
@@ -70,7 +70,7 @@ export async function deletePayout(id) {
   unwrap(await supabase.from('bk_payouts').delete().eq('id', id))
 }
 
-// Point 5: Excel-import backfill for 分紅. `rows` are already deduped by the
+// Point 5: Excel-import backfill for 收成. `rows` are already deduped by the
 // caller (bkImport.markDividendDuplicates) — income/cost rows go to
 // bk_dividend_entries, payout rows to bk_payouts.
 export async function bulkImportDividendRows(rows) {
@@ -109,7 +109,7 @@ export async function savePartiesForStore(storeId, draft, existing) {
     const used = unwrap(await supabase.from('bk_payouts').select('party_id').in('party_id', removed.map((p) => p.id))) ?? []
     if (used.length) {
       const names = removed.filter((p) => used.some((u) => u.party_id === p.id)).map((p) => p.name)
-      throw new Error(`「${names.join('、')}」已有分紅記錄，不能刪除。請先到分紅記錄刪除那些紀錄。`)
+      throw new Error(`「${names.join('、')}」已有收成記錄，不能刪除。請先到收成記錄刪除那些紀錄。`)
     }
     unwrap(await supabase.from('bk_parties').delete().in('id', removed.map((p) => p.id)))
   }
@@ -134,7 +134,7 @@ export async function savePartiesForStore(storeId, draft, existing) {
   }
 }
 
-// 分紅結算 snapshots (reference only; they change no figures). storeId null = 全部分店.
+// 收成結算 snapshots (reference only; they change no figures). storeId null = 全部分店.
 export async function saveSettlement({ storeId, date, status, rows }) {
   unwrap(await supabase.from('bk_settlements').insert({ store_id: storeId, settle_date: date, status, rows }))
 }

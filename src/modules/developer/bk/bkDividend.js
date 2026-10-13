@@ -1,15 +1,15 @@
-// Pure maths for the 分紅 tab (no React, no Supabase), so the numbers can be
+// Pure maths for the 收成 tab (no React, no Supabase), so the numbers can be
 // tested on their own.
 //
 // Vocabulary
-//   income   入金: U帳 入金 (Jeff B / Mao保 / 其他) + 入金 typed on the 分紅 tab (其他)
-//   cost     cost typed on the 分紅 tab
-//   payout   分紅 paid to a party (bank / cash)
-//   vault    income − cost − payouts, counted from the last 分紅完全結算 of the store
+//   income   入金: U帳 入金 (Jeff B / Mao保 / 其他) + 入金 typed on the 收成 tab (其他)
+//   cost     cost typed on the 收成 tab
+//   payout   收成 paid to a party (bank / cash)
+//   vault    income − cost − payouts, counted from the last 收成完全結算 of the store
 //
-// A payout ticked 分紅結算 is a 分紅完全結算 when the vault is exactly zero right
+// A payout ticked 收成結算 is a 收成完全結算 when the vault is exactly zero right
 // after it. Everything before the last 完全結算 is left out of the vault (and of
-// the 金庫概況 party figures); the 分紅記錄 tab counts everything since the start.
+// the 金庫概況 party figures); the 收成記錄 tab counts everything since the start.
 import { round2, toNum } from './bkUtils'
 
 const EPS = 0.005
@@ -111,7 +111,7 @@ export function summarize(events) {
 }
 
 // One store's events (time-ordered) -> where the current window starts.
-//   fullKeys     keys of the payouts that were a 分紅完全結算
+//   fullKeys     keys of the payouts that were a 收成完全結算
 //   windowEvents events after the last 完全結算 (all of them when there is none)
 export function computeLedger(events) {
   let running = 0
@@ -141,7 +141,7 @@ export function partyRows(parties, pool, paidByParty) {
   })
 }
 
-// Everything the 分紅 tab shows for ONE store.
+// Everything the 收成 tab shows for ONE store.
 export function storeReport(storeId, raw, parties) {
   const mine = (rows) => rows.filter((r) => r.store_id === storeId)
   const events = buildEvents({ ruju: mine(raw.ruju), manual: mine(raw.manual), payouts: mine(raw.payouts) })
@@ -214,10 +214,10 @@ export function combineReports(reports) {
   }
 }
 
-// 分紅結算 label of a payout: 分紅完全結算 / 分紅結算 / ''.
+// 收成結算 label of a payout: 收成完全結算 / 收成結算 / ''.
 export function payoutLabel(ev, fullKeys) {
-  if (fullKeys.has(ev.key)) return '分紅完全結算'
-  return ev.settle ? '分紅結算' : ''
+  if (fullKeys.has(ev.key)) return '收成完全結算'
+  return ev.settle ? '收成結算' : ''
 }
 
 // 設定: the weights of one store's parties must add up to 100%.
@@ -243,8 +243,8 @@ export function partySettingsProblem(draft) {
 const OWN_ASSET = { jeff: 'jeff_bank', mao: 'mao_safe' }
 const OTHER_SOURCES = { jeff: 'Mao保 和 其他', mao: 'Jeff B 和 其他' }
 
-// 分紅結算 (a reference calculation, it changes no vault or 分紅 figure):
-// per party, 可領取分紅 − 擁有金庫資產. Positive = still has to be taken from
+// 收成結算 (a reference calculation, it changes no vault or 收成 figure):
+// per party, 可領取收成 − 擁有金庫資產. Positive = still has to be taken from
 // other pots (note says which); only Jeff and Mao have a note, other parties
 // (e.g. C&J) have no own pot and no note.
 //   partyRows  merged rows (mergePartyRows) with { key, name, claimable }

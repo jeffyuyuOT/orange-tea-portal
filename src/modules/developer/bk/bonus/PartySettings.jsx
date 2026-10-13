@@ -30,7 +30,7 @@ export default function PartySettings({ stores, data, reload, onDirtyChange }) {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
 
-  if (!store) return <Notice kind="info">還沒有任何分店。請先到 Sales figure › 資料維護 › 分店管理 新增分店。</Notice>
+  if (!store) return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
 
   const edit = (fn) => {
     setDraft(fn)
@@ -53,7 +53,7 @@ export default function PartySettings({ stores, data, reload, onDirtyChange }) {
   function removeRow(i) {
     const row = draft[i]
     if (row.id && hasPayouts(row.id)) {
-      setError(`「${row.name}」已有分紅記錄，不能刪除。請先到分紅記錄刪除那些紀錄。`)
+      setError(`「${row.name}」已有收成記錄，不能刪除。請先到收成記錄刪除那些紀錄。`)
       return
     }
     setError('')
@@ -144,7 +144,7 @@ export default function PartySettings({ stores, data, reload, onDirtyChange }) {
             儲存
           </Button>
         </div>
-        <p className="text-xs text-gray-400">所有 party 的加權加起來必須剛好是 100%。已經有分紅記錄的 party 不能刪除。</p>
+        <p className="text-xs text-gray-400">所有 party 的加權加起來必須剛好是 100%。已經有收成記錄的 party 不能刪除。</p>
       </div>
     </div>
   )

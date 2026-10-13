@@ -8,13 +8,13 @@ import { DividendEntryForm, EventEditor, EventTable, NoteModal, StatCard } from 
 
 const DETAIL_TITLES = {
   total: '金庫目前總額 — 明細',
-  jeff_bank: 'Jeff B — 明細（入金 − Bank 分紅）',
-  mao_safe: 'Mao保 — 明細（入金 − Cash 分紅）',
+  jeff_bank: 'Jeff B — 明細（入金 − Bank 收成）',
+  mao_safe: 'Mao保 — 明細（入金 − Cash 收成）',
   other: '其他 — 入金明細',
   cost: 'Cost — 明細',
 }
 
-// 金庫概況: the vault since the last 分紅完全結算, the 入金 / cost behind it, and
+// 金庫概況: the vault since the last 收成完全結算, the 入金 / cost behind it, and
 // each party's 可領 / 已領 for the same window.
 export default function VaultOverview({ view }) {
   const { combined: c, stores, storeId, storeNames, partyNames, data, reload, storesInView } = view
@@ -39,10 +39,10 @@ export default function VaultOverview({ view }) {
   const fullInfo = c.reports.filter((r) => r.lastFullDate).map((r) => ({ name: storeNames[r.storeId], date: r.lastFullDate }))
   const fullText =
     fullInfo.length === 0
-      ? '尚無分紅完全結算，從第一筆開始計算'
+      ? '尚無收成完全結算，從第一筆開始計算'
       : storesInView.length === 1
-        ? `上一次分紅完全結算：${fullInfo[0].date}`
-        : `上一次分紅完全結算：${fullInfo.map((f) => `${f.name} ${f.date}`).join('、')}`
+        ? `上一次收成完全結算：${fullInfo[0].date}`
+        : `上一次收成完全結算：${fullInfo.map((f) => `${f.name} ${f.date}`).join('、')}`
 
   async function remove(ev) {
     try {
@@ -67,17 +67,17 @@ export default function VaultOverview({ view }) {
 
       <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="space-y-3">
-          <StatCard label="金庫目前總額" value={w.vault} onClick={() => setDetail('total')} hint="入金 − Cost − 已領取分紅" />
+          <StatCard label="金庫目前總額" value={w.vault} onClick={() => setDetail('total')} hint="入金 − Cost − 已領取收成" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Jeff B" value={w.assets.jeff_bank} onClick={() => setDetail('jeff_bank')} hint="扣掉 Bank 分紅" />
-            <StatCard label="Mao保" value={w.assets.mao_safe} onClick={() => setDetail('mao_safe')} hint="扣掉 Cash 分紅" />
+            <StatCard label="Jeff B" value={w.assets.jeff_bank} onClick={() => setDetail('jeff_bank')} hint="扣掉 Bank 收成" />
+            <StatCard label="Mao保" value={w.assets.mao_safe} onClick={() => setDetail('mao_safe')} hint="扣掉 Cash 收成" />
             <StatCard label="其他" value={w.incomeBy.other} onClick={() => setDetail('other')} />
             <StatCard label="Cost" value={w.cost} tone="cost" onClick={() => setDetail('cost')} />
           </div>
         </div>
 
         <div className="rounded-xl border border-brand-100 bg-white p-4">
-          <div className="mb-3 text-sm font-semibold text-brand-900">分紅概況（上一次分紅完全結算後）</div>
+          <div className="mb-3 text-sm font-semibold text-brand-900">收成概況（上一次收成完全結算後）</div>
           {c.windowParties.length === 0 ? (
             <p className="text-sm text-gray-400">這個範圍還沒有設定 party。請到「設定」新增。</p>
           ) : (
@@ -86,11 +86,11 @@ export default function VaultOverview({ view }) {
                 <div key={p.key} className="rounded-lg bg-brand-50/60 px-3 py-2">
                   <div className="text-sm font-semibold text-brand-800">{p.name}</div>
                   <div className="mt-1 flex justify-between text-sm">
-                    <span className="text-gray-500">可領分紅</span>
+                    <span className="text-gray-500">可領收成</span>
                     <span className="tabular-nums">{fmtMoney(p.claimable)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">已領取分紅</span>
+                    <span className="text-gray-500">已領取收成</span>
                     <span className="tabular-nums">{fmtMoney(p.paid)}</span>
                   </div>
                 </div>

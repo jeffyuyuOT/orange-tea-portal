@@ -10,7 +10,7 @@ import { Notice } from '../bkUi'
 const KIND_LABEL = { salary: '薪水', advance_pay: '預付', advance_draw: '預拿' }
 
 // 系統設置 > 匯入 — 積欠 Jeff. Same direct-to-DB, dedupe-by-default pattern as
-// 收支/分紅: an append-only ledger, so duplicates (same 種類 + 日期 + 金額) are
+// 收支/收成: an append-only ledger, so duplicates (same 種類 + 日期 + 金額) are
 // always skipped, never force-overwritten.
 export default function JeffOwedExcelImport({ file, onImported, onClose }) {
   const [state, setState] = useState({ loading: true })
