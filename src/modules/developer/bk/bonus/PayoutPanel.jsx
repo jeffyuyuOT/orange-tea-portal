@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import { deletePayout } from '../bkDividendData'
 import { Notice, inputCls } from '../bkUi'
 import { EventEditor, EventTable, NoteModal, PayoutForm, StatCard } from './bonusParts'
 import { SettlementModal } from './SettlementParts'
+import DividendExcelImport from './DividendExcelImport'
 
 // 分紅記錄: all-time figures per party (總共 / 已領取 / 可領) and the payouts
 // made to each, filterable by date and method.
@@ -17,6 +18,9 @@ export default function PayoutPanel({ view }) {
   const [editing, setEditing] = useState(null)
   const [note, setNote] = useState(null)
   const [error, setError] = useState('')
+  const [importFile, setImportFile] = useState(null)
+  const [importedMsg, setImportedMsg] = useState('')
+  const fileInputRef = useRef(null)
 
   const payouts = useMemo(() => c.events.filter((ev) => ev.type === 'payout'), [c.events])
   const passes = (ev) => (!from || ev.date >= from) && (!to || ev.date <= to) && (!method || ev.method === method)
@@ -34,6 +38,7 @@ export default function PayoutPanel({ view }) {
   return (
     <div className="space-y-4">
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
+      {importedMsg && <Notice kind="ok" onClose={() => setImportedMsg('')}>{importedMsg}</Notice>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1.5 text-sm text-gray-600">
@@ -50,10 +55,40 @@ export default function PayoutPanel({ view }) {
             <option value="cash">Cash</option>
           </select>
         </div>
-        <Button onClick={() => setAdding('choose')} disabled={data.parties.length === 0}>
-          ＋ 新增
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+            匯入 Excel
+          </Button>
+          <Button onClick={() => setAdding('choose')} disabled={data.parties.length === 0}>
+            ＋ 新增
+          </Button>
+        </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (f) setImportFile(f)
+        }}
+      />
+      {importFile && (
+        <DividendExcelImport
+          file={importFile}
+          stores={stores}
+          data={data}
+          onClose={() => setImportFile(null)}
+          onImported={async (count) => {
+            setImportFile(null)
+            setImportedMsg(`已匯入 ${count} 筆。`)
+            await reload()
+          }}
+        />
+      )}
       <p className="text-xs text-gray-500">這裡是從開始到現在的全部資料（不受分紅完全結算影響）。總共分紅 = (所有入金 − Cost) × 加權；可領分紅 = 總共分紅 − 已領取分紅。</p>
       {data.parties.length === 0 && <Notice kind="info">還沒有設定任何 party。請先到「設定」新增。</Notice>}
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
@@ -23,6 +23,7 @@ import { loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance } f
 import { exportCashXlsx } from '../bkExcel'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
+import CashDayExcelImport from './CashDayExcelImport'
 
 const emptyCashDay = () => ({ actual_ca: '', d_amount: '', d_stocked: false })
 
@@ -122,6 +123,8 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [noteText, setNoteText] = useState(null)
   const [balanceForm, setBalanceForm] = useState(null)
   const [dInfo, setDInfo] = useState(null) // date whose 可 D 金額 popup is open
+  const [importFile, setImportFile] = useState(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -239,6 +242,21 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     }
   }
 
+  // 匯入 Excel: the picked file is previewed in CashDayExcelImport; 套用 fills
+  // cashDays (never saves — 儲存 still needs pressing, same as Sales figure).
+  function applyImport(entries) {
+    setCashDays((prev) => {
+      const next = { ...prev }
+      for (const [date, entry] of Object.entries(entries)) {
+        next[date] = { ...emptyCashDay(), ...next[date], ...entry }
+      }
+      return next
+    })
+    setDirty(true)
+    setMsg('')
+    setImportFile(null)
+  }
+
   async function openBalance() {
     setError('')
     try {
@@ -282,6 +300,9 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           <Button variant="secondary" onClick={doExport} disabled={dirty || loading} title={dirty ? '請先儲存再匯出' : ''}>
             匯出
           </Button>
+          <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={loading}>
+            匯入 Excel
+          </Button>
           <Button variant="secondary" onClick={() => setAddOpen(true)}>
             ＋ 新增收支
           </Button>
@@ -290,6 +311,21 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           </Button>
         </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (f) setImportFile(f)
+        }}
+      />
+      {importFile && (
+        <CashDayExcelImport file={importFile} year={year} month={month} cashDays={cashDays} onApply={applyImport} onClose={() => setImportFile(null)} />
+      )}
 
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}

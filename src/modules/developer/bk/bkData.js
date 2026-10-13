@@ -314,11 +314,187 @@ export async function saveEntry(storeId, form) {
   else unwrap(await supabase.from('bk_cash_entries').insert({ ...payload, store_id: storeId }))
 }
 
-export async function deleteEntry(id) {
-  unwrap(await supabase.from('bk_cash_entries').delete().eq('id', id))
+// A plain entry just deletes its own row. A 分店transfer leg (transfer_group_id
+// set) deletes BOTH legs — and their bk_store_debts rows with them — via the
+// server function, so a transfer is never left half there.
+export async function deleteEntry(entry) {
+  const id = entry?.id ?? entry
+  if (entry?.transfer_group_id) {
+    unwrap(await supabase.rpc('bk_delete_store_transfer', { p_entry_id: id }))
+  } else {
+    unwrap(await supabase.from('bk_cash_entries').delete().eq('id', id))
+  }
+}
+
+// 分店transfer: moves Ucost money from one BK store to another in one go —
+// FROM leg positive (UCOH ↓), TO leg negative (UCOH ↑), both kind 'ucost'.
+// mode 'loan_repay' also writes the FROM store's 借貸 / TO store's 償還 row to
+// 積欠 > 分店之間. See migration 0109 for the actual inserts (done server-side
+// so the transfer can't end up half-written).
+export async function saveStoreTransfer({ fromStoreId, toStoreId, mode, date, amount, note }) {
+  unwrap(
+    await supabase.rpc('bk_create_store_transfer', {
+      p_from_store: fromStoreId,
+      p_to_store: toStoreId,
+      p_mode: mode,
+      p_date: date,
+      p_amount: toNum(amount),
+      p_note: note?.trim() || null,
+    })
+  )
+}
+
+// 積欠 > 分店之間: every store's own running 借貸/償還 totals (each store's own
+// side only — never netted against its peer). storeId null = all stores.
+export async function loadStoreDebts(storeId) {
+  let q = supabase.from('bk_store_debts').select('*')
+  if (storeId) q = q.eq('store_id', storeId)
+  return unwrap(await q.order('entry_date', { ascending: false }).order('created_at', { ascending: false })) ?? []
+}
+
+export async function deleteStoreDebt(id) {
+  unwrap(await supabase.from('bk_store_debts').delete().eq('id', id))
+}
+
+// ---------------------------------------------------------------------------
+// 積欠 > Jeff — 薪水 / 預付 / 預拿
+// ---------------------------------------------------------------------------
+
+export async function loadJeffOwedEntries() {
+  return (
+    unwrap(
+      await supabase.from('bk_owed_jeff_entries').select('*').order('entry_date', { ascending: false }).order('created_at', { ascending: false })
+    ) ?? []
+  )
+}
+
+export async function saveJeffOwedEntry(form) {
+  const payload = {
+    kind: form.kind,
+    entry_date: form.entry_date,
+    description: form.description?.trim() || null,
+    amount: toNum(form.amount),
+    note: form.note?.trim() || null,
+    updated_at: new Date().toISOString(),
+  }
+  if (form.id) unwrap(await supabase.from('bk_owed_jeff_entries').update(payload).eq('id', form.id))
+  else unwrap(await supabase.from('bk_owed_jeff_entries').insert(payload))
+}
+
+export async function deleteJeffOwedEntry(id) {
+  unwrap(await supabase.from('bk_owed_jeff_entries').delete().eq('id', id))
+}
+
+// 薪水 is also read LIVE from the payroll app's own completed calc sheets
+// (migration 0110's bk_jeff_payroll_salary()) and merged with the manual rows
+// above at display time — never copied into bk_owed_jeff_entries, so it can
+// never go stale against payroll.
+export async function loadJeffPayrollSalary() {
+  return unwrap(await supabase.rpc('bk_jeff_payroll_salary')) ?? []
+}
+
+// Point 5/系統設置: Excel-import backfill for 積欠 > Jeff. `rows` are already
+// deduped by the caller (bkImport.markJeffOwedDuplicates).
+export async function bulkImportJeffOwedRows(rows) {
+  if (!rows.length) return
+  unwrap(
+    await supabase.from('bk_owed_jeff_entries').insert(
+      rows.map((r) => ({ kind: r.kind, entry_date: r.date, description: r.description || null, amount: toNum(r.amount), note: r.note || null }))
+    )
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 積欠 > Emma — Sunnybank 入金 bonus (10%)
+// ---------------------------------------------------------------------------
+
+// Every Sunnybank 入金 with a positive amount — a negative 入金 (point 1's
+// vault withdrawal) isn't money coming in, so it's not bonus-eligible.
+export async function loadEmmaCandidateEntries(sunnybankStoreId) {
+  const rows =
+    unwrap(
+      await supabase
+        .from('bk_cash_entries')
+        .select('id, entry_date, amount, ruju_target, note')
+        .eq('store_id', sunnybankStoreId)
+        .eq('kind', 'ruju')
+        .order('entry_date', { ascending: false })
+    ) ?? []
+  return rows.filter((r) => Number(r.amount) > 0)
+}
+
+export async function loadEmmaClaims() {
+  return (
+    unwrap(
+      await supabase.from('bk_owed_emma_claims').select('*').order('submitted_at', { ascending: false }).order('created_at', { ascending: false })
+    ) ?? []
+  )
+}
+
+// `rows` = [{ entry_id, entry_date, amount, note }] for the checked 入金 rows;
+// `totalAmount` (10% of their sum) is computed by the caller so the UI and
+// the stored snapshot always agree on exactly what was submitted.
+export async function saveEmmaClaim({ submittedAt, totalAmount, rows }) {
+  unwrap(
+    await supabase.from('bk_owed_emma_claims').insert({
+      submitted_at: submittedAt,
+      total_amount: toNum(totalAmount),
+      rows,
+    })
+  )
+}
+
+// Point 5/系統設置: Excel-import backfill for 積欠 > Emma. A backfilled claim
+// has no specific 入金 rows to point at (it's historical) — there's no `note`
+// column on bk_owed_emma_claims itself, so the imported note is kept as a
+// single synthetic detail row (entry_id null) rather than dropped; it still
+// shows up correctly in 歷史紀錄's detail view. `importRows` are already
+// deduped by the caller (bkImport.markEmmaClaimDuplicates).
+export async function bulkImportEmmaClaimRows(importRows) {
+  if (!importRows.length) return
+  unwrap(
+    await supabase.from('bk_owed_emma_claims').insert(
+      importRows.map((r) => ({
+        submitted_at: r.date,
+        total_amount: toNum(r.amount),
+        rows: [{ entry_id: null, entry_date: r.date, amount: toNum(r.amount), note: r.note || '（匯入的歷史紀錄）' }],
+      }))
+    )
+  )
+}
+
+export async function deleteEmmaClaim(id) {
+  unwrap(await supabase.from('bk_owed_emma_claims').delete().eq('id', id))
 }
 
 // Entries for the 新增編輯收支 list and the 個別資料 history. storeId null = all.
+// Point 5: Excel-import backfill for 收支. `rows` are already deduped by the
+// caller (bkImport.markLedgerDuplicates) — plain kinds are inserted directly,
+// 分店transfer rows go through the same RPC the UI uses so both legs +
+// bk_store_debts stay consistent.
+export async function bulkImportLedgerRows(rows) {
+  const plain = rows.filter((r) => r.kind !== 'transfer')
+  const transfers = rows.filter((r) => r.kind === 'transfer')
+  if (plain.length) {
+    unwrap(
+      await supabase.from('bk_cash_entries').insert(
+        plain.map((r) => ({
+          store_id: r.storeId,
+          entry_date: r.date,
+          kind: r.kind,
+          description: r.description || null,
+          amount: toNum(r.amount),
+          note: r.note || null,
+          ruju_target: r.kind === 'ruju' ? r.rujuTarget : null,
+        }))
+      )
+    )
+  }
+  for (const r of transfers) {
+    await saveStoreTransfer({ fromStoreId: r.fromStoreId, toStoreId: r.toStoreId, mode: r.mode, date: r.date, amount: r.amount, note: r.note })
+  }
+}
+
 export async function listEntries({ storeId, from, to, kinds }) {
   let q = supabase.from('bk_cash_entries').select('*').gte('entry_date', from).lte('entry_date', to)
   if (storeId) q = q.eq('store_id', storeId)

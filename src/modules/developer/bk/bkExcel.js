@@ -17,12 +17,12 @@ const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFED
 const TOTAL_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } }
 const MONEY_FMT = '#,##0.00;[Red]-#,##0.00'
 
-async function newWorkbook() {
+export async function newWorkbook() {
   const ExcelJS = (await import('exceljs')).default
   return new ExcelJS.Workbook()
 }
 
-async function download(workbook, filename) {
+export async function download(workbook, filename) {
   const buffer = await workbook.xlsx.writeBuffer()
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const url = URL.createObjectURL(blob)
@@ -171,4 +171,29 @@ export async function exportCashXlsx({ storeName, year, month, open, sfDaysMap, 
     })
   )
   await download(wb, `UAccount_${safeName(storeName)}_${monthLabel(year, month)}.xlsx`)
+}
+
+// 歷史紀錄 > P/L: one row per (分店 if shown) + 月份, with a Total row.
+export async function exportPlXlsx({ title, rows, total, showStore }) {
+  const wb = await newWorkbook()
+  const sheetName = safeName(title).slice(0, 31) || 'P_L'
+  const ws = wb.addWorksheet(sheetName)
+  ws.addRow([title]).font = { bold: true, size: 14 }
+  ws.addRow([])
+  const headers = showStore ? ['分店', '月份', 'P/L'] : ['月份', 'P/L']
+  styleHeader(ws.addRow(headers))
+  for (const r of rows) {
+    ws.addRow(showStore ? [r.storeName, r.monthLabel, r.pl] : [r.monthLabel, r.pl])
+  }
+  styleTotal(ws.addRow(showStore ? ['Total', '', total] : ['Total', total]))
+
+  ws.columns.forEach((col, i) => {
+    col.width = i === 0 ? 20 : 16
+  })
+  ws.eachRow((row) =>
+    row.eachCell((cell) => {
+      if (typeof cell.value === 'number') cell.numFmt = MONEY_FMT
+    })
+  )
+  await download(wb, `${safeName(title)}.xlsx`)
 }

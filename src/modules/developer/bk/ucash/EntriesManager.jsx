@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../../components/ui/LoadingSpinner'
@@ -6,6 +6,7 @@ import { ENTRY_KIND_LABELS, RUJU_TARGET_LABELS, brisbaneToday, dwSigned, fmtMone
 import { deleteEntry, listEntries } from '../bkData'
 import { NoteButton, Notice, StoreTabs, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
+import EntriesExcelImport from './EntriesExcelImport'
 
 const KIND_FILTERS = [
   ['', '全部種類'],
@@ -40,6 +41,9 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
   const [noteText, setNoteText] = useState(null)
   const [formKey, setFormKey] = useState(0)
   const [saved, setSaved] = useState(false)
+  const [importFile, setImportFile] = useState(null)
+  const [importedMsg, setImportedMsg] = useState('')
+  const fileInputRef = useRef(null)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -58,10 +62,13 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
   }, [mode, reload])
 
   async function remove(entry) {
-    const label = `${entry.entry_date} ${ENTRY_KIND_LABELS[entry.kind]} ${fmtMoney(Number(entry.amount))}`
-    if (!window.confirm(`確定刪除這筆收支？\n${label}`)) return
+    const label = `${entry.entry_date} ${kindLabel(entry)} ${fmtMoney(Number(entry.amount))}`
+    const confirmMsg = entry.transfer_group_id
+      ? `確定刪除這筆分店transfer？From / To 兩筆紀錄會一起刪除。\n${label}`
+      : `確定刪除這筆收支？\n${label}`
+    if (!window.confirm(confirmMsg)) return
     try {
-      await deleteEntry(entry.id)
+      await deleteEntry(entry)
       await reload()
       onEntriesChanged?.()
     } catch (e) {
@@ -69,6 +76,7 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
     }
   }
 
+  const kindLabel = (e) => ENTRY_KIND_LABELS[e.kind] + (e.transfer_group_id ? ' · 分店transfer' : '')
   const describe = (e) => {
     if (e.kind === 'icost' || e.kind === 'ucost' || e.kind === 'other_income') return e.description
     if (e.kind === 'ruju') return RUJU_TARGET_LABELS[e.ruju_target]
@@ -79,28 +87,60 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
   return (
     <div className="space-y-4">
       <StoreTabs stores={stores} storeId={store.id} onChange={(id) => onNavigate({ storeId: id })} />
-      <div className="flex gap-2">
-        {[
-          ['add', '新增收支'],
-          ['edit', '編輯現有收支'],
-        ].map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => {
-              setMode(k)
-              setSaved(false)
-            }}
-            className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
-              mode === k ? 'bg-brand-500 text-white' : 'bg-brand-50 text-brand-700 hover:bg-brand-100'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-2">
+          {[
+            ['add', '新增收支'],
+            ['edit', '編輯現有收支'],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => {
+                setMode(k)
+                setSaved(false)
+              }}
+              className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
+                mode === k ? 'bg-brand-500 text-white' : 'bg-brand-50 text-brand-700 hover:bg-brand-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+          匯入 Excel
+        </Button>
       </div>
 
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (f) setImportFile(f)
+        }}
+      />
+      {importFile && (
+        <EntriesExcelImport
+          file={importFile}
+          stores={stores}
+          defaultStoreId={store.id}
+          onClose={() => setImportFile(null)}
+          onImported={async (count) => {
+            setImportFile(null)
+            setImportedMsg(`已匯入 ${count} 筆收支。`)
+            if (mode === 'edit') await reload()
+            onEntriesChanged?.()
+          }}
+        />
+      )}
+
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
+      {importedMsg && <Notice kind="ok" onClose={() => setImportedMsg('')}>{importedMsg}</Notice>}
 
       {mode === 'add' ? (
         <div className="max-w-md space-y-3 rounded-xl border border-brand-100 bg-white p-4">
@@ -109,6 +149,7 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
           <EntryForm
             key={formKey}
             storeId={store.id}
+            stores={stores}
             onSaved={() => {
               setSaved(true)
               setFormKey((k) => k + 1)
@@ -156,7 +197,7 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
                   {rows.map((e) => (
                     <tr key={e.id} className="border-t border-gray-100">
                       <td className="whitespace-nowrap px-3 py-2">{e.entry_date}</td>
-                      <td className="px-3 py-2">{ENTRY_KIND_LABELS[e.kind]}</td>
+                      <td className="px-3 py-2">{kindLabel(e)}</td>
                       <td className="px-3 py-2">
                         {describe(e)}
                         <NoteButton note={e.note} onOpen={setNoteText} />
@@ -164,9 +205,11 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
                       <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(signed(e))}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
-                          <Button variant="secondary" onClick={() => setEditing(e)}>
-                            編輯
-                          </Button>
+                          {!e.transfer_group_id && (
+                            <Button variant="secondary" onClick={() => setEditing(e)}>
+                              編輯
+                            </Button>
+                          )}
                           <Button variant="danger" onClick={() => remove(e)}>
                             刪除
                           </Button>
@@ -185,6 +228,7 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
         {editing && (
           <EntryForm
             storeId={store.id}
+            stores={stores}
             initial={editing}
             onCancel={() => setEditing(null)}
             onSaved={async () => {

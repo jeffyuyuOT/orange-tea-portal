@@ -5,15 +5,15 @@ import { Notice } from './bkUi'
 import SalesFigureTab from './sales/SalesFigureTab'
 import UAccountTab from './ucash/UAccountTab'
 import BonusTab from './bonus/BonusTab'
+import OwedPage from './owed/OwedPage'
+import SettingsTab from './settings/SettingsTab'
 
 // BK (記帳) — developer-only bookkeeping page. Gated by RequirePage on
 // developer_tools.bk (routes.jsx), which only the developer role has; the real
 // boundary is is_developer() RLS on the bk_* tables (migration 0101; the store list is bk_stores, 0102).
 //
-// Five top tabs per the spec. Sales figure, U帳 and 分紅 are built; 積欠 /
-// 系統設置 are still to be specced by Jeff and show a placeholder. Every tab
-// stays mounted once opened (hidden, not unmounted) so switching top tabs
-// never throws away unsaved typing.
+// Five top tabs per the spec. Every tab stays mounted once opened (hidden,
+// not unmounted) so switching top tabs never throws away unsaved typing.
 const TABS = [
   ['sf', 'Sales figure'],
   ['u', 'U帳'],
@@ -21,14 +21,6 @@ const TABS = [
   ['owed', '積欠'],
   ['settings', '系統設置'],
 ]
-
-function ComingSoon({ name }) {
-  return (
-    <div className="rounded-xl border border-dashed border-brand-200 bg-brand-50/40 px-6 py-12 text-center text-sm text-gray-500">
-      「{name}」的內容還沒有規格，等 Jeff 補上後再建置。
-    </div>
-  )
-}
 
 export default function BkPage() {
   const [tab, setTab] = useState('sf')
@@ -94,10 +86,18 @@ export default function BkPage() {
               <BonusTab stores={stores} topActive={tab === 'bonus'} />
             </div>
           )}
+          {visited.has('owed') && (
+            <div className={tab === 'owed' ? '' : 'hidden'}>
+              <OwedPage stores={stores} topActive={tab === 'owed'} />
+            </div>
+          )}
+          {visited.has('settings') && (
+            <div className={tab === 'settings' ? '' : 'hidden'}>
+              <SettingsTab stores={stores} />
+            </div>
+          )}
         </>
       )}
-      {tab === 'owed' && <ComingSoon name="積欠" />}
-      {tab === 'settings' && <ComingSoon name="系統設置" />}
     </div>
   )
 }

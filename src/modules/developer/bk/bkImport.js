@@ -40,12 +40,11 @@ function plain(v) {
   return v
 }
 
-// First worksheet that has a header row -> rows as arrays (index 0 = column A).
-export async function readWorkbookRows(arrayBuffer) {
+async function loadWorkbookSheets(arrayBuffer) {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(arrayBuffer)
-  const sheets = wb.worksheets.map((ws) => {
+  return wb.worksheets.map((ws) => {
     const rows = []
     ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
       const out = []
@@ -54,7 +53,28 @@ export async function readWorkbookRows(arrayBuffer) {
     })
     return { name: ws.name, rows: Array.from(rows, (r) => r ?? []) }
   })
-  return sheets.find((s) => findHeaderRow(s.rows) >= 0) ?? sheets[0] ?? { name: '', rows: [] }
+}
+
+// Worksheet that has a header row -> rows as arrays (index 0 = column A).
+// Normally picks the first sheet with a recognizable header row (or the
+// workbook's first sheet). When `sheetNames` is given (系統設置's U帳 import,
+// whose template has both a 分店現金 and a 收支 sheet in one file), restricts
+// the search to worksheets whose name matches one of those strings, so the
+// caller can pick out a specific sheet instead of whichever comes first.
+export async function readWorkbookRows(arrayBuffer, { sheetNames } = {}) {
+  const sheets = await loadWorkbookSheets(arrayBuffer)
+  const pool = sheetNames?.length ? sheets.filter((s) => sheetNames.includes(s.name)) : sheets
+  return pool.find((s) => findHeaderRow(s.rows) >= 0) ?? pool[0] ?? sheets[0] ?? { name: '', rows: [] }
+}
+
+// Just the worksheet names, for 系統設置's U帳 dispatcher to decide which of
+// 分店現金 / 收支 (or both) are present in an uploaded file before it reads
+// either one in full.
+export async function listWorkbookSheetNames(arrayBuffer) {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(arrayBuffer)
+  return wb.worksheets.map((ws) => ws.name)
 }
 
 const DATE_HEADERS = new Set(['date', '日期', '日'])
@@ -94,7 +114,7 @@ export function parseDateCell(v, year, month) {
   return null
 }
 
-function cellNumber(v) {
+export function cellNumber(v) {
   if (v === null || v === undefined || v === '') return { empty: true }
   if (typeof v === 'number') return Number.isFinite(v) ? { value: v } : { bad: true }
   if (typeof v === 'string') {
@@ -240,6 +260,591 @@ export function countOverwrites(entries, days) {
     for (const [id, v] of Object.entries(entry.amounts)) if (differs(cur.amounts?.[id], v)) n++
   }
   return n
+}
+
+// ---------------------------------------------------------------------------
+// Point 5: backfill-by-Excel for the other three BK surfaces (Sales figure's
+// own import is parseSfRows above). The shared rule across all four: a cell
+// / row the system already has wins — the import only fills gaps — unless
+// the person explicitly turns that off for a sheet-style import.
+// ---------------------------------------------------------------------------
+
+// Strip out of a parseSfRows() result any field whose cell in `days` (the SF
+// sheet's current, unsaved state) already holds a value, so 套用 only fills
+// gaps. Returns { entries, skipped } — `skipped` is how many fields were
+// left alone because the sheet already had something there.
+export function filterKeepExisting(entries, days) {
+  const hasValue = (v) => v !== undefined && v !== null && String(v).trim() !== ''
+  const out = {}
+  let skipped = 0
+  for (const [date, entry] of Object.entries(entries)) {
+    const cur = days[date]
+    const next = { amounts: {} }
+    let any = false
+    for (const field of ['o_ca', 'o_post', 'total']) {
+      if (entry[field] === undefined) continue
+      if (cur && hasValue(cur[field])) skipped++
+      else {
+        next[field] = entry[field]
+        any = true
+      }
+    }
+    for (const [id, v] of Object.entries(entry.amounts ?? {})) {
+      if (cur && hasValue(cur.amounts?.[id])) skipped++
+      else {
+        next.amounts[id] = v
+        any = true
+      }
+    }
+    if (any) out[date] = next
+  }
+  return { entries: out, skipped }
+}
+
+// Same idea for 分店現金's daily grid (actual_ca / d_amount / d_stocked).
+// 入庫 is never un-ticked by an import — only ever ticked, same "only fill
+// gaps" spirit since un-ticking has the cascading effect toggleStocked() uses.
+export function filterKeepExistingCashDays(entries, cashDays) {
+  const hasValue = (v) => v !== undefined && v !== null && String(v).trim() !== ''
+  const out = {}
+  let skipped = 0
+  for (const [date, entry] of Object.entries(entries)) {
+    const cur = cashDays[date]
+    const next = {}
+    let any = false
+    for (const field of ['actual_ca', 'd_amount']) {
+      if (entry[field] === undefined) continue
+      if (cur && hasValue(cur[field])) skipped++
+      else {
+        next[field] = entry[field]
+        any = true
+      }
+    }
+    if (entry.d_stocked !== undefined) {
+      if (cur?.d_stocked) skipped++
+      else {
+        next.d_stocked = entry.d_stocked
+        any = true
+      }
+    }
+    if (any) out[date] = next
+  }
+  return { entries: out, skipped }
+}
+
+const ACTUAL_CA_HEADERS = new Set(['實ca', '實際ca', 'actual ca', 'actualca'])
+const D_AMOUNT_HEADERS = new Set(['d', 'd欄', 'd 欄', 'd amount'])
+const STOCKED_HEADERS = new Set(['入庫', 'stocked', 'd_stocked'])
+const TRUE_WORDS = new Set(['1', 'true', 'yes', 'y', '是', '✓', 'v'])
+
+function parseBoolCell(v) {
+  if (v === null || v === undefined || String(v).trim() === '') return undefined
+  return TRUE_WORDS.has(norm(v))
+}
+
+// U帳 > 分店現金's daily grid: Date / 實CA / D / 入庫. Same month-scoped shape
+// as parseSfRows (the grid is one month at a time).
+export function parseCashDayRows(rows, { year, month }) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) {
+    return { error: '找不到標題列：檔案的第一個表頭需要有「Date」或「日期」欄。', entries: {}, mapped: [], ignored: [], otherMonths: [], unreadable: 0, badCells: 0, notes: [], dayCount: 0, cellCount: 0 }
+  }
+  const headers = rows[headerIdx]
+  const targets = []
+  const mapped = []
+  const ignored = []
+  let dateCol = -1
+  headers.forEach((h, i) => {
+    if (h === null || h === undefined || String(h).trim() === '') return
+    const label = String(h).replace(/\s+/g, ' ').trim()
+    const n = normHeader(h)
+    if (DATE_HEADERS.has(norm(h)) && dateCol < 0) dateCol = i
+    else if (ACTUAL_CA_HEADERS.has(n)) {
+      targets[i] = { kind: 'actual_ca' }
+      mapped.push({ header: label, target: '實 CA' })
+    } else if (D_AMOUNT_HEADERS.has(n)) {
+      targets[i] = { kind: 'd_amount' }
+      mapped.push({ header: label, target: 'D' })
+    } else if (STOCKED_HEADERS.has(n)) {
+      targets[i] = { kind: 'd_stocked' }
+      mapped.push({ header: label, target: '入庫' })
+    } else ignored.push({ header: label, reason: '沒有對應的欄位（需要 實CA / D / 入庫）' })
+  })
+  if (dateCol < 0) dateCol = headers.findIndex((h) => typeof h === 'string' && DATE_HEADERS.has(norm(h)))
+  if (dateCol < 0) return { error: '找不到「Date」或「日期」欄。', entries: {}, mapped, ignored, otherMonths: [], unreadable: 0, badCells: 0, notes: [], dayCount: 0, cellCount: 0 }
+
+  const entries = {}
+  const otherMonths = new Set()
+  let unreadable = 0
+  let badCells = 0
+  let cellCount = 0
+  let duplicateDays = 0
+
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    const hasContent = row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')
+    if (!hasContent) continue
+    const dateCell = row[dateCol]
+    if (typeof dateCell === 'string' && SUMMARY_LABELS.test(dateCell.trim())) continue
+    const date = parseDateCell(dateCell, year, month)
+    if (!date) {
+      unreadable++
+      continue
+    }
+    if (date.slice(0, 7) !== `${year}-${String(month).padStart(2, '0')}`) {
+      otherMonths.add(date.slice(0, 7))
+      continue
+    }
+    const entry = entries[date] ?? {}
+    if (entries[date]) duplicateDays++
+    let any = false
+    targets.forEach((t, i) => {
+      if (!t) return
+      if (t.kind === 'd_stocked') {
+        const b = parseBoolCell(row[i])
+        if (b === undefined) return
+        entry.d_stocked = b
+        any = true
+        cellCount++
+        return
+      }
+      const res = cellNumber(row[i])
+      if (res.bad) badCells++
+      if (res.value === undefined) return
+      entry[t.kind] = res.value
+      any = true
+      cellCount++
+    })
+    if (any) entries[date] = entry
+  }
+  const notes = []
+  if (duplicateDays) notes.push(`有 ${duplicateDays} 天在檔案裡出現不只一次，以後面那一列為準。`)
+
+  return {
+    entries,
+    mapped,
+    ignored,
+    otherMonths: [...otherMonths].sort(),
+    unreadable,
+    badCells,
+    notes,
+    dayCount: Object.keys(entries).length,
+    cellCount,
+  }
+}
+
+// U帳 > 收支 (the ledger) and 分店transfer. Not month-scoped — each row
+// carries its own date, and rows are independent records rather than a
+// per-day grid, so parsing produces a flat candidate list instead of an
+// `entries` map; duplicate-checking against the DB happens separately
+// (markLedgerDuplicates) once the caller has fetched the relevant range.
+const LEDGER_KIND_ALIASES = [
+  ['icost', ['icost']],
+  ['ucost', ['ucost']],
+  ['other_income', ['其他收入', 'other income', 'otherincome', 'income']],
+  ['deposit', ['deposit', '存入', '入帳']],
+  ['withdraw', ['withdraw', '提出', '提款']],
+  ['ruju', ['入金', 'ruju']],
+  ['transfer', ['分店transfer', 'transfer', 'store transfer', '分店 transfer']],
+]
+function parseLedgerKindCell(v) {
+  const n = norm(v)
+  for (const [kind, aliases] of LEDGER_KIND_ALIASES) if (aliases.includes(n)) return kind
+  return null
+}
+const RUJU_TARGET_ALIASES = {
+  jeff_bank: ['jeff bank', 'jeff', 'jeffbank', '入jeff bank', '入 jeff bank'],
+  mao_safe: ['mao safe', 'mao保', 'mao', '入mao保', '入 mao 保險箱', 'mao保险箱', 'mao 保險箱'],
+  other: ['其他', 'other'],
+}
+function parseRujuTargetCell(v) {
+  const n = norm(v)
+  for (const [k, aliases] of Object.entries(RUJU_TARGET_ALIASES)) if (aliases.includes(n)) return k
+  return null
+}
+function findStoreByName(stores, name) {
+  if (name === null || name === undefined || String(name).trim() === '') return null
+  const n = norm(name)
+  return stores.find((s) => norm(s.name) === n) ?? null
+}
+
+const LEDGER_HEADER_MAP = [
+  ['date', ['date', '日期', '日']],
+  ['store', ['store', '分店']],
+  ['kind', ['type', 'kind', '種類', '類型']],
+  ['amount', ['amount', '金額']],
+  ['desc', ['description', 'desc', '說明', '敘述']],
+  ['note', ['note', '附註', '備註']],
+  ['target', ['target', '入金對象', '對象']],
+  ['from', ['from', 'from店', 'from分店', 'from store']],
+  ['to', ['to', 'to店', 'to分店', 'to store']],
+  ['mode', ['mode', '借貸或償還', '借貸償還']],
+]
+
+export function parseLedgerRows(rows, { stores, defaultStoreId }) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) return { error: '找不到標題列：檔案需要有「Date」或「日期」欄。', rows: [], mapped: [], ignored: [] }
+  const headers = rows[headerIdx]
+  const col = {}
+  const mapped = []
+  const ignored = []
+  headers.forEach((h, i) => {
+    if (h === null || h === undefined || String(h).trim() === '') return
+    const label = String(h).replace(/\s+/g, ' ').trim()
+    const n = normHeader(h)
+    const hit = LEDGER_HEADER_MAP.find(([key, aliases]) => col[key] === undefined && aliases.includes(n))
+    if (hit) {
+      col[hit[0]] = i
+      mapped.push({ header: label, target: hit[0] })
+    } else ignored.push({ header: label, reason: '沒有對應的欄位' })
+  })
+  if (col.date === undefined) return { error: '找不到「Date」或「日期」欄。', rows: [], mapped, ignored }
+  if (col.kind === undefined) return { error: '找不到「Type」或「種類」欄。', rows: [], mapped, ignored }
+  if (col.amount === undefined) return { error: '找不到「Amount」或「金額」欄。', rows: [], mapped, ignored }
+
+  const out = []
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    const hasContent = row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')
+    if (!hasContent) continue
+    const rowNumber = r + 1
+    const date = parseDateCell(row[col.date], 0, 0) // no implied month: bare day numbers are rejected
+    if (!date) {
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      continue
+    }
+    const kind = parseLedgerKindCell(row[col.kind])
+    if (!kind) {
+      out.push({ rowNumber, date, problem: `看不懂的種類：「${row[col.kind] ?? ''}」` })
+      continue
+    }
+    const amtRes = cellNumber(row[col.amount])
+    if (amtRes.bad || amtRes.value === undefined) {
+      out.push({ rowNumber, date, kind, problem: '金額看不懂' })
+      continue
+    }
+    const amount = amtRes.value
+    if (amount === 0) {
+      out.push({ rowNumber, date, kind, problem: '金額不能是 0' })
+      continue
+    }
+    if (['deposit', 'withdraw', 'other_income'].includes(kind) && amount <= 0) {
+      out.push({ rowNumber, date, kind, problem: '這個種類的金額必須大於 0' })
+      continue
+    }
+    const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
+
+    if (kind === 'transfer') {
+      const fromName = col.from !== undefined ? row[col.from] : col.store !== undefined ? row[col.store] : null
+      const toName = col.to !== undefined ? row[col.to] : null
+      const fromStore = findStoreByName(stores, fromName)
+      const toStore = findStoreByName(stores, toName)
+      if (!fromStore || !toStore) {
+        out.push({ rowNumber, date, kind, problem: `找不到分店：From「${fromName ?? ''}」/ To「${toName ?? ''}」` })
+        continue
+      }
+      if (amount <= 0) {
+        out.push({ rowNumber, date, kind, problem: '分店transfer 金額必須大於 0' })
+        continue
+      }
+      const modeCell = col.mode !== undefined ? norm(row[col.mode]) : ''
+      const mode = ['借貸償還', '借貸', 'loan_repay', 'loan repay'].includes(modeCell) ? 'loan_repay' : 'normal'
+      out.push({ rowNumber, date, kind, amount, note, fromStoreId: fromStore.id, toStoreId: toStore.id, mode })
+      continue
+    }
+
+    const storeNameCell = col.store !== undefined ? row[col.store] : null
+    const store = storeNameCell ? findStoreByName(stores, storeNameCell) : stores.find((s) => s.id === defaultStoreId)
+    if (!store) {
+      out.push({ rowNumber, date, kind, problem: `找不到分店：「${storeNameCell ?? ''}」` })
+      continue
+    }
+
+    if (kind === 'ruju') {
+      const target = col.target !== undefined ? parseRujuTargetCell(row[col.target]) : null
+      if (!target) {
+        out.push({ rowNumber, date, kind, problem: '看不懂入金對象（需要 Jeff bank / Mao 保險箱 / 其他）' })
+        continue
+      }
+      out.push({ rowNumber, date, kind, amount, note, storeId: store.id, rujuTarget: target })
+      continue
+    }
+
+    const description = col.desc !== undefined ? String(row[col.desc] ?? '').trim() : ''
+    out.push({ rowNumber, date, kind, amount, description, note, storeId: store.id })
+  }
+  return { rows: out, mapped, ignored }
+}
+
+// Marks each valid ledger row as a duplicate when an existing bk_cash_entries
+// row already covers it (same store + date + kind + amount) — Point 5's
+// "系統已有資料時，匯入的那筆跳過" rule. `existing` = bkData.listEntries() rows
+// for the date range the file covers (storeId omitted, so it spans every
+// store — a 分店transfer's two legs are in different stores).
+export function markLedgerDuplicates(rows, existing) {
+  const seen = new Set()
+  for (const e of existing) {
+    const kind = e.kind === 'ucost' && e.transfer_group_id ? 'transfer' : e.kind
+    seen.add(`${e.store_id}|${e.entry_date}|${kind}|${Number(e.amount)}`)
+  }
+  return rows.map((r) => {
+    if (r.problem) return r
+    const key = r.kind === 'transfer' ? `${r.fromStoreId}|${r.date}|transfer|${r.amount}` : `${r.storeId}|${r.date}|${r.kind}|${r.amount}`
+    return { ...r, duplicate: seen.has(key) }
+  })
+}
+
+// 分紅: manual 入金/Cost entries (bk_dividend_entries) and payouts
+// (bk_payouts). Same flat-candidate-list shape as the ledger parser above.
+const DIVIDEND_KIND_ALIASES = [
+  ['income', ['income', '入金', 'ruju']],
+  ['cost', ['cost']],
+  ['payout', ['payout', '分紅', '分紅紀錄']],
+]
+function parseDividendKindCell(v) {
+  const n = norm(v)
+  for (const [kind, aliases] of DIVIDEND_KIND_ALIASES) if (aliases.includes(n)) return kind
+  return null
+}
+function parseMethodCell(v) {
+  const n = norm(v)
+  if (['bank', '銀行'].includes(n)) return 'bank'
+  if (['cash', '現金'].includes(n)) return 'cash'
+  return null
+}
+function findPartyByName(parties, storeId, name) {
+  if (name === null || name === undefined || String(name).trim() === '') return null
+  const n = norm(name)
+  return parties.find((p) => p.store_id === storeId && norm(p.name) === n) ?? null
+}
+
+const DIVIDEND_HEADER_MAP = [
+  ['date', ['date', '日期', '日']],
+  ['store', ['store', '分店']],
+  ['kind', ['type', 'kind', '種類', '類型']],
+  ['party', ['party', 'party名稱']],
+  ['method', ['method', '方式']],
+  ['amount', ['amount', '金額']],
+  ['note', ['note', '附註', '備註']],
+]
+
+export function parseDividendRows(rows, { stores, parties }) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) return { error: '找不到標題列：檔案需要有「Date」或「日期」欄。', rows: [], mapped: [], ignored: [] }
+  const headers = rows[headerIdx]
+  const col = {}
+  const mapped = []
+  const ignored = []
+  headers.forEach((h, i) => {
+    if (h === null || h === undefined || String(h).trim() === '') return
+    const label = String(h).replace(/\s+/g, ' ').trim()
+    const n = normHeader(h)
+    const hit = DIVIDEND_HEADER_MAP.find(([key, aliases]) => col[key] === undefined && aliases.includes(n))
+    if (hit) {
+      col[hit[0]] = i
+      mapped.push({ header: label, target: hit[0] })
+    } else ignored.push({ header: label, reason: '沒有對應的欄位' })
+  })
+  if (col.date === undefined) return { error: '找不到「Date」或「日期」欄。', rows: [], mapped, ignored }
+  if (col.store === undefined) return { error: '找不到「Store」或「分店」欄。', rows: [], mapped, ignored }
+  if (col.kind === undefined) return { error: '找不到「Type」或「種類」欄。', rows: [], mapped, ignored }
+  if (col.amount === undefined) return { error: '找不到「Amount」或「金額」欄。', rows: [], mapped, ignored }
+
+  const out = []
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    const hasContent = row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')
+    if (!hasContent) continue
+    const rowNumber = r + 1
+    const date = parseDateCell(row[col.date], 0, 0)
+    if (!date) {
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      continue
+    }
+    const store = findStoreByName(stores, row[col.store])
+    if (!store) {
+      out.push({ rowNumber, date, problem: `找不到分店：「${row[col.store] ?? ''}」` })
+      continue
+    }
+    const kind = parseDividendKindCell(row[col.kind])
+    if (!kind) {
+      out.push({ rowNumber, date, problem: `看不懂的種類：「${row[col.kind] ?? ''}」（需要 income / cost / payout）` })
+      continue
+    }
+    const amtRes = cellNumber(row[col.amount])
+    if (amtRes.bad || amtRes.value === undefined || amtRes.value <= 0) {
+      out.push({ rowNumber, date, kind, problem: '金額必須是大於 0 的數字' })
+      continue
+    }
+    const amount = amtRes.value
+    const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
+
+    if (kind === 'payout') {
+      const party = col.party !== undefined ? findPartyByName(parties, store.id, row[col.party]) : null
+      if (!party) {
+        out.push({ rowNumber, date, kind, problem: `找不到這個分店的 party：「${col.party !== undefined ? row[col.party] ?? '' : ''}」` })
+        continue
+      }
+      const method = col.method !== undefined ? parseMethodCell(row[col.method]) : null
+      if (!method) {
+        out.push({ rowNumber, date, kind, problem: '看不懂方式（需要 Bank / Cash）' })
+        continue
+      }
+      out.push({ rowNumber, date, kind, amount, note, storeId: store.id, partyId: party.id, method })
+      continue
+    }
+    // income / cost -> bk_dividend_entries
+    out.push({ rowNumber, date, kind, amount, note, storeId: store.id })
+  }
+  return { rows: out, mapped, ignored }
+}
+
+// `existingEntries` = loadDividendData().manual (bk_dividend_entries rows),
+// `existingPayouts` = .payouts (bk_payouts rows).
+export function markDividendDuplicates(rows, existingEntries, existingPayouts) {
+  const entryKeys = new Set(existingEntries.map((e) => `${e.store_id}|${e.entry_date}|${e.kind}|${Number(e.amount)}`))
+  const payoutKeys = new Set(existingPayouts.map((p) => `${p.store_id}|${p.entry_date}|${p.party_id}|${p.method}|${Number(p.amount)}`))
+  return rows.map((r) => {
+    if (r.problem) return r
+    const duplicate =
+      r.kind === 'payout'
+        ? payoutKeys.has(`${r.storeId}|${r.date}|${r.partyId}|${r.method}|${r.amount}`)
+        : entryKeys.has(`${r.storeId}|${r.date}|${r.kind}|${r.amount}`)
+    return { ...r, duplicate }
+  })
+}
+
+// 積欠 > Jeff: manual 薪水/預付/預拿 rows (bk_owed_jeff_entries). Not scoped to
+// any store or month.
+const JEFF_OWED_KIND_ALIASES = [
+  ['salary', ['薪水', 'salary']],
+  ['advance_pay', ['預付', 'advance_pay', 'advance pay']],
+  ['advance_draw', ['預拿', 'advance_draw', 'advance draw']],
+]
+function parseJeffOwedKindCell(v) {
+  const n = norm(v)
+  for (const [kind, aliases] of JEFF_OWED_KIND_ALIASES) if (aliases.includes(n)) return kind
+  return null
+}
+const JEFF_OWED_HEADER_MAP = [
+  ['date', ['date', '日期', '日']],
+  ['kind', ['type', 'kind', '種類', '類型']],
+  ['desc', ['description', 'desc', '說明', '敘述']],
+  ['amount', ['amount', '金額']],
+  ['note', ['note', '附註', '備註']],
+]
+
+export function parseJeffOwedRows(rows) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) return { error: '找不到標題列：檔案需要有「Date」或「日期」欄。', rows: [], mapped: [], ignored: [] }
+  const headers = rows[headerIdx]
+  const col = {}
+  const mapped = []
+  const ignored = []
+  headers.forEach((h, i) => {
+    if (h === null || h === undefined || String(h).trim() === '') return
+    const label = String(h).replace(/\s+/g, ' ').trim()
+    const n = normHeader(h)
+    const hit = JEFF_OWED_HEADER_MAP.find(([key, aliases]) => col[key] === undefined && aliases.includes(n))
+    if (hit) {
+      col[hit[0]] = i
+      mapped.push({ header: label, target: hit[0] })
+    } else ignored.push({ header: label, reason: '沒有對應的欄位' })
+  })
+  if (col.date === undefined) return { error: '找不到「Date」或「日期」欄。', rows: [], mapped, ignored }
+  if (col.kind === undefined) return { error: '找不到「Type」或「種類」欄。', rows: [], mapped, ignored }
+  if (col.amount === undefined) return { error: '找不到「Amount」或「金額」欄。', rows: [], mapped, ignored }
+
+  const out = []
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    const hasContent = row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')
+    if (!hasContent) continue
+    const rowNumber = r + 1
+    const date = parseDateCell(row[col.date], 0, 0)
+    if (!date) {
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      continue
+    }
+    const kind = parseJeffOwedKindCell(row[col.kind])
+    if (!kind) {
+      out.push({ rowNumber, date, problem: `看不懂的種類：「${row[col.kind] ?? ''}」（需要 薪水 / 預付 / 預拿）` })
+      continue
+    }
+    const amtRes = cellNumber(row[col.amount])
+    if (amtRes.bad || amtRes.value === undefined || amtRes.value <= 0) {
+      out.push({ rowNumber, date, kind, problem: '金額必須是大於 0 的數字' })
+      continue
+    }
+    const description = col.desc !== undefined ? String(row[col.desc] ?? '').trim() : ''
+    const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
+    out.push({ rowNumber, date, kind, amount: amtRes.value, description, note })
+  }
+  return { rows: out, mapped, ignored }
+}
+
+// `existing` = bkData.loadJeffOwedEntries() rows.
+export function markJeffOwedDuplicates(rows, existing) {
+  const seen = new Set(existing.map((e) => `${e.kind}|${e.entry_date}|${Number(e.amount)}`))
+  return rows.map((r) => (r.problem ? r : { ...r, duplicate: seen.has(`${r.kind}|${r.date}|${r.amount}`) }))
+}
+
+// 積欠 > Emma: historical bonus claims (bk_owed_emma_claims). A claim normally
+// bundles specific U帳 入金 rows, but a backfilled historical claim has no
+// such rows to point at — it's imported as a claim with an empty `rows: []`
+// (the submitted date, total amount and note are all that's known about it).
+const EMMA_CLAIM_HEADER_MAP = [
+  ['date', ['date', '日期', '日', 'submitted', '提交日期']],
+  ['amount', ['amount', '金額', 'bonus', '分紅金額']],
+  ['note', ['note', '附註', '備註']],
+]
+
+export function parseEmmaClaimRows(rows) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) return { error: '找不到標題列：檔案需要有「Date」或「日期」欄。', rows: [], mapped: [], ignored: [] }
+  const headers = rows[headerIdx]
+  const col = {}
+  const mapped = []
+  const ignored = []
+  headers.forEach((h, i) => {
+    if (h === null || h === undefined || String(h).trim() === '') return
+    const label = String(h).replace(/\s+/g, ' ').trim()
+    const n = normHeader(h)
+    const hit = EMMA_CLAIM_HEADER_MAP.find(([key, aliases]) => col[key] === undefined && aliases.includes(n))
+    if (hit) {
+      col[hit[0]] = i
+      mapped.push({ header: label, target: hit[0] })
+    } else ignored.push({ header: label, reason: '沒有對應的欄位' })
+  })
+  if (col.date === undefined) return { error: '找不到「Date」或「日期」欄。', rows: [], mapped, ignored }
+  if (col.amount === undefined) return { error: '找不到「Amount」或「金額」欄。', rows: [], mapped, ignored }
+
+  const out = []
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    const hasContent = row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')
+    if (!hasContent) continue
+    const rowNumber = r + 1
+    const date = parseDateCell(row[col.date], 0, 0)
+    if (!date) {
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      continue
+    }
+    const amtRes = cellNumber(row[col.amount])
+    if (amtRes.bad || amtRes.value === undefined || amtRes.value <= 0) {
+      out.push({ rowNumber, date, problem: '金額必須是大於 0 的數字' })
+      continue
+    }
+    const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
+    out.push({ rowNumber, date, amount: amtRes.value, note })
+  }
+  return { rows: out, mapped, ignored }
+}
+
+// `existing` = bkData.loadEmmaClaims() rows.
+export function markEmmaClaimDuplicates(rows, existing) {
+  const seen = new Set(existing.map((c) => `${c.submitted_at}|${Number(c.total_amount)}`))
+  return rows.map((r) => (r.problem ? r : { ...r, duplicate: seen.has(`${r.date}|${r.amount}`) }))
 }
 
 // ---------------------------------------------------------------------------

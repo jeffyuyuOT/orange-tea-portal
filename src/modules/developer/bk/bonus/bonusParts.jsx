@@ -247,7 +247,12 @@ export function EventTable({ events, storeNames, showStore, partyNames, fullKeys
           {events.map((ev) => {
             const editable = ev.source !== 'ucash' && onOpen
             const label = ev.type === 'payout' ? payoutLabel(ev, fullKeys) : ''
-            const neg = signed && ev.type !== 'income'
+            // Payouts/cost show a manual "−" since their amount is stored
+            // positive; a 入金 (income) row's amount carries its own sign
+            // (a negative 入金 = withdrawal from the vault), so fmtMoney
+            // already renders it with a "-" — just colour it red too.
+            const negPrefix = signed && ev.type !== 'income'
+            const neg = negPrefix || (ev.type === 'income' && ev.amount < 0)
             return (
               <tr
                 key={ev.key}
@@ -268,7 +273,7 @@ export function EventTable({ events, storeNames, showStore, partyNames, fullKeys
                   </span>
                 </td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${neg ? 'text-red-600' : ''}`}>
-                  {neg ? '−' : ''}
+                  {negPrefix ? '−' : ''}
                   {fmtMoney(ev.amount)}
                 </td>
                 <td className="px-3 py-2 text-right text-xs text-brand-500">{editable ? '編輯' : ''}</td>

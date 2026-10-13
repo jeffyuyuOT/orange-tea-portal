@@ -7,8 +7,11 @@ import {
   RUJU_TARGET_LABELS,
   brisbaneToday,
   brisbaneTodayStr,
+  computeCashDay,
+  computeCashSummary,
   dwSigned,
   fmtMoney,
+  monthDates,
   monthLabel,
   monthStart,
   round2,
@@ -16,22 +19,26 @@ import {
   toNum,
 } from '../bkUtils'
 import { listCashDayRows, listCashMonths, listEntries, loadCashMonth } from '../bkData'
-import { exportCashXlsx } from '../bkExcel'
+import { exportCashXlsx, exportPlXlsx } from '../bkExcel'
 import { NoteButton, Notice, inputCls } from '../bkUi'
 
 const VIEWS = [
   ['store', '分店現金'],
   ['items', '個別資料'],
+  ['pl', 'P/L'],
 ]
 
-// 個別資料 categories. ids: icost / ucost / dw / ruju come from 收支;
-// d / pm come from the daily table.
+// 個別資料 categories. ids: icost / ucost / dw / ruju / transfer come from
+// 收支 (分店transfer is a 'ucost' row with transfer_group_id set — "Ucost"
+// here means a PLAIN Ucost row, excluding transfers, so the two never
+// double-count the same row); d / pm come from the daily table.
 const ITEM_KINDS = [
   ['icost', 'Icost'],
   ['ucost', 'Ucost'],
   ['other_income', '其他收入'],
   ['dw', 'deposit / withdraw'],
   ['ruju', '入金'],
+  ['transfer', '分店transfer'],
   ['d', 'D 欄'],
   ['pm', '+/− 欄'],
 ]
@@ -56,11 +63,44 @@ export default function UHistory({ stores, storeId: initialStoreId, active, onLo
       </div>
       {view === 'store' ? (
         <StoreMonths stores={stores} initialStoreId={initialStoreId} active={active} onLoad={onLoad} />
-      ) : (
+      ) : view === 'items' ? (
         <ItemHistory stores={stores} initialStoreId={initialStoreId} active={active} />
+      ) : (
+        <PlHistory stores={stores} initialStoreId={initialStoreId} active={active} />
       )}
     </div>
   )
+}
+
+// One store/month's P/L, independent of opening balances (bkUtils.computeCashSummary).
+async function computePlForStoreMonth(storeId, year, month) {
+  const from = monthStart(year, month)
+  const dates = monthDates(year, month)
+  const to = dates[dates.length - 1]
+  const { cashDays, sfDays } = await listCashDayRows({ storeId, from, to })
+  const ocaByDay = new Map(sfDays.map((r) => [r.day, toNum(r.o_ca)]))
+  const cashByDay = new Map(cashDays.map((c) => [c.day, c]))
+  const dayRows = dates.map((date) => ({ date, ...computeCashDay(ocaByDay.get(date) ?? 0, cashByDay.get(date) ?? null) }))
+  const entries = await listEntries({ storeId, from, to, kinds: ['ucost'] })
+  return computeCashSummary(0, 0, dayRows, entries).pl
+}
+
+// Every (year, month) from `from`'s month to `to`'s month, inclusive.
+function monthsBetween(from, to) {
+  const [fy, fm] = from.slice(0, 7).split('-').map(Number)
+  const [ty, tm] = to.slice(0, 7).split('-').map(Number)
+  const out = []
+  let y = fy
+  let m = fm
+  while (y < ty || (y === ty && m <= tm)) {
+    out.push({ year: y, month: m })
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+  }
+  return out
 }
 
 // 分店現金 view: one store's months (month + D total), with 載入 / 匯出.
@@ -181,62 +221,91 @@ function StoreMonths({ stores, initialStoreId, active, onLoad }) {
   )
 }
 
-// 個別資料 view: pick a store (or all), one or more categories and a date range
-// (this month so far by default) -> the matching lines and their total.
+// 個別資料 view: pick a store (or all) and a date range (this month so far by
+// default), then pick categories from a dropdown one at a time and "加入清單"
+// (add to list). Each added category gets its own column with its own total
+// at the top; removing a column just drops it from the list.
 function ItemHistory({ stores, initialStoreId, active }) {
   const t = brisbaneToday()
   const [storeId, setStoreId] = useState(initialStoreId) // null = all
-  const [kinds, setKinds] = useState(['icost'])
+  const [addedKinds, setAddedKinds] = useState(['icost'])
+  const [pendingKind, setPendingKind] = useState('')
   const [from, setFrom] = useState(monthStart(t.year, t.month))
   const [to, setTo] = useState(brisbaneTodayStr())
   const [rujuTarget, setRujuTarget] = useState('')
-  const [rows, setRows] = useState([])
+  const [byKind, setByKind] = useState({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [noteText, setNoteText] = useState(null)
 
   const storeName = (id) => stores.find((s) => s.id === id)?.name ?? ''
-  const toggleKind = (k) => setKinds((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]))
+  const availableKinds = ITEM_KINDS.filter(([k]) => !addedKinds.includes(k))
+
+  function addKind() {
+    const k = pendingKind || availableKinds[0]?.[0]
+    if (!k || addedKinds.includes(k)) return
+    setAddedKinds((prev) => [...prev, k])
+    setPendingKind('')
+  }
+  function removeKind(k) {
+    setAddedKinds((prev) => prev.filter((x) => x !== k))
+  }
 
   useEffect(() => {
     if (!active) return
     let cancelled = false
     ;(async () => {
-      if (kinds.length === 0 || !from || !to) {
-        setRows([])
+      if (addedKinds.length === 0 || !from || !to) {
+        setByKind({})
         return
       }
       setLoading(true)
       setError('')
       try {
-        const out = []
-        const entryKinds = kinds.flatMap((k) => (k === 'dw' ? ['deposit', 'withdraw'] : ['icost', 'ucost', 'other_income', 'ruju'].includes(k) ? [k] : []))
+        const buckets = {}
+        for (const k of addedKinds) buckets[k] = []
+        const wantTransfer = addedKinds.includes('transfer')
+        const entryKinds = addedKinds.flatMap((k) =>
+          k === 'dw' ? ['deposit', 'withdraw'] : k === 'transfer' ? [] : ['icost', 'ucost', 'other_income', 'ruju'].includes(k) ? [k] : []
+        )
+        if (wantTransfer && !entryKinds.includes('ucost')) entryKinds.push('ucost')
         if (entryKinds.length) {
           const entries = await listEntries({ storeId, from, to, kinds: entryKinds })
           for (const e of entries) {
             if (e.kind === 'ruju' && rujuTarget && e.ruju_target !== rujuTarget) continue
-            out.push({
+            // A 分店transfer leg is still kind 'ucost' underneath; split it
+            // into its own bucket here so "Ucost" and "分店transfer" never
+            // double-count the same row.
+            let bucketKey = e.kind === 'deposit' || e.kind === 'withdraw' ? 'dw' : e.kind
+            if (e.kind === 'ucost') bucketKey = e.transfer_group_id ? 'transfer' : 'ucost'
+            if (!buckets[bucketKey]) continue
+            buckets[bucketKey].push({
               key: `e-${e.id}`,
               date: e.entry_date,
               store: e.store_id,
-              type: e.kind === 'ruju' ? `入金（${RUJU_TARGET_LABELS[e.ruju_target]}）` : ENTRY_KIND_LABELS[e.kind],
+              type:
+                e.kind === 'ruju'
+                  ? `入金（${RUJU_TARGET_LABELS[e.ruju_target]}）`
+                  : e.kind === 'ucost' && e.transfer_group_id
+                    ? `分店transfer${e.transfer_mode === 'loan_repay' ? '（借貸償還）' : ''}`
+                    : ENTRY_KIND_LABELS[e.kind],
               desc: e.description ?? '',
               amount: e.kind === 'deposit' || e.kind === 'withdraw' ? dwSigned(e) : Number(e.amount),
               note: e.note,
             })
           }
         }
-        if (kinds.includes('d') || kinds.includes('pm')) {
+        if (buckets.d || buckets.pm) {
           const { cashDays, sfDays } = await listCashDayRows({ storeId, from, to })
           const oca = new Map(sfDays.map((r) => [`${r.bk_sf_months.store_id}|${r.day}`, toNum(r.o_ca)]))
           for (const c of cashDays) {
             const d = toNum(c.d_amount)
-            if (kinds.includes('d') && d !== null) {
-              out.push({ key: `d-${c.store_id}-${c.day}`, date: c.day, store: c.store_id, type: 'D 欄', desc: c.d_stocked ? '已入庫' : '未入庫', amount: d })
+            if (buckets.d && d !== null) {
+              buckets.d.push({ key: `d-${c.store_id}-${c.day}`, date: c.day, store: c.store_id, type: 'D 欄', desc: c.d_stocked ? '已入庫' : '未入庫', amount: d })
             }
             const actual = toNum(c.actual_ca)
-            if (kinds.includes('pm') && actual !== null) {
-              out.push({
+            if (buckets.pm && actual !== null) {
+              buckets.pm.push({
                 key: `p-${c.store_id}-${c.day}`,
                 date: c.day,
                 store: c.store_id,
@@ -247,8 +316,8 @@ function ItemHistory({ stores, initialStoreId, active }) {
             }
           }
         }
-        out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-        if (!cancelled) setRows(out)
+        for (const k of Object.keys(buckets)) buckets[k].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+        if (!cancelled) setByKind(buckets)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -258,9 +327,9 @@ function ItemHistory({ stores, initialStoreId, active }) {
     return () => {
       cancelled = true
     }
-  }, [active, storeId, kinds, from, to, rujuTarget])
+  }, [active, storeId, addedKinds, from, to, rujuTarget])
 
-  const total = round2(rows.reduce((a, r) => a + r.amount, 0))
+  const grandTotal = round2(addedKinds.reduce((a, k) => a + (byKind[k] ?? []).reduce((aa, r) => aa + r.amount, 0), 0))
 
   return (
     <div className="space-y-3">
@@ -287,14 +356,19 @@ function ItemHistory({ stores, initialStoreId, active }) {
           <input type="date" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        {ITEM_KINDS.map(([k, label]) => (
-          <label key={k} className="flex items-center gap-1.5">
-            <input type="checkbox" checked={kinds.includes(k)} onChange={() => toggleKind(k)} />
-            {label}
-          </label>
-        ))}
-        {kinds.includes('ruju') && (
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <select className={inputCls} value={pendingKind} onChange={(e) => setPendingKind(e.target.value)} aria-label="資料種類">
+          <option value="">選擇資料種類…</option>
+          {availableKinds.map(([k, label]) => (
+            <option key={k} value={k}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <Button variant="secondary" onClick={addKind} disabled={availableKinds.length === 0}>
+          加入清單
+        </Button>
+        {addedKinds.includes('ruju') && (
           <select className={inputCls} value={rujuTarget} onChange={(e) => setRujuTarget(e.target.value)} aria-label="入金對象">
             <option value="">入金：全部</option>
             <option value="jeff_bank">入 Jeff bank</option>
@@ -305,41 +379,203 @@ function ItemHistory({ stores, initialStoreId, active }) {
       </div>
 
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
-      {kinds.length === 0 ? (
-        <EmptyState label="請至少選擇一種資料。" />
+      {addedKinds.length === 0 ? (
+        <EmptyState label="請從上面選擇資料種類，加入清單。" />
       ) : loading ? (
         <LoadingSpinner />
       ) : (
         <>
           <div className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm">
-            符合條件共 {rows.length} 筆，Total：<span className="text-lg font-semibold tabular-nums text-brand-900">{fmtMoney(total)}</span>
-            {kinds.length > 1 && <span className="ml-2 text-xs text-gray-500">（多種類別的金額直接相加）</span>}
+            全部加總 Total：<span className="text-lg font-semibold tabular-nums text-brand-900">{fmtMoney(grandTotal)}</span>
+            {addedKinds.length > 1 && <span className="ml-2 text-xs text-gray-500">（每欄各自計算，這裡是全部欄加總）</span>}
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {addedKinds.map((k) => {
+              const label = ITEM_KINDS.find(([id]) => id === k)?.[1] ?? k
+              const list = byKind[k] ?? []
+              const colTotal = round2(list.reduce((a, r) => a + r.amount, 0))
+              return (
+                <div key={k} className="min-w-[280px] flex-1 rounded-xl border border-brand-100">
+                  <div className="flex items-center justify-between gap-2 border-b border-brand-100 bg-brand-100 px-3 py-2">
+                    <div className="text-sm font-semibold text-gray-700">{label}</div>
+                    <button
+                      type="button"
+                      onClick={() => removeKind(k)}
+                      className="text-xs text-gray-500 hover:text-red-600"
+                      aria-label={`移除 ${label}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="border-b border-brand-100 bg-brand-50/60 px-3 py-2 text-sm">
+                    Total：<span className="font-semibold tabular-nums text-brand-900">{fmtMoney(colTotal)}</span>
+                    <span className="ml-1 text-xs text-gray-500">（{list.length} 筆）</span>
+                  </div>
+                  {list.length === 0 ? (
+                    <div className="px-3 py-4 text-center text-xs text-gray-400">沒有符合的資料。</div>
+                  ) : (
+                    <div className="max-h-[480px] overflow-y-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-brand-50 text-left text-xs text-gray-600">
+                          <tr>
+                            <th className="px-2 py-1.5">日期</th>
+                            {!storeId && <th className="px-2 py-1.5">分店</th>}
+                            <th className="px-2 py-1.5">Description</th>
+                            <th className="px-2 py-1.5 text-right">金額</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {list.map((r) => (
+                            <tr key={r.key} className="border-t border-gray-100">
+                              <td className="whitespace-nowrap px-2 py-1.5">{r.date}</td>
+                              {!storeId && <td className="px-2 py-1.5">{storeName(r.store)}</td>}
+                              <td className="px-2 py-1.5">
+                                <span className="mr-1 rounded bg-gray-100 px-1 text-xs text-gray-500">{r.type}</span>
+                                {r.desc}
+                                <NoteButton note={r.note} onOpen={setNoteText} />
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+      <Modal open={noteText !== null} onClose={() => setNoteText(null)} title="附註" footer={<Button onClick={() => setNoteText(null)}>關閉</Button>}>
+        <p className="whitespace-pre-wrap text-sm text-gray-700">{noteText}</p>
+      </Modal>
+    </div>
+  )
+}
+
+// P/L view: pick a store (or 全部) and a date range, show every month's P/L
+// (independent of opening COH/UCOH — bkUtils.computeCashSummary), a Total
+// banner, and an Excel export.
+function PlHistory({ stores, initialStoreId, active }) {
+  const t = brisbaneToday()
+  const [storeId, setStoreId] = useState(initialStoreId) // null = 全部分店
+  const [from, setFrom] = useState(monthStart(t.year, t.month))
+  const [to, setTo] = useState(brisbaneTodayStr())
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    ;(async () => {
+      if (!from || !to) {
+        setRows([])
+        return
+      }
+      setLoading(true)
+      setError('')
+      try {
+        const months = monthsBetween(from, to)
+        const targetStores = storeId ? stores.filter((s) => s.id === storeId) : stores
+        const combos = targetStores.flatMap((s) => months.map(({ year, month }) => ({ s, year, month })))
+        const out = await Promise.all(
+          combos.map(async ({ s, year, month }) => ({
+            key: `${s.id}-${year}-${month}`,
+            storeId: s.id,
+            storeName: s.name,
+            year,
+            month,
+            pl: await computePlForStoreMonth(s.id, year, month),
+          }))
+        )
+        out.sort((a, b) => (a.year !== b.year ? b.year - a.year : b.month - a.month))
+        if (!cancelled) setRows(out)
+      } catch (e) {
+        if (!cancelled) setError(e.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [active, storeId, from, to, stores])
+
+  const total = round2(rows.reduce((a, r) => a + r.pl, 0))
+
+  async function doExport() {
+    setError('')
+    try {
+      const title = storeId ? `${stores.find((s) => s.id === storeId)?.name ?? ''} P_L` : '全部分店 P_L'
+      await exportPlXlsx({
+        title,
+        showStore: !storeId,
+        rows: rows.map((r) => ({ storeName: r.storeName, monthLabel: monthLabel(r.year, r.month), pl: r.pl })),
+        total,
+      })
+    } catch (e) {
+      setError(`匯出失敗：${e.message}`)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          className={inputCls}
+          value={storeId ?? ''}
+          onChange={(e) => setStoreId(e.target.value || null)}
+          aria-label="Store"
+        >
+          <option value="">全部分店</option>
+          {stores.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          從
+          <input type="date" className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          到
+          <input type="date" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <Button variant="secondary" onClick={doExport} disabled={rows.length === 0}>
+          匯出 Excel
+        </Button>
+      </div>
+
+      {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
+      {loading ? (
+        <LoadingSpinner />
+      ) : (
+        <>
+          <div className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm">
+            Total P/L：
+            <span className={`text-lg font-semibold tabular-nums ${total < 0 ? 'text-red-600' : 'text-brand-900'}`}>{fmtMoney(total)}</span>
           </div>
           {rows.length === 0 ? (
-            <EmptyState label="這個範圍沒有符合的資料。" />
+            <EmptyState label="這個範圍沒有符合的月份。" />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-brand-100">
               <table className="min-w-full text-sm">
                 <thead className="bg-brand-100 text-left text-xs text-gray-700">
                   <tr>
-                    <th className="px-3 py-2">日期</th>
-                    <th className="px-3 py-2">分店</th>
-                    <th className="px-3 py-2">種類</th>
-                    <th className="px-3 py-2">Description</th>
-                    <th className="px-3 py-2 text-right">金額</th>
+                    {!storeId && <th className="px-3 py-2">分店</th>}
+                    <th className="px-3 py-2">月份</th>
+                    <th className="px-3 py-2 text-right">P/L</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.key} className="border-t border-gray-100">
-                      <td className="whitespace-nowrap px-3 py-2">{r.date}</td>
-                      <td className="px-3 py-2">{storeName(r.store)}</td>
-                      <td className="px-3 py-2">{r.type}</td>
-                      <td className="px-3 py-2">
-                        {r.desc}
-                        <NoteButton note={r.note} onOpen={setNoteText} />
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                      {!storeId && <td className="px-3 py-2">{r.storeName}</td>}
+                      <td className="px-3 py-2 font-medium">{monthLabel(r.year, r.month)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${r.pl < 0 ? 'text-red-600' : ''}`}>{fmtMoney(r.pl)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -348,9 +584,6 @@ function ItemHistory({ stores, initialStoreId, active }) {
           )}
         </>
       )}
-      <Modal open={noteText !== null} onClose={() => setNoteText(null)} title="附註" footer={<Button onClick={() => setNoteText(null)}>關閉</Button>}>
-        <p className="whitespace-pre-wrap text-sm text-gray-700">{noteText}</p>
-      </Modal>
     </div>
   )
 }

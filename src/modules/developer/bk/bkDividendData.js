@@ -70,6 +70,36 @@ export async function deletePayout(id) {
   unwrap(await supabase.from('bk_payouts').delete().eq('id', id))
 }
 
+// Point 5: Excel-import backfill for 分紅. `rows` are already deduped by the
+// caller (bkImport.markDividendDuplicates) — income/cost rows go to
+// bk_dividend_entries, payout rows to bk_payouts.
+export async function bulkImportDividendRows(rows) {
+  const entryRows = rows.filter((r) => r.kind !== 'payout')
+  const payoutRows = rows.filter((r) => r.kind === 'payout')
+  if (entryRows.length) {
+    unwrap(
+      await supabase.from('bk_dividend_entries').insert(
+        entryRows.map((r) => ({ store_id: r.storeId, entry_date: r.date, kind: r.kind, amount: toNum(r.amount), note: r.note || null }))
+      )
+    )
+  }
+  if (payoutRows.length) {
+    unwrap(
+      await supabase.from('bk_payouts').insert(
+        payoutRows.map((r) => ({
+          store_id: r.storeId,
+          party_id: r.partyId,
+          entry_date: r.date,
+          amount: toNum(r.amount),
+          method: r.method,
+          is_settlement: false,
+          note: r.note || null,
+        }))
+      )
+    )
+  }
+}
+
 // 設定: save one store's parties. `draft` rows: { id?, name, weight }. Parties
 // missing from the draft are deleted — but only if they have no payouts.
 export async function savePartiesForStore(storeId, draft, existing) {

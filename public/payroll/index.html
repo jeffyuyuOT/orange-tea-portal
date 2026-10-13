@@ -2474,9 +2474,20 @@ function refreshUnknownAgeRows(rows, settings, periodTo){
 // site. A row with no matching (or no longer existing, e.g. deleted)
 // employee record -- an "未登記" row, or an orphaned employeeId -- sorts to
 // the end, keeping its prior relative order (sort is stable).
+//
+// Jeff, 2026-10-13: "Jeff要放在最下面" -- Jeff is currently the only
+// paymentType "Direct" employee (pooled cross-store hours, excluded from
+// this store's Total row -- see renderMasterTable's isDirect handling), so
+// rather than hardcoding his name, a Direct row always sorts after every
+// ordinary employee row here, regardless of its 員工資料管理 up/down
+// position. If more than one Direct employee ever exists, they're ordered
+// among themselves the same way (by their own 員工資料管理 order).
 function sortRowsByEmployeeOrder(rows){
   const orderById = new Map(currentEmployees.map(e=>[e.id, e.order||0]));
   rows.sort((a,b)=>{
+    const aDirect = a.paymentType==="Direct" ? 1 : 0;
+    const bDirect = b.paymentType==="Direct" ? 1 : 0;
+    if(aDirect!==bDirect) return aDirect-bDirect;
     const ao = (a.employeeId!=null && orderById.has(a.employeeId)) ? orderById.get(a.employeeId) : Infinity;
     const bo = (b.employeeId!=null && orderById.has(b.employeeId)) ? orderById.get(b.employeeId) : Infinity;
     return ao-bo;
