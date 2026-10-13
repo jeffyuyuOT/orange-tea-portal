@@ -6,25 +6,30 @@ import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import {
   buildColumns,
   computeSfDay,
+  columnCopyText,
   computeSfTotals,
+  countSfDataDays,
   dMapFromRows,
   fmtMoney,
   inactiveIdsWithData,
+  isCashColumn,
+  isPosTotalColumn,
   isWeekend,
   monthDates,
+  monthLabel,
   numToInput,
-  prevMonth,
+  sfDayCountMismatch,
   sfDaysFromRows,
   sfSubmitProblems,
   weekdayOf,
 } from '../bkUtils'
-import { loadCashDays, loadPaymentTypes, loadSfMonth, saveSfMonth } from '../bkData'
+import { loadCashDays, loadPaymentTypes, loadSfDataDayCounts, loadSfMonth, saveSfMonth } from '../bkData'
 import { exportSfXlsx } from '../bkExcel'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import ImportByImage from './ImportByImage'
 import SfExcelImport from './SfExcelImport'
 
-const emptyDay = () => ({ o_ca: '', total: '', amounts: {} })
+const emptyDay = () => ({ o_ca: '', o_post: '', total: '', amounts: {} })
 
 // The SF sub-tab: store tabs, year/month, Save / Submit / Action, and the
 // month table (Date | main payment types | Total | Sum vs Total | sub payment
@@ -40,6 +45,8 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [problems, setProblems] = useState(null)
+  const [mismatch, setMismatch] = useState(null) // { reference, counts: [{ id, name, days }] }
+  const [copied, setCopied] = useState(null) // type id just copied
   const [menuOpen, setMenuOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const fileInputRef = useRef(null)
@@ -100,6 +107,8 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
   const dates = useMemo(() => monthDates(year, month), [year, month])
   const columns = useMemo(() => buildColumns(types, inactiveIdsWithData(types, days)), [types, days])
   const subs = useMemo(() => columns.flatMap((c) => c.subs.map((s) => ({ ...s, parentName: c.name }))), [columns])
+  // date 58 + check 44 + about 66px for each money column (mains, Total, subs, O.CA, O.POST)
+  const tableMinWidth = 58 + 44 + 66 * (columns.length + 1 + subs.length + 2)
   const rows = useMemo(
     () => dates.map((date) => computeSfDay(columns, days[date] ?? emptyDay(), dMap[date] ?? null)),
     [dates, columns, days, dMap]
@@ -120,12 +129,49 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
     setMsg('')
   }
 
+  // Copy one column's month of values (1st … last, one per line) to the clipboard.
+  async function copyColumn(typeId, values) {
+    const text = columnCopyText(values)
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
+      else throw new Error('no clipboard api')
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    }
+    setCopied(typeId)
+    setTimeout(() => setCopied((cur) => (cur === typeId ? null : cur)), 1500)
+  }
+
+  const copyBtn = (type, values) =>
+    type.can_copy ? (
+      <button
+        type="button"
+        onClick={() => copyColumn(type.id, values)}
+        title={copied === type.id ? '已複製' : `複製 ${type.name} 整欄數值`}
+        aria-label={`複製 ${type.name} 整欄數值`}
+        className="absolute right-0.5 top-0.5 rounded px-1 text-xs leading-none text-brand-600 hover:bg-brand-200"
+      >
+        {copied === type.id ? '✓' : '⧉'}
+      </button>
+    ) : null
+
   async function persist(submit) {
     setSaving(true)
     setError('')
     setMsg('')
     try {
-      const saved = await saveSfMonth({ storeId: store.id, year, month, existing: sfMonth, days, submit })
+      // Total is never typed: store the calculated one (Pos total + Self order kiosk).
+      const daysToSave = Object.fromEntries(
+        dates.map((date, i) => [date, { ...(days[date] ?? emptyDay()), total: numToInput(rows[i].total) }])
+      )
+      const saved = await saveSfMonth({ storeId: store.id, year, month, existing: sfMonth, days: daysToSave, submit })
       setSfMonth(saved)
       setDirty(false)
       setMsg(submit ? '已提交。' : '已儲存（狀態：未提交）。')
@@ -136,12 +182,37 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
     }
   }
 
+  // Submit checks: (1) a day with any other main payment figure needs Cash;
+  // (2) every store should have the same number of days with data this month —
+  // that one only warns (a store may genuinely have fewer days), 仍要提交 goes on.
   async function submit() {
-    const found = sfSubmitProblems(dates, days)
+    const found = sfSubmitProblems(dates, days, columns)
     if (found.length > 0) {
       setProblems(found)
       return
     }
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await loadSfDataDayCounts(year, month)
+      const counts = stores.map((s) => ({
+        id: s.id,
+        name: s.name,
+        // this store: what is on screen (may be unsaved); the others: what is saved
+        days: s.id === store.id ? countSfDataDays(days) : (saved[s.id] ?? 0),
+      }))
+      const { reference, mismatched } = sfDayCountMismatch(counts)
+      if (mismatched.length > 0) {
+        setMismatch({ reference, counts })
+        setSaving(false)
+        return
+      }
+    } catch (e) {
+      setError(`無法檢查各分店的天數：${e.message}`)
+      setSaving(false)
+      return
+    }
+    setSaving(false)
     await persist(true)
   }
 
@@ -166,6 +237,7 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
         next[date] = {
           ...cur,
           o_ca: entry.o_ca !== undefined ? numToInput(entry.o_ca) : cur.o_ca,
+          o_post: entry.o_post !== undefined ? numToInput(entry.o_post) : cur.o_post,
           total: entry.total !== undefined ? numToInput(entry.total) : cur.total,
           amounts,
         }
@@ -176,12 +248,6 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
     setImportFile(null)
     setError('')
     setMsg(`已把 ${Object.keys(entries).length} 天的 Excel 資料填進表格，請檢查後按「儲存」。`)
-  }
-
-  function loadPrevious() {
-    setMenuOpen(false)
-    const p = prevMonth(year, month)
-    onNavigate({ year: p.year, month: p.month })
   }
 
   // Enter moves to the same column on the next day, like a spreadsheet.
@@ -204,10 +270,16 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
         : { color: 'red', text: '未提交' }
   const canExport = sfMonth?.status === 'submitted' && !dirty
 
-  const th = 'border border-brand-100 px-2 py-1.5 text-xs font-semibold text-gray-700'
+  const th = 'border border-brand-100 px-1 py-1.5 text-[11px] font-semibold leading-tight text-gray-700'
   const td = 'border border-gray-100 p-0'
   const inputFor = (i, colKey, value, onChange) => (
-    <MoneyInput value={value} onChange={onChange} data-sf={`${i}:${colKey}`} onKeyDown={(e) => onKeyDown(e, i, colKey)} />
+    <MoneyInput
+      value={value}
+      onChange={onChange}
+      className="!px-1 !text-[13px]"
+      data-sf={`${i}:${colKey}`}
+      onKeyDown={(e) => onKeyDown(e, i, colKey)}
+    />
   )
 
   return (
@@ -249,9 +321,6 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
                   className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50"
                 >
                   匯入 Excel
-                </button>
-                <button type="button" onClick={loadPrevious} className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50">
-                  載入上個月 SF
                 </button>
               </div>
             )}
@@ -295,27 +364,54 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
         <LoadingSpinner />
       ) : (
         <div className="max-h-[70vh] overflow-auto rounded-xl border border-brand-100">
-          <table className="min-w-full border-collapse text-sm">
+          {/* Compact layout: fixed column widths that share the page width, so the
+              whole month fits without sliding sideways (date and check columns are
+              narrow; every money column gets an equal share). It only scrolls
+              sideways when the window is narrower than minWidth. */}
+          <table className="w-full table-fixed border-collapse text-[13px]" style={{ minWidth: tableMinWidth }}>
+            <colgroup>
+              <col style={{ width: 58 }} />
+              {columns.map((c) => (
+                <col key={c.id} />
+              ))}
+              <col />
+              <col style={{ width: 44 }} />
+              {subs.map((s) => (
+                <col key={s.id} />
+              ))}
+              <col />
+              <col />
+            </colgroup>
             <thead className="sticky top-0 z-20">
               <tr>
-                <th className={`${th} sticky left-0 z-30 min-w-24 bg-brand-100 text-left`}>日期</th>
+                <th className={`${th} sticky left-0 z-30 bg-brand-100 text-left`}>日期</th>
                 {columns.map((c) => (
-                  <th key={c.id} className={`${th} min-w-28 bg-brand-100`}>
+                  <th key={c.id} className={`${th} relative bg-brand-100`}>
+                    {copyBtn(c, rows.map((r) => r.mains[c.id]))}
                     {c.name}
                     {!c.is_active && <div className="text-[10px] font-normal text-gray-400">(已停用)</div>}
                     {c.subs.length > 0 && <div className="text-[10px] font-normal text-gray-500">= sub 加總</div>}
-                    {c.is_locked && c.name === 'Cash' && <div className="text-[10px] font-normal text-gray-500">= O.CA − D</div>}
+                    {isCashColumn(c) && <div className="text-[10px] font-normal text-gray-500">= O.CA − D</div>}
+                    {isPosTotalColumn(c) && <div className="text-[10px] font-normal text-gray-500">= O.POST − D（不計入 Sum）</div>}
                   </th>
                 ))}
-                <th className={`${th} min-w-28 bg-brand-200`}>Total</th>
-                <th className={`${th} min-w-24 bg-gray-100`}>Sum vs Total</th>
+                <th className={`${th} bg-brand-200`}>
+                  Total
+                  <div className="text-[10px] font-normal text-gray-500">= Pos total + Self order kiosk</div>
+                </th>
+                <th className={`${th} bg-gray-100`}>Sum vs Total</th>
                 {subs.map((s) => (
-                  <th key={s.id} className={`${th} min-w-28 bg-sky-50`}>
+                  <th key={s.id} className={`${th} relative bg-sky-50`}>
+                    {copyBtn(s, rows.map((r) => r.subAmounts[s.id]))}
                     {s.name}
                     <div className="text-[10px] font-normal text-gray-500">{s.parentName}</div>
                   </th>
                 ))}
-                <th className={`${th} min-w-28 bg-green-50`}>O.CA</th>
+                <th className={`${th} bg-green-50`}>O.CA</th>
+                <th className={`${th} bg-green-50`}>
+                  O.POST
+                  <div className="text-[10px] font-normal text-gray-500">POS 報表 Total</div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -325,18 +421,20 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
                 const weekendBg = isWeekend(date) ? 'bg-gray-50' : 'bg-white'
                 return (
                   <tr key={date} className={weekendBg}>
-                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-2 py-1 ${weekendBg}`}>
+                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`}>
                       <span className="font-medium">{Number(date.slice(8))}</span>{' '}
-                      <span className="text-xs text-gray-400">{weekdayOf(date)}</span>
+                      <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
                     </td>
                     {columns.map((c) => {
-                      const computed = (c.is_locked && c.name === 'Cash') || c.subs.length > 0
+                      const computed = isCashColumn(c) || isPosTotalColumn(c) || c.subs.length > 0
                       return (
                         <td key={c.id} className={td}>
                           {computed ? (
                             <div
-                              className="px-2 py-1 text-right tabular-nums text-gray-700"
-                              title={c.subs.length ? '由 sub payment type 加總' : 'O.CA − D'}
+                              className="px-1 py-1 text-right tabular-nums text-gray-700"
+                              title={
+                                c.subs.length ? '由 sub payment type 加總' : isPosTotalColumn(c) ? 'O.POST − D' : 'O.CA − D'
+                              }
                             >
                               {fmtMoney(r.mains[c.id])}
                             </div>
@@ -346,9 +444,13 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
                         </td>
                       )
                     })}
-                    <td className={td}>{inputFor(i, 'total', day.total, (v) => setField(date, 'total', v))}</td>
+                    <td className={td}>
+                      <div className="px-1 py-1 text-right font-medium tabular-nums text-gray-700" title="Pos total + Self order kiosk">
+                        {fmtMoney(r.total)}
+                      </div>
+                    </td>
                     <td className={`${td} text-center`}>
-                      {r.check === 'ok' && <span className="font-bold text-green-600" title="主 payment 加總 = Total">✓</span>}
+                      {r.check === 'ok' && <span className="font-bold text-green-600" title="主 payment 加總（不含 Pos total）= Total">✓</span>}
                       {r.check === 'bad' && (
                         <span
                           className="font-bold text-red-600"
@@ -364,26 +466,28 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
                       </td>
                     ))}
                     <td className={td}>{inputFor(i, 'o_ca', day.o_ca, (v) => setField(date, 'o_ca', v))}</td>
+                    <td className={td}>{inputFor(i, 'o_post', day.o_post, (v) => setField(date, 'o_post', v))}</td>
                   </tr>
                 )
               })}
             </tbody>
             <tfoot className="sticky bottom-0 z-20">
               <tr className="bg-brand-50 font-semibold">
-                <td className={`${td} sticky left-0 z-30 bg-brand-50 px-2 py-1.5`}>Total</td>
+                <td className={`${td} sticky left-0 z-30 bg-brand-50 px-1.5 py-1.5`}>Total</td>
                 {columns.map((c) => (
-                  <td key={c.id} className={`${td} px-2 py-1.5 text-right tabular-nums`}>
+                  <td key={c.id} className={`${td} px-1 py-1.5 text-right tabular-nums`}>
                     {fmtMoney(totals.mains[c.id])}
                   </td>
                 ))}
-                <td className={`${td} px-2 py-1.5 text-right tabular-nums`}>{fmtMoney(totals.total)}</td>
+                <td className={`${td} px-1 py-1.5 text-right tabular-nums`}>{fmtMoney(totals.total)}</td>
                 <td className={td} />
                 {subs.map((s) => (
-                  <td key={s.id} className={`${td} px-2 py-1.5 text-right tabular-nums`}>
+                  <td key={s.id} className={`${td} px-1 py-1.5 text-right tabular-nums`}>
                     {fmtMoney(totals.subs[s.id])}
                   </td>
                 ))}
-                <td className={`${td} px-2 py-1.5 text-right tabular-nums`}>{fmtMoney(totals.oCa)}</td>
+                <td className={`${td} px-1 py-1.5 text-right tabular-nums`}>{fmtMoney(totals.oCa)}</td>
+                <td className={`${td} px-1 py-1.5 text-right tabular-nums`}>{fmtMoney(totals.oPost)}</td>
               </tr>
             </tfoot>
           </table>
@@ -393,10 +497,10 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
       <Modal
         open={!!problems}
         onClose={() => setProblems(null)}
-        title="無法提交：有日期缺少資料"
+        title="無法提交：有日期缺少 Cash"
         footer={<Button onClick={() => setProblems(null)}>知道了</Button>}
       >
-        <p className="mb-2 text-sm text-gray-600">每一天都需要 Cash（O.CA）與 Total 的紀錄才能提交。缺少的日期：</p>
+        <p className="mb-2 text-sm text-gray-600">這些日期已經有其他 payment 的資料，但沒有 Cash（O.CA）的紀錄。完全沒有資料的日期不需要填。缺少的日期：</p>
         <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
           {problems?.map((p) => (
             <li key={p.date} className="flex justify-between rounded bg-red-50 px-2 py-1">
@@ -405,6 +509,52 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
             </li>
           ))}
         </ul>
+      </Modal>
+
+      <Modal
+        open={!!mismatch}
+        onClose={() => setMismatch(null)}
+        title="警示：各分店有資料的天數不一致"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setMismatch(null)}>
+              回去檢查
+            </Button>
+            <Button
+              onClick={async () => {
+                setMismatch(null)
+                await persist(true)
+              }}
+            >
+              仍要提交
+            </Button>
+          </>
+        }
+      >
+        {mismatch && (
+          <div className="space-y-2 text-sm">
+            <p className="text-gray-600">
+              {monthLabel(year, month)} 大部分分店有 {mismatch.reference} 天有資料，但以下分店的天數跟其他店不符
+              （目前這間分店以畫面上的資料計算，其他分店以已儲存的資料計算）：
+            </p>
+            <ul className="max-h-72 space-y-1 overflow-y-auto">
+              {mismatch.counts.map((c) => {
+                const bad = c.days !== mismatch.reference
+                return (
+                  <li key={c.id} className={`flex justify-between rounded px-2 py-1 ${bad ? 'bg-red-50' : 'bg-gray-50'}`}>
+                    <span className={bad ? 'font-medium text-red-700' : ''}>
+                      {c.name}
+                      {c.id === store.id ? '（目前）' : ''}
+                    </span>
+                    <span className={bad ? 'text-red-600' : 'text-gray-500'}>
+                      {c.days} 天{bad ? '（不符）' : ''}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
       </Modal>
     </div>
   )

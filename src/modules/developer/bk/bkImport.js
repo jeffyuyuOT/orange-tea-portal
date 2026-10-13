@@ -7,10 +7,12 @@
 // straight back, and another file with the same column names works too:
 //   Date / 日期          which day (a date, "2026-10-05", "5/10/2026", "5 Mon" or a plain day number)
 //   O.CA                 -> O.CA
+//   O.POST               -> O.POST (the POS report's total)
+//   Pos total            ignored (= O.POST − D, calculated by the sheet)
 //   Cash                 -> O.CA, but only if the file has no O.CA column
 //                           (the spec: the report's cash figure goes into O.CA;
 //                           the sheet's own Cash is O.CA − D and is never typed)
-//   Total                -> Total
+//   Total                ignored (Total = Pos total + Self order kiosk, calculated by the sheet)
 //   <payment type name>  -> that column; sub columns may carry a " (Parent)" suffix
 //   Sum vs Total         ignored (it's a check)
 //   a main made of subs  ignored (computed from its subs)
@@ -108,7 +110,7 @@ const SUMMARY_LABELS = /^(total|sum|合計|總計|總和)\b/i
 
 // rows: array of arrays. columns: the sheet's buildColumns() result (mains with .subs).
 // Returns {
-//   error?, entries: { [date]: { o_ca?, total?, amounts: { [typeId]: number } } },
+//   error?, entries: { [date]: { o_ca?, o_post?, amounts: { [typeId]: number } } },
 //   mapped: [{ header, target }], ignored: [{ header, reason }],
 //   otherMonths: ['2026-09', …], unreadable: n, badCells: n, notes: [..], dayCount, cellCount
 // }
@@ -123,7 +125,8 @@ export function parseSfRows(rows, { year, month, columns }) {
   const typed = new Map() // name -> { id, label }
   const computed = new Map() // name -> reason
   for (const col of columns) {
-    if (col.is_locked && col.name === 'Cash') computed.set(norm(col.name), 'Cash = O.CA − D，由系統計算')
+    if (col.name === 'Cash') computed.set(norm(col.name), 'Cash = O.CA − D，由系統計算')
+    else if (col.name === 'Pos total') computed.set(norm(col.name), 'Pos total = O.POST − D，由系統計算，請匯入 O.POST')
     else if (col.subs.length > 0) {
       computed.set(norm(col.name), '由 sub payment type 加總，請匯入它的 sub 欄位')
       for (const sub of col.subs) typed.set(norm(sub.name), { id: sub.id, label: `${sub.name}（${col.name}）` })
@@ -145,13 +148,15 @@ export function parseSfRows(rows, { year, month, columns }) {
     } else if (['o.ca', 'oca', 'o ca'].includes(n)) {
       targets[i] = { kind: 'o_ca' }
       mapped.push({ header: label, target: 'O.CA' })
+    } else if (['o.post', 'opost', 'o post'].includes(n)) {
+      targets[i] = { kind: 'o_post' }
+      mapped.push({ header: label, target: 'O.POST' })
     } else if (n === 'cash' && !hasOca) {
       targets[i] = { kind: 'o_ca' }
       mapped.push({ header: label, target: 'O.CA（檔案沒有 O.CA 欄，Cash 當作 O.CA）' })
       notes.push('檔案沒有 O.CA 欄，已把「Cash」欄當作 O.CA 匯入。')
     } else if (n === 'total') {
-      targets[i] = { kind: 'total' }
-      mapped.push({ header: label, target: 'Total' })
+      ignored.push({ header: label, reason: 'Total 由 Pos total + Self order kiosk 自動計算，不匯入' })
     } else if (n === 'sum vs total') {
       ignored.push({ header: label, reason: '檢查欄，不匯入' })
     } else if (typed.has(n)) {
@@ -198,7 +203,7 @@ export function parseSfRows(rows, { year, month, columns }) {
       any = true
       cellCount++
       if (t.kind === 'o_ca') entry.o_ca = res.value
-      else if (t.kind === 'total') entry.total = res.value
+      else if (t.kind === 'o_post') entry.o_post = res.value
       else entry.amounts[t.id] = res.value
     })
     if (any) entries[date] = entry
@@ -219,7 +224,7 @@ export function parseSfRows(rows, { year, month, columns }) {
 }
 
 // How many cells already holding a different number would be replaced.
-// `days` is the sheet's form state ({ [date]: { o_ca, total, amounts } } of strings).
+// `days` is the sheet's form state ({ [date]: { o_ca, o_post, total, amounts } } of strings).
 export function countOverwrites(entries, days) {
   let n = 0
   const differs = (existing, incoming) => {
@@ -230,8 +235,34 @@ export function countOverwrites(entries, days) {
     const cur = days[date]
     if (!cur) continue
     if (entry.o_ca !== undefined && differs(cur.o_ca, entry.o_ca)) n++
+    if (entry.o_post !== undefined && differs(cur.o_post, entry.o_post)) n++
     if (entry.total !== undefined && differs(cur.total, entry.total)) n++
     for (const [id, v] of Object.entries(entry.amounts)) if (differs(cur.amounts?.[id], v)) n++
   }
   return n
+}
+
+// ---------------------------------------------------------------------------
+// Image import (the reading of the picture is a later phase). When it lands,
+// the labels it finds go through here first: the report's "Eftpos" and
+// "Eftpos offline" lines are ONE payment type on the sheet, POS eftpos, so
+// their amounts are added together. `lines` = [{ label, amount }];
+// returns the same shape with those two merged into a single 'POS eftpos' line
+// (placed where the first of them was). Other lines pass through unchanged.
+// ---------------------------------------------------------------------------
+const EFTPOS_LABELS = new Set(['eftpos', 'eftpos offline'])
+
+export function mergeEftposLines(lines) {
+  const out = []
+  let merged = null
+  for (const line of lines) {
+    if (EFTPOS_LABELS.has(norm(line.label))) {
+      if (!merged) {
+        merged = { label: 'POS eftpos', amount: 0 }
+        out.push(merged)
+      }
+      merged.amount = Math.round((merged.amount + (toNum(line.amount) ?? 0) + Number.EPSILON) * 100) / 100
+    } else out.push(line)
+  }
+  return out
 }

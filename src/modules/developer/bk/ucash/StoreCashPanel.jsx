@@ -7,11 +7,14 @@ import {
   cashDaysFromRows,
   computeCashDay,
   computeCashSummary,
+  dLimitProblems,
+  dMaxAmount,
   dwSigned,
   fmtMoney,
   isWeekend,
   monthDates,
   numToInput,
+  otherIncomeByDate,
   sfOcaMapFromRows,
   toggleStocked,
   weekdayOf,
@@ -99,6 +102,7 @@ const TONES = {
   icost: { border: 'border-amber-200', head: 'bg-amber-100 text-amber-900', foot: 'bg-amber-50 border-amber-200' },
   ucost: { border: 'border-rose-200', head: 'bg-rose-100 text-rose-900', foot: 'bg-rose-50 border-rose-200' },
   ruju: { border: 'border-emerald-200', head: 'bg-emerald-100 text-emerald-900', foot: 'bg-emerald-50 border-emerald-200' },
+  income: { border: 'border-teal-200', head: 'bg-teal-100 text-teal-900', foot: 'bg-teal-50 border-teal-200' },
 }
 
 // 分店現金: COH / UCOH / D / P/L for one store+month, the day-by-day table you
@@ -117,6 +121,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [addOpen, setAddOpen] = useState(false)
   const [noteText, setNoteText] = useState(null)
   const [balanceForm, setBalanceForm] = useState(null)
+  const [dInfo, setDInfo] = useState(null) // date whose 可 D 金額 popup is open
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -167,10 +172,19 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   }, [active, entriesVersion, store.id, year, month])
 
   const dates = useMemo(() => monthDates(year, month), [year, month])
+  // 其他收入 raises a day's max D: maxD = O.CA + the day's 其他收入. D may not exceed it.
+  const incomeMap = useMemo(() => otherIncomeByDate(entries), [entries])
   const dayRows = useMemo(
-    () => dates.map((date) => ({ date, ...computeCashDay(sfMap[date], cashDays[date]) })),
-    [dates, sfMap, cashDays]
+    () =>
+      dates.map((date) => ({
+        date,
+        ...computeCashDay(sfMap[date], cashDays[date]),
+        income: incomeMap[date] ?? 0,
+        maxD: dMaxAmount(sfMap[date], incomeMap[date]),
+      })),
+    [dates, sfMap, cashDays, incomeMap]
   )
+  const overLimit = useMemo(() => new Set(dLimitProblems(dayRows).map((r) => r.date)), [dayRows])
   const summary = useMemo(() => computeCashSummary(open.coh, open.ucoh, dayRows, entries), [open, dayRows, entries])
 
   function setField(date, field, value) {
@@ -193,6 +207,16 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   }
 
   async function save() {
+    const over = dLimitProblems(dayRows)
+    if (over.length > 0) {
+      setMsg('')
+      setError(
+        `D 不能超過可 D 的最大金額（O.CA + 其他收入），請先修正：${over
+          .map((r) => `${r.date.slice(5)}（D ${fmtMoney(r.d)} > 可 D ${fmtMoney(r.maxD)}）`)
+          .join('、')}`
+      )
+      return
+    }
     setSaving(true)
     setError('')
     setMsg('')
@@ -318,6 +342,17 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                           <span className="text-xs text-gray-400">{weekdayOf(r.date)}</span>
                         </td>
                         <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-600`} title="與 SF 頁面同步">
+                          {r.income > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setDInfo(r.date)}
+                              title="這天有其他收入，點一下看可 D 金額"
+                              aria-label="這天有其他收入，查看可 D 金額"
+                              className="mr-1 rounded px-1 text-xs text-teal-600 hover:bg-teal-50"
+                            >
+                              ⓘ
+                            </button>
+                          )}
                           {fmtMoney(r.oCa)}
                         </td>
                         <td className={td}>
@@ -331,7 +366,12 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                           {fmtMoney(r.pm)}
                         </td>
                         <td className={td}>
-                          <MoneyInput value={cd.d_amount} onChange={(v) => setField(r.date, 'd_amount', v)} />
+                          <MoneyInput
+                            value={cd.d_amount}
+                            onChange={(v) => setField(r.date, 'd_amount', v)}
+                            className={overLimit.has(r.date) ? '!border-red-400 !bg-red-50 !text-red-700' : ''}
+                            title={overLimit.has(r.date) ? 'D 超過可 D 的最大金額（O.CA + 其他收入）' : undefined}
+                          />
                         </td>
                         <td className={`${td} text-center`}>
                           <input
@@ -411,6 +451,18 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                   cells: [e.entry_date.slice(5), e.description, fmtMoney(Number(e.amount))],
                 }))}
               />
+              <Block
+                title="其他收入"
+                tone={TONES.income}
+                headers={['日期', 'Description', '金額']}
+                total={summary.entryTotals.otherIncome}
+                onNote={setNoteText}
+                rows={byKind('other_income').map((e) => ({
+                  id: e.id,
+                  note: e.note,
+                  cells: [e.entry_date.slice(5), e.description, fmtMoney(Number(e.amount))],
+                }))}
+              />
             </div>
           </div>
         </>
@@ -425,6 +477,38 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
             onEntriesChanged?.()
           }}
         />
+      </Modal>
+
+      <Modal open={!!dInfo} onClose={() => setDInfo(null)} title={`可 D 金額 — ${dInfo ?? ''}`} footer={<Button onClick={() => setDInfo(null)}>關閉</Button>}>
+        {dInfo && (
+          <div className="space-y-3 text-sm">
+            {(() => {
+              const r = dayRows.find((x) => x.date === dInfo)
+              const items = byKind('other_income').filter((e) => e.entry_date === dInfo)
+              return (
+                <>
+                  <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3">
+                    <div className="text-xs font-medium text-teal-800">可 D 金額（D 不能超過）</div>
+                    <div className="text-2xl font-semibold tabular-nums text-teal-900">{fmtMoney(r.maxD)}</div>
+                    <div className="text-[11px] text-gray-500">= O.CA {fmtMoney(r.oCa ?? 0)} + 其他收入 {fmtMoney(r.income)}</div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
+                    <span className="font-medium text-gray-700">其他收入</span>
+                    <span className="font-semibold tabular-nums">{fmtMoney(r.income)}</span>
+                  </div>
+                  <ul className="space-y-1 text-xs text-gray-600">
+                    {items.map((e) => (
+                      <li key={e.id} className="flex justify-between gap-3 rounded bg-white px-2 py-1">
+                        <span className="break-words">{e.description}</span>
+                        <span className="tabular-nums">{fmtMoney(Number(e.amount))}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )
+            })()}
+          </div>
+        )}
       </Modal>
 
       <Modal open={noteText !== null} onClose={() => setNoteText(null)} title="附註" footer={<Button onClick={() => setNoteText(null)}>關閉</Button>}>

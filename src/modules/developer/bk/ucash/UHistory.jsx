@@ -29,6 +29,7 @@ const VIEWS = [
 const ITEM_KINDS = [
   ['icost', 'Icost'],
   ['ucost', 'Ucost'],
+  ['other_income', '其他收入'],
   ['dw', 'deposit / withdraw'],
   ['ruju', '入金'],
   ['d', 'D 欄'],
@@ -209,7 +210,7 @@ function ItemHistory({ stores, initialStoreId, active }) {
       setError('')
       try {
         const out = []
-        const entryKinds = kinds.flatMap((k) => (k === 'dw' ? ['deposit', 'withdraw'] : ['icost', 'ucost', 'ruju'].includes(k) ? [k] : []))
+        const entryKinds = kinds.flatMap((k) => (k === 'dw' ? ['deposit', 'withdraw'] : ['icost', 'ucost', 'other_income', 'ruju'].includes(k) ? [k] : []))
         if (entryKinds.length) {
           const entries = await listEntries({ storeId, from, to, kinds: entryKinds })
           for (const e of entries) {

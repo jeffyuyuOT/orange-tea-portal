@@ -4,9 +4,11 @@ import Badge from '../../../../components/ui/Badge'
 import Modal from '../../../../components/ui/Modal'
 import StoreManager from './StoreManager'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
-import { loadPaymentTypes, savePaymentType, savePaymentTypeOrder } from '../bkData'
+import { deletePaymentType, loadPaymentTypes, savePaymentType, savePaymentTypeOrder } from '../bkData'
+import { FORMULA_TYPE_NAMES } from '../bkUtils'
 import { Field, Notice, StoreTabs, inputCls } from '../bkUi'
 
+const NO_SUBS = ['Cash', 'Pos total']
 const bySort = (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)
 
 // Payment type view of 資料維護: the Sales-figure columns of ONE store — order,
@@ -23,6 +25,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(null) // { id?, kind, name, parent_id, is_active }
   const [formError, setFormError] = useState('')
+  const [deleting, setDeleting] = useState(null) // the type being deleted
 
   useEffect(() => {
     if (active) setStoreId(sfStoreId)
@@ -65,13 +68,28 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
 
   function openNew(kind) {
     setFormError('')
-    // Cash is always O.CA − D, so it can't be a parent.
-    const firstParent = mains.find((m) => m.name !== 'Cash')
-    setEditing({ kind, name: '', parent_id: kind === 'sub' ? (firstParent?.id ?? '') : null, is_active: true })
+    // Cash is O.CA − D and Pos total is a typed-in figure, so neither can be a parent.
+    const firstParent = mains.find((m) => !NO_SUBS.includes(m.name))
+    setEditing({
+      kind,
+      name: '',
+      parent_id: kind === 'sub' ? (firstParent?.id ?? '') : null,
+      is_active: true,
+      is_locked: false,
+      can_copy: false,
+    })
   }
   function openEdit(t) {
     setFormError('')
-    setEditing({ id: t.id, kind: t.kind, name: t.name, parent_id: t.parent_id, is_active: t.is_active })
+    setEditing({
+      id: t.id,
+      kind: t.kind,
+      name: t.name,
+      parent_id: t.parent_id,
+      is_active: t.is_active,
+      is_locked: !!t.is_locked,
+      can_copy: !!t.can_copy,
+    })
   }
 
   async function save() {
@@ -96,6 +114,19 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
     }
   }
 
+  async function confirmDelete() {
+    try {
+      await deletePaymentType(deleting.id)
+      setDeleting(null)
+      setEditing(null)
+      await reload()
+      onChanged?.()
+    } catch (e) {
+      setDeleting({ ...deleting, error: e.message })
+    }
+  }
+
+  const isFormula = !!editing?.id && FORMULA_TYPE_NAMES.includes(editing.name)
   const parentHasOwnColumn = (parentId) => parentId && subsOf(parentId).length === 0
 
   const renderRow = (t, group, index) => (
@@ -122,8 +153,9 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
       </div>
       <span className={`font-medium ${t.is_active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{t.name}</span>
       {t.is_locked && <Badge color="gray">鎖定</Badge>}
+      {t.can_copy && <Badge color="brand">可複製</Badge>}
       {!t.is_active && <Badge color="red">已停用</Badge>}
-      <Button variant="secondary" className="ml-auto" disabled={t.is_locked} onClick={() => openEdit(t)}>
+      <Button variant="secondary" className="ml-auto" onClick={() => openEdit(t)}>
         編輯
       </Button>
     </li>
@@ -133,7 +165,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
     <div className="space-y-4">
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} />
       <Notice kind="info">
-        以下設定只套用在目前這間分店。順序由上到下 = SF 頁面由左到右。Cash 與 Total Eftpos 不能編輯，其餘可編輯 / 新增 / 停用。
+        以下設定只套用在目前這間分店。順序由上到下 = SF 頁面由左到右。Cash、Pos total 與 Self order kiosk 是計算用的欄位，名稱不能改、也不能停用（Total = Pos total + Self order kiosk）。每個 payment type 都可以勾選「鎖定」（鎖定的不能刪除）與「可複製資料」（SF 欄位標題會出現複製圖示）。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
 
@@ -180,6 +212,17 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
         title={`${editing?.id ? '編輯' : '新增'}${editing?.kind === 'main' ? '主' : ' sub '} payment type`}
         footer={
           <>
+            {editing?.id && (
+              <Button
+                variant="danger"
+                className="mr-auto"
+                disabled={editing.is_locked}
+                title={editing.is_locked ? '已鎖定，請先取消鎖定才能刪除' : ''}
+                onClick={() => setDeleting({ id: editing.id, name: editing.name, kind: editing.kind })}
+              >
+                刪除
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setEditing(null)}>
               取消
             </Button>
@@ -194,6 +237,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
                 className={`${inputCls} w-full`}
                 value={editing.name}
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                disabled={isFormula}
                 autoFocus
               />
             </Field>
@@ -205,7 +249,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
                   onChange={(e) => setEditing({ ...editing, parent_id: e.target.value })}
                 >
                   {mains
-                    .filter((m) => m.name !== 'Cash')
+                    .filter((m) => !NO_SUBS.includes(m.name))
                     .map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.name}
@@ -219,10 +263,30 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
                 <input
                   type="checkbox"
                   checked={editing.is_active}
+                  disabled={isFormula}
                   onChange={(e) => setEditing({ ...editing, is_active: e.target.checked })}
                 />
                 啟用（取消勾選 = 不再顯示在 SF 頁面，已輸入的歷史資料保留）
               </label>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={editing.is_locked}
+                onChange={(e) => setEditing({ ...editing, is_locked: e.target.checked })}
+              />
+              鎖定（鎖定的 payment type 不能刪除；要刪除請先取消鎖定）
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={editing.can_copy}
+                onChange={(e) => setEditing({ ...editing, can_copy: e.target.checked })}
+              />
+              可複製資料（SF 欄位標題右上角會有複製圖示，點一下複製整欄數值，可貼到 Excel）
+            </label>
+            {isFormula && (
+              <Notice kind="info">這是計算用的 payment type，名稱不能改、也不能停用。</Notice>
             )}
             {editing.kind === 'sub' && parentHasOwnColumn(editing.parent_id) && (
               <Notice kind="info">
@@ -230,6 +294,34 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
               </Notice>
             )}
             {formError && <Notice kind="error">{formError}</Notice>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={`刪除 payment type：${deleting?.name ?? ''}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleting(null)}>
+              取消
+            </Button>
+            <Button variant="danger" onClick={confirmDelete}>
+              永久刪除
+            </Button>
+          </>
+        }
+      >
+        {deleting && (
+          <div className="space-y-3 text-sm">
+            <Notice kind="error">
+              刪除後這個欄位會從這間分店的 SF 消失，已經輸入在這一欄的數字也不會再顯示或計算，無法復原。
+              {deleting.kind === 'main' && ' 屬於它的 sub payment type 也會一起刪除。'}
+              {FORMULA_TYPE_NAMES.includes(deleting.name) && ' 注意：這是計算用的欄位（Cash / Pos total / Self order kiosk），刪除後相關的計算會失效。'}
+            </Notice>
+            <p className="text-gray-600">如果只是暫時不用，建議改用「停用」，歷史資料會保留。</p>
+            {deleting.error && <Notice kind="error">{deleting.error}</Notice>}
           </div>
         )}
       </Modal>

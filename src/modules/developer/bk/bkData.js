@@ -3,7 +3,7 @@
 // developer account. Functions throw an Error on failure; screens catch and
 // show the message.
 import { supabase } from '../../../lib/supabaseClient'
-import { monthStart, nextMonthStart, toNum, isEmptySfDay, isEmptyCashDay } from './bkUtils'
+import { monthStart, nextMonthStart, toNum, isEmptySfDay, isEmptyCashDay, sfDayHasData } from './bkUtils'
 
 function unwrap({ data, error }) {
   if (error) throw new Error(error.message)
@@ -27,6 +27,16 @@ export async function addStore(name, existing) {
   return unwrap(await supabase.from('bk_stores').insert({ name: name.trim(), sort_order: sortOrder }).select().single())
 }
 
+// `orderedIds` is the new order of ALL stores; sort_order is rewritten 0..n-1.
+// The SF and U帳 store tabs (and 資料維護) follow this order.
+export async function saveStoreOrder(orderedIds) {
+  const now = new Date().toISOString()
+  const results = await Promise.all(
+    orderedIds.map((id, i) => supabase.from('bk_stores').update({ sort_order: i, updated_at: now }).eq('id', id))
+  )
+  for (const r of results) if (r.error) throw new Error(r.error.message)
+}
+
 export async function renameStore(id, name) {
   unwrap(await supabase.from('bk_stores').update({ name: name.trim(), updated_at: new Date().toISOString() }).eq('id', id))
 }
@@ -38,8 +48,15 @@ export async function storeDataCounts(id) {
     if (error) throw new Error(error.message)
     return n ?? 0
   }
-  const [sfMonths, cashDays, entries] = await Promise.all([count('bk_sf_months'), count('bk_cash_days'), count('bk_cash_entries')])
-  return { sfMonths, cashDays, entries }
+  const [sfMonths, cashDays, entries, parties, dividendEntries, payouts] = await Promise.all([
+    count('bk_sf_months'),
+    count('bk_cash_days'),
+    count('bk_cash_entries'),
+    count('bk_parties'),
+    count('bk_dividend_entries'),
+    count('bk_payouts'),
+  ])
+  return { sfMonths, cashDays, entries, parties, dividendEntries, payouts }
 }
 
 // ON DELETE CASCADE removes the store's payment types, Sales-figure months and
@@ -49,7 +66,7 @@ export async function deleteStore(id) {
 }
 
 // A store with no Sales-figure columns yet gets the defaults (Cash, Total
-// Eftpos, Uber Eat, Doordash, Fantuan, Payo, Panda + two Eftpos subs).
+// Eftpos, Uber Eat, Doordash, Fantuan, Payo, Panda, Pos total + two Eftpos subs).
 export async function loadPaymentTypes(storeId) {
   const read = async () =>
     unwrap(await supabase.from('bk_payment_types').select('*').eq('store_id', storeId).order('sort_order')) ?? []
@@ -66,6 +83,8 @@ export async function savePaymentType(storeId, form) {
     name: form.name.trim(),
     kind: form.kind,
     parent_id: form.kind === 'sub' ? form.parent_id : null,
+    is_locked: !!form.is_locked,
+    can_copy: !!form.can_copy,
     updated_at: new Date().toISOString(),
   }
   if (form.id) {
@@ -77,6 +96,15 @@ export async function savePaymentType(storeId, form) {
         .insert({ ...payload, store_id: storeId, sort_order: form.sort_order ?? 0, is_active: true })
     )
   }
+}
+
+// Deleting a main also deletes its subs (ON DELETE CASCADE). Numbers already
+// typed into SF days stay in bk_sf_days.amounts but no column shows them any more.
+// A locked type must be unlocked first — checked here as well as in the UI.
+export async function deletePaymentType(id) {
+  const row = unwrap(await supabase.from('bk_payment_types').select('is_locked').eq('id', id).single())
+  if (row.is_locked) throw new Error('這個 payment type 已鎖定，請先取消鎖定才能刪除。')
+  unwrap(await supabase.from('bk_payment_types').delete().eq('id', id))
 }
 
 // `orderedIds` is the new left-to-right order of one group (the mains, or the
@@ -98,9 +126,29 @@ export async function loadSfMonth(storeId, year, month) {
     await supabase.from('bk_sf_months').select('*').eq('store_id', storeId).eq('year', year).eq('month', month).maybeSingle()
   )
   const days = sfMonth
-    ? unwrap(await supabase.from('bk_sf_days').select('day, o_ca, total, amounts').eq('sf_month_id', sfMonth.id)) ?? []
+    ? unwrap(await supabase.from('bk_sf_days').select('day, o_ca, o_post, total, amounts').eq('sf_month_id', sfMonth.id)) ?? []
     : []
   return { sfMonth, days }
+}
+
+// For the submit check: how many days of the month hold data, per store
+// ({ [storeId]: n }). Stores with no saved data are simply absent (= 0).
+export async function loadSfDataDayCounts(year, month) {
+  const rows =
+    unwrap(
+      await supabase
+        .from('bk_sf_days')
+        .select('day, o_ca, o_post, amounts, bk_sf_months!inner(store_id, year, month)')
+        .eq('bk_sf_months.year', year)
+        .eq('bk_sf_months.month', month)
+    ) ?? []
+  const counts = {}
+  for (const r of rows) {
+    if (!sfDayHasData({ o_ca: r.o_ca, o_post: r.o_post, amounts: r.amounts })) continue
+    const id = r.bk_sf_months.store_id
+    counts[id] = (counts[id] ?? 0) + 1
+  }
+  return counts
 }
 
 // D (未入庫) per day for a month — the Sales-figure sheet needs it for Cash.
@@ -117,7 +165,8 @@ export async function loadCashDays(storeId, year, month) {
   )
 }
 
-// `days` is { [date]: { o_ca, total, amounts } } with form values (strings).
+// `days` is { [date]: { o_ca, o_post, total, amounts } } with form values (strings);
+// `total` is the COMPUTED Total (Pos total + Self order kiosk), filled in by the sheet.
 // Empty days are removed so the table doesn't fill up with blank rows.
 // `submit` true -> status 'submitted'; false -> back to 'draft' (saving a
 // submitted month un-submits it, per the spec).
@@ -145,7 +194,14 @@ export async function saveSfMonth({ storeId, year, month, existing, days, submit
       const n = toNum(v)
       if (n !== null) amounts[id] = n
     }
-    upserts.push({ sf_month_id: sfMonth.id, day: date, o_ca: toNum(day.o_ca), total: toNum(day.total), amounts })
+    upserts.push({
+      sf_month_id: sfMonth.id,
+      day: date,
+      o_ca: toNum(day.o_ca),
+      o_post: toNum(day.o_post),
+      total: toNum(day.total),
+      amounts,
+    })
   }
   if (upserts.length) unwrap(await supabase.from('bk_sf_days').upsert(upserts, { onConflict: 'sf_month_id,day' }))
   if (removals.length) unwrap(await supabase.from('bk_sf_days').delete().eq('sf_month_id', sfMonth.id).in('day', removals))

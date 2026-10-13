@@ -6,11 +6,14 @@ import { Field, MoneyInput, Notice, inputCls } from '../bkUi'
 
 // 新增收支 form. The first dropdown picks the group:
 //   icost / ucost  -> date, description, amount (negative = income), note
+//   other_income   -> date, description, amount (positive), note — raises that
+//                     day's max D in 分店現金
 //   dw             -> deposit or withdraw, date, amount, note
 //   ruju (入金)    -> 入 Jeff bank / 入 Mao 保險箱, date, amount, note
 const GROUPS = [
   ['icost', 'Icost'],
   ['ucost', 'Ucost'],
+  ['other_income', '其他收入'],
   ['dw', 'deposit / withdraw'],
   ['ruju', '入金'],
 ]
@@ -30,13 +33,14 @@ export default function EntryForm({ storeId, initial = null, onSaved, onCancel }
   const [note, setNote] = useState(initial?.note ?? '')
   const [error, setError] = useState('')
 
-  const isCost = group === 'icost' || group === 'ucost'
+  const isCost = group === 'icost' || group === 'ucost' // may be negative
+  const hasDescription = isCost || group === 'other_income'
 
   async function submit() {
     setError('')
     const n = toNum(amount)
     if (!date) return setError('請輸入日期。')
-    if (isCost && !description.trim()) return setError('請輸入 description。')
+    if (hasDescription && !description.trim()) return setError('請輸入 description。')
     if (n === null || n === 0) return setError('請輸入金額。')
     if (!isCost && n < 0) return setError('這個類型的金額必須是正數。')
     try {
@@ -44,7 +48,7 @@ export default function EntryForm({ storeId, initial = null, onSaved, onCancel }
         id: initial?.id,
         entry_date: date,
         kind: group === 'dw' ? dwKind : group,
-        description: isCost ? description : null,
+        description: hasDescription ? description : null,
         amount: n,
         note,
         ruju_target: group === 'ruju' ? target : null,
@@ -90,12 +94,21 @@ export default function EntryForm({ storeId, initial = null, onSaved, onCancel }
       <Field label="日期">
         <input type="date" className={`${inputCls} w-full`} value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
-      {isCost && (
+      {hasDescription && (
         <Field label="Description">
           <input className={`${inputCls} w-full`} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
       )}
-      <Field label="金額" hint={isCost ? '可以輸入負數，負數代表收入。' : undefined}>
+      <Field
+        label="金額"
+        hint={
+          isCost
+            ? '可以輸入負數，負數代表收入。'
+            : group === 'other_income'
+              ? '會加到當天「可 D 的最大金額」（O.CA + 其他收入）。'
+              : undefined
+        }
+      >
         <MoneyInput
           value={amount}
           onChange={setAmount}

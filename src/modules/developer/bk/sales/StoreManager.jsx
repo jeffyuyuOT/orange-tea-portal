@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
-import { addStore, deleteStore, renameStore, storeDataCounts } from '../bkData'
+import { addStore, deleteStore, renameStore, saveStoreOrder, storeDataCounts } from '../bkData'
 import { Field, Notice, inputCls } from '../bkUi'
 
 // 分店管理: the stores BK knows about. Only a store listed here shows up in
@@ -32,6 +32,21 @@ export default function StoreManager({ stores, onChanged }) {
     }
   }
 
+  // Swap with the neighbour; SF and U帳 store tabs follow this order.
+  async function move(index, delta) {
+    const target = index + delta
+    if (target < 0 || target >= stores.length) return
+    const ids = stores.map((s) => s.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    setError('')
+    try {
+      await saveStoreOrder(ids)
+      await onChanged?.()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   async function askDelete(store) {
     setError('')
     try {
@@ -51,12 +66,12 @@ export default function StoreManager({ stores, onChanged }) {
     }
   }
 
-  const hasData = deleting && deleting.counts.sfMonths + deleting.counts.cashDays + deleting.counts.entries > 0
+  const hasData = deleting && deleting.counts.sfMonths + deleting.counts.cashDays + deleting.counts.entries + deleting.counts.parties + deleting.counts.dividendEntries + deleting.counts.payouts > 0
 
   return (
     <div className="max-w-2xl space-y-3">
       <Notice kind="info">
-        只有在這裡的分店才會出現在 BK 頁面（Sales figure 與 U帳）。這份名單只屬於 BK，新增或刪除不會影響 OT Portal 本身的分店。
+        只有在這裡的分店才會出現在 BK 頁面（Sales figure 與 U帳）。順序由上到下 = SF 與 U帳 分店分頁由左到右。這份名單只屬於 BK，新增或刪除不會影響 OT Portal 本身的分店。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
 
@@ -78,8 +93,28 @@ export default function StoreManager({ stores, onChanged }) {
         </p>
       ) : (
         <ul className="space-y-1.5">
-          {stores.map((s) => (
+          {stores.map((s, i) => (
             <li key={s.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2">
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  disabled={i === 0}
+                  onClick={() => move(i, -1)}
+                  className="text-xs leading-none text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                  aria-label="Move up"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  disabled={i === stores.length - 1}
+                  onClick={() => move(i, 1)}
+                  className="text-xs leading-none text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                  aria-label="Move down"
+                >
+                  ▼
+                </button>
+              </div>
               <span className="font-medium text-gray-800">{s.name}</span>
               <div className="ml-auto flex gap-2">
                 <Button
@@ -149,7 +184,7 @@ export default function StoreManager({ stores, onChanged }) {
             {hasData ? (
               <Notice kind="error">
                 刪除後，這間分店在 BK 的所有資料會一併永久消失、無法復原：Sales figure {deleting.counts.sfMonths} 個月、U帳每日紀錄{' '}
-                {deleting.counts.cashDays} 天、收支 {deleting.counts.entries} 筆，以及 payment type 設定與期初餘額。
+                {deleting.counts.cashDays} 天、收支 {deleting.counts.entries} 筆、分紅 party {deleting.counts.parties} 個、分紅入金/cost {deleting.counts.dividendEntries} 筆、分紅記錄 {deleting.counts.payouts} 筆，以及 payment type 設定與期初餘額。
               </Notice>
             ) : (
               <Notice kind="info">這間分店在 BK 還沒有任何資料（只會移除它的 payment type 設定）。</Notice>

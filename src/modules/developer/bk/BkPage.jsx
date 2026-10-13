@@ -4,12 +4,13 @@ import { loadStores } from './bkData'
 import { Notice } from './bkUi'
 import SalesFigureTab from './sales/SalesFigureTab'
 import UAccountTab from './ucash/UAccountTab'
+import BonusTab from './bonus/BonusTab'
 
 // BK (記帳) — developer-only bookkeeping page. Gated by RequirePage on
 // developer_tools.bk (routes.jsx), which only the developer role has; the real
 // boundary is is_developer() RLS on the bk_* tables (migration 0101; the store list is bk_stores, 0102).
 //
-// Five top tabs per the spec. Sales figure and U帳 are built; 分紅 / 積欠 /
+// Five top tabs per the spec. Sales figure, U帳 and 分紅 are built; 積欠 /
 // 系統設置 are still to be specced by Jeff and show a placeholder. Every tab
 // stays mounted once opened (hidden, not unmounted) so switching top tabs
 // never throws away unsaved typing.
@@ -88,9 +89,13 @@ export default function BkPage() {
               <UAccountTab stores={stores} topActive={tab === 'u'} />
             </div>
           )}
+          {visited.has('bonus') && (
+            <div className={tab === 'bonus' ? '' : 'hidden'}>
+              <BonusTab stores={stores} topActive={tab === 'bonus'} />
+            </div>
+          )}
         </>
       )}
-      {tab === 'bonus' && <ComingSoon name="分紅" />}
       {tab === 'owed' && <ComingSoon name="積欠" />}
       {tab === 'settings' && <ComingSoon name="系統設置" />}
     </div>

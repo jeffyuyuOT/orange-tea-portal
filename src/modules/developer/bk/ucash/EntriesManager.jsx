@@ -11,6 +11,7 @@ const KIND_FILTERS = [
   ['', '全部種類'],
   ['icost', 'Icost'],
   ['ucost', 'Ucost'],
+  ['other_income', '其他收入'],
   ['dw', 'deposit / withdraw'],
   ['ruju', '入金'],
 ]
@@ -69,7 +70,7 @@ export default function EntriesManager({ stores, store, onNavigate, onEntriesCha
   }
 
   const describe = (e) => {
-    if (e.kind === 'icost' || e.kind === 'ucost') return e.description
+    if (e.kind === 'icost' || e.kind === 'ucost' || e.kind === 'other_income') return e.description
     if (e.kind === 'ruju') return RUJU_TARGET_LABELS[e.ruju_target]
     return ''
   }

@@ -54,7 +54,7 @@ function styleTotal(row) {
 
 const safeName = (s) => String(s).replace(/[\\/:*?"<>|]/g, '_')
 
-// Same column order as the on-screen sheet: Date | mains… | Total | Check | subs… | O.CA
+// Same column order as the on-screen sheet: Date | mains… | Total | Check | subs… | O.CA | O.POST
 // Builds the workbook (no download) so tests and the Excel import can round-trip it.
 export async function buildSfWorkbook({ storeName, year, month, columns, days, dMap }) {
   const wb = await newWorkbook()
@@ -63,7 +63,7 @@ export async function buildSfWorkbook({ storeName, year, month, columns, days, d
   ws.addRow([`${storeName} — Sales figure ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
   ws.addRow([])
   styleHeader(
-    ws.addRow(['Date', ...columns.map((c) => c.name), 'Total', 'Sum vs Total', ...subs.map((s) => `${s.name} (${s.parentName})`), 'O.CA'])
+    ws.addRow(['Date', ...columns.map((c) => c.name), 'Total', 'Sum vs Total', ...subs.map((s) => `${s.name} (${s.parentName})`), 'O.CA', 'O.POST'])
   )
 
   const rows = []
@@ -78,11 +78,12 @@ export async function buildSfWorkbook({ storeName, year, month, columns, days, d
       r.check === 'ok' ? '✓' : r.check === 'bad' ? '✗' : '',
       ...subs.map((s) => r.subAmounts[s.id]),
       r.oCa,
+      r.oPost,
     ]
     ws.addRow(cells)
   }
   const t = computeSfTotals(columns, rows)
-  styleTotal(ws.addRow(['Total', ...columns.map((c) => t.mains[c.id]), t.total, '', ...subs.map((s) => t.subs[s.id]), t.oCa]))
+  styleTotal(ws.addRow(['Total', ...columns.map((c) => t.mains[c.id]), t.total, '', ...subs.map((s) => t.subs[s.id]), t.oCa, t.oPost]))
 
   ws.columns.forEach((col, i) => {
     col.width = i === 0 ? 16 : 14
@@ -147,6 +148,12 @@ export async function exportCashXlsx({ storeName, year, month, open, sfDaysMap, 
     ['Date', 'Description', 'Amount', 'Note'],
     by(['ucost']).map((e) => [e.entry_date, e.description ?? '', Number(e.amount), e.note ?? '']),
     s.entryTotals.ucost
+  )
+  block(
+    '其他收入',
+    ['Date', 'Description', 'Amount', 'Note'],
+    by(['other_income']).map((e) => [e.entry_date, e.description ?? '', Number(e.amount), e.note ?? '']),
+    s.entryTotals.otherIncome
   )
   block(
     '入金',

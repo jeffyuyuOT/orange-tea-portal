@@ -125,33 +125,60 @@ export function cashValue(oCa, d) {
   return round2(oCa - (d ?? 0))
 }
 
+// Names the formulas depend on (both are locked in the payment-type settings).
+export const POS_TOTAL_NAME = 'Pos total'
+export const KIOSK_NAME = 'Self order kiosk'
+
+// Identified by NAME (the lock flag now only means "cannot be deleted").
+export const CASH_NAME = 'Cash'
+// Types the formulas depend on: their name can't be changed or switched off.
+export const FORMULA_TYPE_NAMES = [CASH_NAME, POS_TOTAL_NAME, KIOSK_NAME]
+export const isCashColumn = (col) => col.name === CASH_NAME
+// The POS report's own total: typed in (or read from the image) and part of
+// Total, but NOT part of the Sum that Total is checked against.
+export const isPosTotalColumn = (col) => col.name === POS_TOTAL_NAME
+
 // One day's value for one main column.
 //   Cash                -> computed (O.CA − D)
+//   Pos total           -> computed (O.POST − D)
 //   main made of subs   -> sum of its subs
 //   any other main      -> what was typed in
 export function mainValue(main, day, dValue) {
-  if (main.is_locked && main.name === 'Cash') return cashValue(toNum(day.o_ca), dValue)
+  if (isCashColumn(main)) return cashValue(toNum(day.o_ca), dValue)
+  if (isPosTotalColumn(main)) return cashValue(toNum(day.o_post), dValue) // O.POST − D
   if (main.subs.length > 0) return sumOrNull(main.subs.map((s) => toNum(day.amounts?.[s.id])))
   return toNum(day.amounts?.[main.id])
 }
 
-// Row maths for the Sales-figure table: each main's value, the sum of them,
-// the typed-in Total and whether the two agree.
-//   check: 'empty' (nothing on the day), 'ok', or 'bad'
+// Row maths for the Sales-figure table.
+//   total = Pos total + Self order kiosk          (never typed)
+//   sum   = every main EXCEPT Pos total, added up
+//   check: 'empty' (nothing on the day), 'ok' (sum = total), or 'bad'
 export function computeSfDay(columns, day, dValue) {
   const mains = {}
   const subAmounts = {}
+  let kioskAmount = null
   for (const col of columns) {
     mains[col.id] = mainValue(col, day, dValue)
-    for (const sub of col.subs) subAmounts[sub.id] = toNum(day.amounts?.[sub.id])
+    for (const sub of col.subs) {
+      subAmounts[sub.id] = toNum(day.amounts?.[sub.id])
+      if (sub.name === KIOSK_NAME) kioskAmount = subAmounts[sub.id]
+    }
   }
-  const sum = sumOrNull(Object.values(mains))
-  const total = toNum(day.total)
+  const posTotalCol = columns.find(isPosTotalColumn)
+  const total = sumOrNull([posTotalCol ? mains[posTotalCol.id] : null, kioskAmount])
+  const sum = sumOrNull(columns.filter((c) => !isPosTotalColumn(c)).map((c) => mains[c.id]))
   let check = 'empty'
   if (sum !== null || total !== null) {
     check = sum !== null && total !== null && Math.abs(sum - total) < 0.005 ? 'ok' : 'bad'
   }
-  return { mains, subAmounts, sum, total, check, oCa: toNum(day.o_ca) }
+  return { mains, subAmounts, sum, total, check, oCa: toNum(day.o_ca), oPost: toNum(day.o_post) }
+}
+
+// A column's month of values as clipboard text: one line per day (1st … last,
+// blank line for an empty day) so it pastes straight down an Excel column.
+export function columnCopyText(values) {
+  return values.map((v) => (v === null || v === undefined ? '' : String(round2(v)))).join('\n')
 }
 
 // Column totals for the bottom row.
@@ -168,21 +195,49 @@ export function computeSfTotals(columns, rows) {
     sum: sumOrNull(rows.map((r) => r.sum)),
     total: sumOrNull(rows.map((r) => r.total)),
     oCa: sumOrNull(rows.map((r) => r.oCa)),
+    oPost: sumOrNull(rows.map((r) => r.oPost)),
   }
 }
 
-// Submit rule: every day of the month needs a Cash figure (i.e. O.CA) and a
-// Total. Returns the dates that fail, with what's missing, for the warning.
-export function sfSubmitProblems(dates, days) {
+// True when a day holds any figure at all (O.CA, O.POST or a payment amount).
+export function sfDayHasData(day) {
+  if (!day) return false
+  if (toNum(day.o_ca) !== null || toNum(day.o_post) !== null) return true
+  return Object.values(day.amounts ?? {}).some((v) => toNum(v) !== null)
+}
+
+// Submit rule 1: a day that has ANY main payment figure besides Cash must also
+// have Cash (O.CA). A day with nothing at all is skipped. Returns the dates that
+// fail, with what's missing, for the warning.
+export function sfSubmitProblems(dates, days, columns) {
   const problems = []
   for (const date of dates) {
-    const day = days[date] ?? {}
-    const missing = []
-    if (toNum(day.o_ca) === null) missing.push('Cash')
-    if (toNum(day.total) === null) missing.push('Total')
-    if (missing.length) problems.push({ date, missing })
+    const day = days[date]
+    if (!sfDayHasData(day)) continue
+    const row = computeSfDay(columns, day, null)
+    const otherMainHasData = columns.some((c) => !isCashColumn(c) && row.mains[c.id] !== null)
+    if (otherMainHasData && toNum(day.o_ca) === null) problems.push({ date, missing: ['Cash'] })
   }
   return problems
+}
+
+// How many days of a month hold data (what the cross-store check compares).
+export function countSfDataDays(days) {
+  return Object.values(days).filter(sfDayHasData).length
+}
+
+// Submit rule 2: every store should have the same number of days with data.
+// `counts` = [{ id, name, days }]. The reference is the most common count (a tie
+// goes to the larger one); stores that differ from it are returned.
+export function sfDayCountMismatch(counts) {
+  if (counts.length < 2) return { reference: counts[0]?.days ?? 0, mismatched: [] }
+  const freq = new Map()
+  for (const c of counts) freq.set(c.days, (freq.get(c.days) ?? 0) + 1)
+  let reference = null
+  for (const [n, f] of freq) {
+    if (reference === null || f > freq.get(reference) || (f === freq.get(reference) && n > reference)) reference = n
+  }
+  return { reference, mismatched: counts.filter((c) => c.days !== reference) }
 }
 
 // DB rows -> the string-valued form state the sheet edits.
@@ -191,6 +246,7 @@ export function sfDaysFromRows(rows) {
   for (const d of rows) {
     map[d.day] = {
       o_ca: numToInput(d.o_ca),
+      o_post: numToInput(d.o_post),
       total: numToInput(d.total),
       amounts: Object.fromEntries(Object.entries(d.amounts ?? {}).map(([k, v]) => [k, numToInput(v)])),
     }
@@ -207,7 +263,7 @@ export function dMapFromRows(rows) {
 
 // True when a day holds nothing worth saving.
 export function isEmptySfDay(day) {
-  if (toNum(day.o_ca) !== null || toNum(day.total) !== null) return false
+  if (toNum(day.o_ca) !== null || toNum(day.o_post) !== null || toNum(day.total) !== null) return false
   return !Object.values(day.amounts ?? {}).some((v) => toNum(v) !== null)
 }
 
@@ -221,6 +277,7 @@ export const ENTRY_KIND_LABELS = {
   deposit: 'Deposit',
   withdraw: 'Withdraw',
   ruju: '入金',
+  other_income: '其他收入',
 }
 export const RUJU_TARGET_LABELS = { jeff_bank: '入 Jeff bank', mao_safe: '入 Mao 保險箱', other: '其他' }
 
@@ -257,6 +314,7 @@ export function computeCashSummary(openCoh, openUcoh, dayRows, entries) {
   const icost = kindSum('icost')
   const ucost = kindSum('ucost')
   const ruju = kindSum('ruju')
+  const otherIncome = kindSum('other_income') // only raises the max D of its day; not part of COH / UCOH / P/L
   const oCaT = sum(dayRows.map((r) => r.oCa))
   const actualT = sum(dayRows.map((r) => r.actual))
   const pmT = sum(dayRows.map((r) => r.pm))
@@ -269,8 +327,28 @@ export function computeCashSummary(openCoh, openUcoh, dayRows, entries) {
     dUnstocked,
     pl: round2(dT + pmT - ucost),
     totals: { oCa: oCaT, actual: actualT, pm: pmT, d: dT, sfCash: sfCashT },
-    entryTotals: { deposit: dep, withdraw: wd, dw: round2(dep - wd), icost, ucost, ruju },
+    entryTotals: { deposit: dep, withdraw: wd, dw: round2(dep - wd), icost, ucost, ruju, otherIncome },
   }
+}
+
+// 其他收入 per day: { [date]: total } from the month's 收支 entries.
+export function otherIncomeByDate(entries) {
+  const map = {}
+  for (const e of entries) {
+    if (e.kind !== 'other_income') continue
+    map[e.entry_date] = round2((map[e.entry_date] ?? 0) + (toNum(e.amount) ?? 0))
+  }
+  return map
+}
+
+// 可 D 的最大金額 of a day = O.CA + that day's 其他收入 (a missing O.CA counts as 0).
+export function dMaxAmount(oCa, income) {
+  return round2((toNum(oCa) ?? 0) + (income ?? 0))
+}
+
+// Days whose typed D is above the max D. `dayRows` = [{ date, d, maxD }].
+export function dLimitProblems(dayRows) {
+  return dayRows.filter((r) => r.d !== null && r.d !== undefined && r.d > r.maxD + 0.004)
 }
 
 // Ticking 入庫 on a day also ticks every earlier day of the month; un-ticking
