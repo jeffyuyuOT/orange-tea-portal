@@ -11,6 +11,7 @@ import {
   downloadJeffOwedTemplate,
   downloadSfTemplate,
   downloadUAccountTemplate,
+  sheetNameForStore,
 } from '../bkImportTemplates'
 import BackfillGridImport from './BackfillGridImport'
 import EntriesExcelImport from '../ucash/EntriesExcelImport'
@@ -44,7 +45,10 @@ const ROUTES = [
   ['emma', /emma/i, '積欠 Emma'],
   ['bonus', /收成|dividend|bonus/i, '收成'],
   ['u', /u\s*帳|u\s*account|ucash|分店現金|收支/i, 'U帳'],
-  ['sf', /\bsf\b|sales\s*figure/i, 'SF'],
+  // Not \bsf\b: JS treats "_" as a word character, so "範本_SF" has no word
+  // boundary before the S. Only ASCII letters count as a neighbour here, which
+  // still lets "_SF", " SF 202607" and "SF202607" match but not "transfer".
+  ['sf', /(^|[^a-z])sf([^a-z]|$)|sales\s*figure/i, 'SF'],
 ]
 const ROUTE_LABEL = Object.fromEntries(ROUTES.map(([k, , label]) => [k, label]))
 
@@ -135,9 +139,30 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
     setError('')
     setImportedMsg('')
     setFile(f)
-    setKind(guessKind(f.name))
+    const byName = guessKind(f.name)
+    setKind(byName)
     setUSheets(null)
     setUPipeline(null)
+    if (!byName) guessKindFromSheets(f)
+  }
+
+  // Fallback when the filename says nothing: look at the sheet names. A U帳
+  // workbook has 分店現金 / 收支 sheets; an SF workbook has one sheet per store.
+  async function guessKindFromSheets(f) {
+    try {
+      const names = await listWorkbookSheetNames(await f.arrayBuffer())
+      let guess = null
+      if (names.some((n) => CASH_SHEET_RE.test(n) || ENTRIES_SHEET_RE.test(n))) {
+        guess = 'u'
+      } else {
+        const storeSheets = new Set((stores ?? []).map((s) => sheetNameForStore(s.name).toLowerCase()))
+        if (names.some((n) => storeSheets.has(String(n).trim().toLowerCase()))) guess = 'sf'
+      }
+      // Ignore the result if the user picked another file or a kind meanwhile.
+      if (guess) setKind((cur) => cur ?? guess)
+    } catch {
+      // Unreadable here; the real importer will report it. Manual chooser stays.
+    }
   }
 
   function reset() {
