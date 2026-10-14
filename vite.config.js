@@ -88,4 +88,12 @@ export default defineConfig({
       },
     }),
   ],
+  // exceljs is only loaded when an Excel file is imported / exported (dynamic import).
+  // Without this, the dev server finds it late, re-bundles it with a new version
+  // code, and an already-open page fails with "Failed to fetch dynamically
+  // imported module ... exceljs.js?v=...". Listing it makes the dev server bundle
+  // it at start-up. (Dev server only; the production build is not affected.)
+  optimizeDeps: {
+    include: ['exceljs'],
+  },
 })
