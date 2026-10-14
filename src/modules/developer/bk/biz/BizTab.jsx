@@ -86,10 +86,6 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
     }
   }, [topActive, sfStoreId, year, month, overview])
 
-  const leaveOk = useCallback(
-    () => (!dirty && !ovDirty) || window.confirm('營業有未儲存的變更，確定要離開並捨棄嗎？'),
-    [dirty, ovDirty]
-  )
 
   const dates = useMemo(() => monthDates(year, month), [year, month])
   const rows = useMemo(
@@ -132,15 +128,18 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   useEffect(() => {
     onTabDirty?.(dirty || ovDirty)
   }, [dirty, ovDirty]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The save used by BK's 儲存 button AND when leaving a store / month: typing
+  // is saved instead of asking whether to throw it away (→ true / false).
+  const saveAllHere = useCallback(async () => {
+    const cur = stateRef.current
+    let ok = true
+    if (cur.ovDirty && ovSaveRef.current) ok = (await ovSaveRef.current()) && ok
+    if (cur.dirty) ok = (await cur.save()) && ok
+    return ok
+  }, [])
   useEffect(() => {
-    registerSaver?.('biz', async () => {
-      const cur = stateRef.current
-      let ok = true
-      if (cur.ovDirty && ovSaveRef.current) ok = (await ovSaveRef.current()) && ok
-      if (cur.dirty) ok = (await cur.save()) && ok
-      return ok
-    })
-  }, [registerSaver])
+    registerSaver?.('biz', saveAllHere)
+  }, [registerSaver, saveAllHere])
 
   // Enter moves to the same column on the next day, like a spreadsheet.
   function onKeyDown(e, rowIdx, key) {
@@ -168,10 +167,10 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
         stores={stores}
         storeId={overview ? OVERVIEW_ID : store.id}
         lead={[OVERVIEW_ID, '手動輸入總頁']}
-        onChange={(id) => {
+        onChange={async (id) => {
           if (id === OVERVIEW_ID) {
-            if (!overview && leaveOk()) setOverview(true)
-          } else if ((overview || id !== store.id) && leaveOk()) {
+            if (!overview && (await saveAllHere())) setOverview(true)
+          } else if ((overview || id !== store.id) && (await saveAllHere())) {
             setStoreId(id)
             setOverview(false)
           }
@@ -183,8 +182,8 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
           stores={stores}
           year={year}
           month={month}
-          onYearMonth={(v) => {
-            if (leaveOk()) {
+          onYearMonth={async (v) => {
+            if (await saveAllHere()) {
               setYear(v.year)
               setMonth(v.month)
             }
@@ -200,8 +199,8 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
         <YearMonthPicker
           year={year}
           month={month}
-          onChange={(v) => {
-            if (leaveOk()) {
+          onChange={async (v) => {
+            if (await saveAllHere()) {
               setYear(v.year)
               setMonth(v.month)
             }
