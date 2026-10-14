@@ -102,8 +102,9 @@ export function bizDaysFromRows(rows) {
   const map = {}
   for (const r of rows) {
     map[r.day] = {
-      pos: r.pos === null || r.pos === undefined ? '' : String(round2(Number(r.pos))),
-      self_o: r.self_o === null || r.self_o === undefined ? '' : String(round2(Number(r.self_o))),
+      // money fields keep two decimals (POS, Self O); CV and the cup counts stay plain numbers
+      pos: r.pos === null || r.pos === undefined ? '' : round2(Number(r.pos)).toFixed(2),
+      self_o: r.self_o === null || r.self_o === undefined ? '' : round2(Number(r.self_o)).toFixed(2),
       cv: r.cv === null || r.cv === undefined ? '' : String(round2(Number(r.cv))),
       p_cups: r.p_cups === null || r.p_cups === undefined ? '' : String(round2(Number(r.p_cups))),
       so_cups: r.so_cups === null || r.so_cups === undefined ? '' : String(round2(Number(r.so_cups))),

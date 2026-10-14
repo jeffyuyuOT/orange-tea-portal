@@ -252,7 +252,7 @@ export default function BizTab({ stores, topActive = true }) {
                         {fmtCount(r.cups)}
                       </div>
                     </td>
-                    {BIZ_INPUTS.map(({ key, field }, c) => (
+                    {BIZ_INPUTS.map(({ key, field, money }, c) => (
                       <td key={key} className={`${td} bg-sky-50/40 ${c === 0 ? split : ''}`}>
                         {key === 'pos' && linked ? (
                           <div className="px-1 py-1 text-right tabular-nums text-gray-700" title="來自 Sales figure 的 O.POST">
@@ -264,6 +264,18 @@ export default function BizTab({ stores, topActive = true }) {
                             onChange={(v) => setField(date, field, v)}
                             allowNegative={false}
                             className="!px-1 !text-[13px]"
+                            onBlur={
+                              money
+                                ? () => {
+                                    // money cells settle to two decimals when you leave them
+                                    const n = Number(day[field])
+                                    if (day[field] !== '' && day[field] !== undefined && Number.isFinite(n)) {
+                                      const fixed = (Math.round(n * 100) / 100).toFixed(2)
+                                      if (fixed !== day[field]) setField(date, field, fixed)
+                                    }
+                                  }
+                                : undefined
+                            }
                             data-biz={`${i}:${key}`}
                             onKeyDown={(e) => onKeyDown(e, i, key)}
                           />
