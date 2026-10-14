@@ -5,7 +5,7 @@ import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
 import { loadSalesMonth, loadSfPostMonth, saveSalesFields } from '../bkSalesData'
 import { BIZ_INPUTS, bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
-import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
+import { Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import BizExportModal from './BizExportModal'
 import BizOverview from './BizOverview'
 
@@ -94,12 +94,6 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   )
   const { total, average } = useMemo(() => bizTotals(rows), [rows])
 
-  function setField(date, field, value) {
-    setDays((prev) => ({ ...prev, [date]: { ...(prev[date] ?? {}), [field]: value } }))
-    setDirty(true)
-    setMsg('')
-  }
-
   async function save() {
     setSaving(true)
     setError('')
@@ -140,17 +134,6 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   useEffect(() => {
     registerSaver?.('biz', saveAllHere)
   }, [registerSaver, saveAllHere])
-
-  // Enter moves to the same column on the next day, like a spreadsheet.
-  function onKeyDown(e, rowIdx, key) {
-    if (e.key !== 'Enter') return
-    e.preventDefault()
-    const next = e.currentTarget.closest('table')?.querySelector(`[data-biz="${rowIdx + 1}:${key}"]`)
-    if (next) {
-      next.focus()
-      next.select?.()
-    }
-  }
 
   if (!store) {
     return (
@@ -208,9 +191,6 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
         />
         {status && <Badge color={status.color}>{status.text}</Badge>}
         <div className="ml-auto flex items-center gap-2">
-          <Button onClick={save} disabled={saving || loading || !dirty}>
-            {saving ? '儲存中…' : '儲存'}
-          </Button>
           <div className="relative">
             <Button variant="secondary" onClick={() => setMenuOpen((v) => !v)}>
               匯出 ▾
@@ -244,7 +224,11 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
           這間分店的 POS 直接讀 Sales figure 的 O.POST（不能在這裡改）。Self O 是 Sales figure 的 Self order kiosk 的預設值；SF 那邊可以手動改，兩邊不一致時 SF 會顯示警示。
         </Notice>
       )}
-      <Notice kind="info">P杯數、CV、Self O、SO杯數 請到「手動輸入總頁」輸入，這裡只顯示那邊的數字。</Notice>
+      <Notice kind="info">
+        {linked
+          ? 'P杯數、CV、Self O、SO杯數 請到「手動輸入總頁」輸入，這裡只顯示那邊的數字。'
+          : 'P杯數、POS、CV、Self O、SO杯數 請到「手動輸入總頁」輸入，這裡只顯示那邊的數字。'}
+      </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}
 
@@ -305,32 +289,12 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                     </td>
                     {BIZ_INPUTS.map(({ key, field, money }, c) => (
                       <td key={key} className={`${td} bg-sky-50/40 ${c === 0 ? split : ''}`}>
-                        {key !== 'pos' ? (
-                          <div className="px-1 py-1 text-right tabular-nums text-gray-700" title="在手動輸入總頁輸入">
-                            {money ? fmtMoney(r[key]) : fmtCount(r[key])}
-                          </div>
-                        ) : linked ? (
-                          <div className="px-1 py-1 text-right tabular-nums text-gray-700" title="來自 Sales figure 的 O.POST">
-                            {fmtMoney(r.pos)}
-                          </div>
-                        ) : (
-                          <MoneyInput
-                            value={day[field]}
-                            onChange={(v) => setField(date, field, v)}
-                            allowNegative={false}
-                            className="!px-1 !text-[13px]"
-                            onBlur={() => {
-                              // POS settles to two decimals when you leave the cell
-                              const n = Number(day[field])
-                              if (day[field] !== '' && day[field] !== undefined && Number.isFinite(n)) {
-                                const fixed = (Math.round(n * 100) / 100).toFixed(2)
-                                if (fixed !== day[field]) setField(date, field, fixed)
-                              }
-                            }}
-                            data-biz={`${i}:${key}`}
-                            onKeyDown={(e) => onKeyDown(e, i, key)}
-                          />
-                        )}
+                        <div
+                          className="px-1 py-1 text-right tabular-nums text-gray-700"
+                          title={key === 'pos' && linked ? '來自 Sales figure 的 O.POST' : '在手動輸入總頁輸入'}
+                        >
+                          {money ? fmtMoney(r[key]) : fmtCount(r[key])}
+                        </div>
                       </td>
                     ))}
                   </tr>
