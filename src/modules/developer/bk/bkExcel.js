@@ -113,7 +113,7 @@ export async function exportCashXlsx({ storeName, year, month, open, sfDaysMap, 
 
   ws.addRow([`${storeName} — U帳 分店現金 ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
   ws.addRow([])
-  styleHeader(ws.addRow(['COH', 'UCOH', 'D (未入庫)', 'P/L']))
+  styleHeader(ws.addRow(['COH', 'UCOH', 'D + +/− (未入庫)', 'P/L']))
   ws.addRow([s.coh, s.ucoh, s.dUnstocked, s.pl])
   ws.addRow(['上月月底 COH', open.coh, '上月月底 UCOH', open.ucoh])
   ws.addRow([])

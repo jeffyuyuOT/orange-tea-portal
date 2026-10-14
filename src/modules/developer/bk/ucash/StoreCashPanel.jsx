@@ -421,7 +421,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard label="COH（SF 現金）" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
             <SummaryCard label="UCOH（非 SF 現金）" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
-            <SummaryCard label="D（未入庫）" value={summary.dUnstocked} />
+            <SummaryCard label="D（未入庫）" value={summary.dUnstocked} hint="未勾入庫的 D + +/−" />
             <SummaryCard label="P/L" value={summary.pl} tone={summary.pl < 0 ? 'text-red-600' : 'text-green-700'} />
           </div>
 
