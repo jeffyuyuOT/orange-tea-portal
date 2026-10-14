@@ -4,6 +4,9 @@ import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import {
   RUJU_TARGET_LABELS,
+  daysInMonth,
+  toNum,
+  ymd,
   brisbaneToday,
   brisbaneTodayStr,
   monthStart,
@@ -22,7 +25,7 @@ import {
   toggleStocked,
   weekdayOf,
 } from '../bkUtils'
-import { listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance } from '../bkData'
+import { listCashDayRows, listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance } from '../bkData'
 import { exportCashXlsx } from '../bkExcel'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
@@ -207,6 +210,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [balanceForm, setBalanceForm] = useState(null)
   const [dInfo, setDInfo] = useState(null) // date whose 可 D 金額 popup is open
   const [importFile, setImportFile] = useState(null)
+  const [fyOther, setFyOther] = useState(null) // P/L of the FY's other months (saved data)
   const [detail, setDetail] = useState(null) // { key, title, kinds } of the open side-list window
   const fileInputRef = useRef(null)
 
@@ -257,6 +261,42 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       cancelled = true
     }
   }, [active, entriesVersion, store.id, year, month])
+
+  // The FY (1 July – 30 June) the shown month belongs to, and its P/L from the
+  // months OTHER than the one on screen (saved data). The on-screen month is
+  // added live below, so unsaved typing is reflected in the FY figure too.
+  const fyStartYear = month >= 7 ? year : year - 1
+  const fyLabel = `${String(fyStartYear).slice(-2)}-${String(fyStartYear + 1).slice(-2)}FY`
+  useEffect(() => {
+    let cancelled = false
+    const from = ymd(fyStartYear, 7, 1)
+    const to = ymd(fyStartYear + 1, 6, daysInMonth(fyStartYear + 1, 6))
+    const curFrom = monthStart(year, month)
+    const curTo = monthDates(year, month).slice(-1)[0]
+    const outside = (d) => d < curFrom || d > curTo
+    ;(async () => {
+      try {
+        const [{ cashDays: cd, sfDays }, ucosts] = await Promise.all([
+          listCashDayRows({ storeId: store.id, from, to }),
+          listEntries({ storeId: store.id, from, to, kinds: ['ucost'] }),
+        ])
+        const oca = new Map(sfDays.map((r) => [r.day, toNum(r.o_ca)]))
+        let pl = 0
+        for (const c of cd) {
+          if (!outside(c.day)) continue
+          const r = computeCashDay(oca.get(c.day) ?? 0, c)
+          pl += (r.d ?? 0) + (r.pm ?? 0)
+        }
+        for (const e of ucosts) if (outside(e.entry_date)) pl -= toNum(e.amount) ?? 0
+        if (!cancelled) setFyOther(Math.round(pl * 100) / 100)
+      } catch {
+        if (!cancelled) setFyOther(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [store.id, fyStartYear, year, month, active, entriesVersion, reloadKey, msg])
 
   const dates = useMemo(() => monthDates(year, month), [year, month])
   // 其他收入 raises a day's max D: maxD = O.CA + the day's 其他收入. D may not exceed it.
@@ -422,7 +462,12 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
             <SummaryCard label="COH（SF 現金）" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
             <SummaryCard label="UCOH（非 SF 現金）" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
             <SummaryCard label="D（未入庫）" value={summary.dUnstocked} hint="未勾入庫的 D + +/−" />
-            <SummaryCard label="P/L" value={summary.pl} tone={summary.pl < 0 ? 'text-red-600' : 'text-green-700'} />
+            <SummaryCard
+              label="P/L"
+              value={summary.pl}
+              tone={summary.pl < 0 ? 'text-red-600' : 'text-green-700'}
+              hint={fyOther === null ? undefined : `${fyLabel} 累計 ${fmtMoney(Math.round((fyOther + summary.pl) * 100) / 100)}`}
+            />
           </div>
 
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
