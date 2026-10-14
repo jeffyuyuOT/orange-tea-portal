@@ -210,55 +210,68 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
           </Notice>
         )}
 
-        {imageUrl && <img src={imageUrl} alt="原圖" className="max-h-48 rounded border border-brand-100" />}
+        {/* original picture beside the numbers, so each figure can be checked at a glance; click = full size in a new tab */}
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:items-start">
+          {imageUrl && (
+            <a
+              href={imageUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="點一下在新分頁看原圖大小"
+              className="block cursor-zoom-in md:sticky md:top-0"
+            >
+              <img src={imageUrl} alt="原圖" className="w-full rounded border border-brand-100" />
+              <span className="mt-1 block text-center text-xs text-gray-400">點圖片可在新分頁放大</span>
+            </a>
+          )}
+          <div className="space-y-3">
+            <label className="flex items-center gap-2">
+              <span className="font-medium text-brand-900">日期</span>
+              <input
+                type="date"
+                value={draft.date}
+                onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))}
+                className={inputCls}
+              />
+              {!draft.date && <span className="text-xs text-red-600">沒有讀到日期，請選一天</span>}
+            </label>
 
-        {imageUrl && <img src={imageUrl} alt="原圖" className="max-h-48 rounded border border-brand-100" />}
-
-        <label className="flex items-center gap-2">
-          <span className="font-medium text-brand-900">日期</span>
-          <input
-            type="date"
-            value={draft.date}
-            onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))}
-            className={inputCls}
-          />
-          {!draft.date && <span className="text-xs text-red-600">沒有讀到日期，請選一天</span>}
-        </label>
-
-        <table className="w-full table-fixed border-collapse text-sm">
-          <thead>
-            <tr className="bg-brand-100 text-left text-xs">
-              <th className="border border-brand-100 px-2 py-1">圖片上的名稱</th>
-              <th className="w-32 border border-brand-100 px-2 py-1 text-right">金額</th>
-              <th className="border border-brand-100 px-2 py-1">填到</th>
-            </tr>
-          </thead>
-          <tbody>
-            {draft.lines.map((l, i) => (
-              <tr key={i}>
-                <td className="border border-gray-100 p-0">
-                  <input
-                    value={l.label}
-                    onChange={(e) => setLine(i, { label: e.target.value })}
-                    className="w-full bg-transparent px-2 py-1 focus:bg-white focus:outline-none"
-                    aria-label="名稱"
-                  />
-                </td>
-                <td className="border border-gray-100 p-0">
-                  <MoneyInput value={l.amount} onChange={(v) => setLine(i, { amount: v })} />
-                </td>
-                <td className="border border-gray-100 px-2 py-1 text-xs">{targetOf(l.label, view)}</td>
-              </tr>
-            ))}
-            <tr className="bg-brand-50 font-semibold">
-              <td className="border border-gray-100 px-2 py-1">Total</td>
-              <td className="border border-gray-100 p-0">
-                <MoneyInput value={draft.total} onChange={(v) => setDraft((d) => ({ ...d, total: v }))} />
-              </td>
-              <td className="border border-gray-100 px-2 py-1 text-xs">O.POST</td>
-            </tr>
-          </tbody>
-        </table>
+            <table className="w-full table-fixed border-collapse text-sm">
+              <thead>
+                <tr className="bg-brand-100 text-left text-xs">
+                  <th className="border border-brand-100 px-2 py-1">圖片上的名稱</th>
+                  <th className="w-32 border border-brand-100 px-2 py-1 text-right">金額</th>
+                  <th className="border border-brand-100 px-2 py-1">填到</th>
+                </tr>
+              </thead>
+              <tbody>
+                {draft.lines.map((l, i) => (
+                  <tr key={i}>
+                    <td className="border border-gray-100 p-0">
+                      <input
+                        value={l.label}
+                        onChange={(e) => setLine(i, { label: e.target.value })}
+                        className="w-full bg-transparent px-2 py-1 focus:bg-white focus:outline-none"
+                        aria-label="名稱"
+                      />
+                    </td>
+                    <td className="border border-gray-100 p-0">
+                      <MoneyInput value={l.amount} onChange={(v) => setLine(i, { amount: v })} />
+                    </td>
+                    <td className="border border-gray-100 px-2 py-1 text-xs">{targetOf(l.label, view)}</td>
+                  </tr>
+                ))}
+                <tr className="bg-brand-50 font-semibold">
+                  <td className="border border-gray-100 px-2 py-1">Total</td>
+                  <td className="border border-gray-100 p-0">
+                    <MoneyInput value={draft.total} onChange={(v) => setDraft((d) => ({ ...d, total: v }))} />
+                  </td>
+                  <td className="border border-gray-100 px-2 py-1 text-xs">O.POST</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         {view.totalAmount !== null &&
           (view.sumOk ? (
