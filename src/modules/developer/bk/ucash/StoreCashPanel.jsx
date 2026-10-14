@@ -210,7 +210,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [balanceForm, setBalanceForm] = useState(null)
   const [dInfo, setDInfo] = useState(null) // date whose 可 D 金額 popup is open
   const [importFile, setImportFile] = useState(null)
-  const [fyOther, setFyOther] = useState(null) // P/L of the FY's other months (saved data)
+  const [fyOther, setFyOther] = useState(undefined) // P/L of the FY's other months (saved data)
   const [detail, setDetail] = useState(null) // { key, title, kinds } of the open side-list window
   const fileInputRef = useRef(null)
 
@@ -289,8 +289,8 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         }
         for (const e of ucosts) if (outside(e.entry_date)) pl -= toNum(e.amount) ?? 0
         if (!cancelled) setFyOther(Math.round(pl * 100) / 100)
-      } catch {
-        if (!cancelled) setFyOther(null)
+      } catch (e) {
+        if (!cancelled) setFyOther(`ERR:${e?.message ?? e}`)
       }
     })()
     return () => {
@@ -466,7 +466,13 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
               label="P/L"
               value={summary.pl}
               tone={summary.pl < 0 ? 'text-red-600' : 'text-green-700'}
-              hint={fyOther === null ? undefined : `${fyLabel} 累計 ${fmtMoney(Math.round((fyOther + summary.pl) * 100) / 100)}`}
+              hint={
+                fyOther === undefined
+                  ? `${fyLabel} 累計 計算中…`
+                  : typeof fyOther === 'string'
+                    ? `${fyLabel} 累計讀取失敗：${fyOther.slice(4)}`
+                    : `${fyLabel} 累計 ${fmtMoney(Math.round((fyOther + summary.pl) * 100) / 100)}`
+              }
             />
           </div>
 
