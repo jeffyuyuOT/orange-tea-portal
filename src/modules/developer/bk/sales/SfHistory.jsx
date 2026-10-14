@@ -5,13 +5,15 @@ import LoadingSpinner, { EmptyState } from '../../../../components/ui/LoadingSpi
 import { buildColumns, dMapFromRows, inactiveIdsWithData, monthLabel, sfDaysFromRows } from '../bkUtils'
 import { listSfMonths, loadCashDays, loadPaymentTypes, loadSfMonth } from '../bkData'
 import { exportSfXlsx } from '../bkExcel'
+import { loadSalesMonth } from '../bkSalesData'
+import { selfOMapFromRows } from '../bkSalesUtils'
 import { Notice, inputCls } from '../bkUi'
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane', hour12: false }) : '')
 
 // One line per month (the latest state), for one store at a time. Starts on
 // the store the SF tab is showing; the dropdown can switch.
-export default function SfHistory({ stores, sfStoreId, active, refreshKey, onLoad }) {
+export default function SfHistory({ stores, salesStores, sfStoreId, active, refreshKey, onLoad }) {
   const [storeId, setStoreId] = useState(sfStoreId)
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
@@ -45,10 +47,14 @@ export default function SfHistory({ stores, sfStoreId, active, refreshKey, onLoa
   async function exportRow(r) {
     setError('')
     try {
-      const [types, sf, cash] = await Promise.all([
+      // A store linked to the 營業 tab: its empty Self order kiosk days fall
+      // back to 營業's Self O, same as the sheet.
+      const biz = salesStores?.find((s) => s.sf_store_id === storeId) ?? null
+      const [types, sf, cash, bizRows] = await Promise.all([
         loadPaymentTypes(storeId),
         loadSfMonth(storeId, r.year, r.month),
         loadCashDays(storeId, r.year, r.month),
+        biz ? loadSalesMonth(biz.id, r.year, r.month) : Promise.resolve(null),
       ])
       const days = sfDaysFromRows(sf.days)
       await exportSfXlsx({
@@ -58,6 +64,7 @@ export default function SfHistory({ stores, sfStoreId, active, refreshKey, onLoa
         columns: buildColumns(types, inactiveIdsWithData(types, days)),
         days,
         dMap: dMapFromRows(cash),
+        kioskMap: bizRows ? selfOMapFromRows(bizRows) : undefined,
       })
     } catch (e) {
       setError(`匯出失敗：${e.message}`)

@@ -56,7 +56,9 @@ const safeName = (s) => String(s).replace(/[\\/:*?"<>|]/g, '_')
 
 // Same column order as the on-screen sheet: Date | mains… | Total | Check | subs… | O.CA | O.POST
 // Builds the workbook (no download) so tests and the Excel import can round-trip it.
-export async function buildSfWorkbook({ storeName, year, month, columns, days, dMap }) {
+// `kioskMap` ({ [date]: 營業 Self O }, optional): for a store linked to the 營業
+// tab, fills a day's empty Self order kiosk the same way the sheet does.
+export async function buildSfWorkbook({ storeName, year, month, columns, days, dMap, kioskMap }) {
   const wb = await newWorkbook()
   const ws = wb.addWorksheet(monthLabel(year, month))
   const subs = columns.flatMap((c) => c.subs.map((s) => ({ ...s, parentName: c.name })))
@@ -69,7 +71,7 @@ export async function buildSfWorkbook({ storeName, year, month, columns, days, d
   const rows = []
   for (const date of monthDates(year, month)) {
     const day = days[date] ?? { amounts: {} }
-    const r = computeSfDay(columns, day, dMap[date] ?? null)
+    const r = computeSfDay(columns, day, dMap[date] ?? null, kioskMap ? (kioskMap[date] ?? null) : undefined)
     rows.push(r)
     const cells = [
       `${date} ${weekdayOf(date)}`,

@@ -15,6 +15,9 @@ import {
   isCashColumn,
   isPosTotalColumn,
   isWeekend,
+  KIOSK_NAME,
+  kioskMismatch,
+  sfDayHasData,
   monthDates,
   monthLabel,
   numToInput,
@@ -25,6 +28,8 @@ import {
 } from '../bkUtils'
 import { loadCashDays, loadPaymentTypes, loadSfDataDayCounts, loadSfMonth, saveSfMonth } from '../bkData'
 import { exportSfXlsx } from '../bkExcel'
+import { loadSalesMonth } from '../bkSalesData'
+import { selfOMapFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import ImportByImage from './ImportByImage'
 import SfExcelImport from './SfExcelImport'
@@ -34,11 +39,19 @@ const emptyDay = () => ({ o_ca: '', o_post: '', total: '', amounts: {} })
 // The SF sub-tab: store tabs, year/month, Save / Submit / Action, and the
 // month table (Date | main payment types | Total | Sum vs Total | sub payment
 // types | O.CA). Cash is never typed — it is O.CA − D, D coming from U帳.
-export default function SfSheet({ stores, store, year, month, typesVersion, active, onNavigate, onDirtyChange }) {
+//
+// Self order kiosk and the 營業 tab: for a store linked there, an empty kiosk
+// cell falls back to 營業's Self O for that day (grey placeholder); a figure typed
+// here always wins and can be changed by hand. When both exist and differ, the
+// cell gets a ⚠ — click it to see the 營業 number.
+export default function SfSheet({ stores, salesStores, store, year, month, typesVersion, active, onNavigate, onDirtyChange }) {
   const [types, setTypes] = useState([])
   const [sfMonth, setSfMonth] = useState(null)
   const [days, setDays] = useState({})
   const [dMap, setDMap] = useState({})
+  const [selfOMap, setSelfOMap] = useState({}) // 營業 Self O per day (linked stores only)
+  const [kioskWarn, setKioskWarn] = useState(null) // { date, typeId, sf, biz }
+  const bizStoreId = salesStores?.find((s) => s.sf_store_id === store.id)?.id ?? null
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -75,11 +88,16 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
       setError('')
       setMsg('')
       try {
-        const [sf, cash] = await Promise.all([loadSfMonth(store.id, year, month), loadCashDays(store.id, year, month)])
+        const [sf, cash, biz] = await Promise.all([
+          loadSfMonth(store.id, year, month),
+          loadCashDays(store.id, year, month),
+          bizStoreId ? loadSalesMonth(bizStoreId, year, month) : Promise.resolve([]),
+        ])
         if (cancelled) return
         setSfMonth(sf.sfMonth)
         setDays(sfDaysFromRows(sf.days))
         setDMap(dMapFromRows(cash))
+        setSelfOMap(selfOMapFromRows(biz))
         setDirty(false)
       } catch (e) {
         if (!cancelled) setError(e.message)
@@ -90,28 +108,38 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
     return () => {
       cancelled = true
     }
-  }, [store.id, year, month])
+  }, [store.id, bizStoreId, year, month])
 
-  // D can change in U帳 while this tab is hidden — re-read it when coming back.
+  // D can change in U帳 (and Self O in 營業) while this tab is hidden — re-read
+  // them when coming back.
   useEffect(() => {
     if (!active) return
     let cancelled = false
     loadCashDays(store.id, year, month)
       .then((rows) => !cancelled && setDMap(dMapFromRows(rows)))
       .catch(() => {})
+    if (bizStoreId) {
+      loadSalesMonth(bizStoreId, year, month)
+        .then((rows) => !cancelled && setSelfOMap(selfOMapFromRows(rows)))
+        .catch(() => {})
+    }
     return () => {
       cancelled = true
     }
-  }, [active, store.id, year, month])
+  }, [active, store.id, bizStoreId, year, month])
 
   const dates = useMemo(() => monthDates(year, month), [year, month])
   const columns = useMemo(() => buildColumns(types, inactiveIdsWithData(types, days)), [types, days])
   const subs = useMemo(() => columns.flatMap((c) => c.subs.map((s) => ({ ...s, parentName: c.name }))), [columns])
   // date 58 + check 44 + about 66px for each money column (mains, Total, subs, O.CA, O.POST)
   const tableMinWidth = 58 + 44 + 66 * (columns.length + 1 + subs.length + 2)
+  const kioskType = useMemo(() => subs.find((s) => s.name === KIOSK_NAME) ?? null, [subs])
   const rows = useMemo(
-    () => dates.map((date) => computeSfDay(columns, days[date] ?? emptyDay(), dMap[date] ?? null)),
-    [dates, columns, days, dMap]
+    () =>
+      dates.map((date) =>
+        computeSfDay(columns, days[date] ?? emptyDay(), dMap[date] ?? null, bizStoreId ? (selfOMap[date] ?? null) : undefined)
+      ),
+    [dates, columns, days, dMap, selfOMap, bizStoreId]
   )
   const totals = useMemo(() => computeSfTotals(columns, rows), [columns, rows])
 
@@ -219,7 +247,7 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
   async function doExport() {
     setMenuOpen(false)
     try {
-      await exportSfXlsx({ storeName: store.name, year, month, columns, days, dMap })
+      await exportSfXlsx({ storeName: store.name, year, month, columns, days, dMap, kioskMap: bizStoreId ? selfOMap : undefined })
     } catch (e) {
       setError(`匯出失敗：${e.message}`)
     }
@@ -272,10 +300,11 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
 
   const th = 'border border-brand-100 px-1 py-1.5 text-[11px] font-semibold leading-tight text-gray-700'
   const td = 'border border-gray-100 p-0'
-  const inputFor = (i, colKey, value, onChange) => (
+  const inputFor = (i, colKey, value, onChange, extra) => (
     <MoneyInput
       value={value}
       onChange={onChange}
+      {...extra}
       className="!px-1 !text-[13px]"
       data-sf={`${i}:${colKey}`}
       onKeyDown={(e) => onKeyDown(e, i, colKey)}
@@ -457,11 +486,36 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
                         </span>
                       )}
                     </td>
-                    {subs.map((s) => (
-                      <td key={s.id} className={td}>
-                        {inputFor(i, s.id, day.amounts[s.id], (v) => setAmount(date, s.id, v))}
-                      </td>
-                    ))}
+                    {subs.map((s) => {
+                      const isKiosk = !!bizStoreId && s.id === kioskType?.id
+                      const own = day.amounts[s.id]
+                      const biz = selfOMap[date]
+                      const mismatch = isKiosk ? kioskMismatch(own, biz) : null
+                      // empty here, 營業 has a figure: it is what the row uses (shown grey)
+                      const fromBiz = isKiosk && (own ?? '') === '' && biz !== null && biz !== undefined && sfDayHasData(day)
+                      return (
+                        <td key={s.id} className={`${td} relative`}>
+                          {mismatch && (
+                            <button
+                              type="button"
+                              onClick={() => setKioskWarn({ date, typeId: s.id, ...mismatch })}
+                              title="和營業的 Self O 不一致，點一下看詳細"
+                              aria-label="和營業的 Self O 不一致"
+                              className="absolute left-0.5 top-1/2 z-10 -translate-y-1/2 text-[12px] leading-none text-amber-600 hover:text-amber-700"
+                            >
+                              ⚠
+                            </button>
+                          )}
+                          {inputFor(
+                            i,
+                            s.id,
+                            own,
+                            (v) => setAmount(date, s.id, v),
+                            fromBiz ? { placeholder: numToInput(biz), title: '空白：用營業的 Self O' } : undefined
+                          )}
+                        </td>
+                      )
+                    })}
                     <td className={td}>{inputFor(i, 'o_ca', day.o_ca, (v) => setField(date, 'o_ca', v))}</td>
                     <td className={td}>{inputFor(i, 'o_post', day.o_post, (v) => setField(date, 'o_post', v))}</td>
                   </tr>
@@ -490,6 +544,48 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
           </table>
         </div>
       )}
+
+      <Modal
+        open={!!kioskWarn}
+        onClose={() => setKioskWarn(null)}
+        title="Self order kiosk 和營業的 Self O 不一致"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setKioskWarn(null)}>
+              保留 SF 的數字
+            </Button>
+            <Button
+              onClick={() => {
+                setAmount(kioskWarn.date, kioskWarn.typeId, numToInput(kioskWarn.biz))
+                setKioskWarn(null)
+              }}
+            >
+              改用營業的數字
+            </Button>
+          </>
+        }
+      >
+        {kioskWarn && (
+          <div className="space-y-2 text-sm text-gray-700">
+            <p>{kioskWarn.date} 這一天：</p>
+            <ul className="space-y-1">
+              <li className="flex justify-between rounded bg-amber-50 px-2 py-1">
+                <span>營業的 Self O</span>
+                <span className="tabular-nums">{fmtMoney(kioskWarn.biz)}</span>
+              </li>
+              <li className="flex justify-between rounded bg-amber-50 px-2 py-1">
+                <span>SF 的 Self order kiosk</span>
+                <span className="tabular-nums">{fmtMoney(kioskWarn.sf)}</span>
+              </li>
+              <li className="flex justify-between rounded bg-gray-50 px-2 py-1">
+                <span>差額（SF − 營業）</span>
+                <span className="tabular-nums">{fmtMoney(kioskWarn.sf - kioskWarn.biz)}</span>
+              </li>
+            </ul>
+            <p className="text-xs text-gray-400">SF 手動輸入的數字優先；如果要跟營業一致，按「改用營業的數字」後記得按「提交」。</p>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!problems}

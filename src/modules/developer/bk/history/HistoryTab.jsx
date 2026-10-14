@@ -16,7 +16,7 @@ const SUBTABS = [
 // that surface's own sheet via `onLoadSf`/`onLoadCash` — BkPage sets a jump
 // target and switches the active top tab, since the sheet itself now lives
 // on a different page than its history.
-export default function HistoryTab({ stores, topActive = true, onLoadSf, onLoadCash }) {
+export default function HistoryTab({ stores, salesStores, topActive = true, onLoadSf, onLoadCash }) {
   const [sub, setSub] = useState('sf')
 
   if (stores.length === 0) {
@@ -27,7 +27,7 @@ export default function HistoryTab({ stores, topActive = true, onLoadSf, onLoadC
     <div className="space-y-4">
       <SubTabs tabs={SUBTABS} value={sub} onChange={setSub} />
       <div className={sub === 'sf' ? '' : 'hidden'}>
-        <SfHistory stores={stores} sfStoreId={stores[0]?.id ?? null} active={topActive && sub === 'sf'} onLoad={onLoadSf} />
+        <SfHistory stores={stores} salesStores={salesStores} sfStoreId={stores[0]?.id ?? null} active={topActive && sub === 'sf'} onLoad={onLoadSf} />
       </div>
       <div className={sub === 'u' ? '' : 'hidden'}>
         <UHistory stores={stores} storeId={stores[0]?.id ?? null} active={topActive && sub === 'u'} onLoad={onLoadCash} />

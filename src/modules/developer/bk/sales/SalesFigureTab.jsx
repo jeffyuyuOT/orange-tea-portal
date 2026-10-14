@@ -10,7 +10,7 @@ import StoreManager from './StoreManager'
 // sub-tab bar any more. `typesVersion` is now owned by BkPage (bumped by
 // 系統設置's SF payment-type editor) so the sheet re-reads its columns after
 // a change made from that other tab.
-export default function SalesFigureTab({ stores, topActive = true, typesVersion, jumpTarget, onJumpHandled, onStoresChanged }) {
+export default function SalesFigureTab({ stores, salesStores, topActive = true, typesVersion, jumpTarget, onJumpHandled, onStoresChanged }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
   const [year, setYear] = useState(today.year)
@@ -43,6 +43,7 @@ export default function SalesFigureTab({ stores, topActive = true, typesVersion,
   return (
     <SfSheet
       stores={stores}
+      salesStores={salesStores}
       store={store}
       year={year}
       month={month}

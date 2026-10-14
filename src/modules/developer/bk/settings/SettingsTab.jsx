@@ -5,6 +5,7 @@ import { Notice, SubTabs, inputCls } from '../bkUi'
 import { listWorkbookSheetNames } from '../bkImport'
 import { loadDividendData } from '../bkDividendData'
 import { exportBkBackup, restoreBkBackup } from '../bkBackup'
+import AutoBackupPanel from './AutoBackupPanel'
 import {
   downloadDividendTemplate,
   downloadEmmaClaimTemplate,
@@ -19,12 +20,14 @@ import DividendExcelImport from '../bonus/DividendExcelImport'
 import JeffOwedExcelImport from './JeffOwedExcelImport'
 import EmmaClaimExcelImport from './EmmaClaimExcelImport'
 import SfMaintenance from '../sales/SfMaintenance'
+import BizStoreManager from './BizStoreManager'
 import PartySettings from '../bonus/PartySettings'
 
 const SUBTABS = [
   ['import', '匯入'],
   ['backup', '備份'],
   ['sf', 'SF'],
+  ['biz', '營業'],
   ['bonus', '收成'],
 ]
 
@@ -76,7 +79,7 @@ const ENTRIES_SHEET_RE = /收支|entries?/i
 //   are configuration, not day-to-day entry, so they live alongside the rest
 //   of this tab's setup-and-maintenance surfaces instead of cluttering the
 //   tabs people use every day.
-export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesChanged }) {
+export default function SettingsTab({ stores, salesStores, onStoresChanged, onSalesStoresChanged, onPaymentTypesChanged }) {
   const [sub, setSub] = useState('import')
   const [templateChoice, setTemplateChoice] = useState(TEMPLATES[0][0])
   const [file, setFile] = useState(null)
@@ -360,6 +363,8 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
 
       {sub === 'backup' && (
         <div className="max-w-2xl space-y-4">
+          <AutoBackupPanel />
+          <h3 className="pt-2 font-semibold text-brand-900">手動匯出／還原</h3>
           <Notice kind="info">
             BK 的備份跟 OT Portal 整體的備份是分開的：整體備份（系統設定）只涵蓋公式／題庫／訓練內容這類參考資料，刻意不包含排班、出勤這類會持續累積的營運資料；BK 的帳本資料屬於同一類——資料量會持續變大、內容也比較敏感，混進整體備份裡會讓那份備份變大又變敏感，而兩邊真正會用到備份的人也不同（開發者 vs 平常維護整體備份的人）。所以 BK 在這裡有自己獨立的匯出／還原，包含所有 BK 的資料表。
           </Notice>
@@ -416,6 +421,8 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
           onStoresChanged={onStoresChanged}
         />
       </div>
+
+      {sub === 'biz' && <BizStoreManager salesStores={salesStores} sfStores={stores} onChanged={onSalesStoresChanged} />}
 
       <div className={sub === 'bonus' ? '' : 'hidden'}>
         {!dividendData ? (

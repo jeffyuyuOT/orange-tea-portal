@@ -154,15 +154,25 @@ export function mainValue(main, day, dValue) {
 //   total = Pos total + Self order kiosk          (never typed)
 //   sum   = every main EXCEPT Pos total, added up
 //   check: 'empty' (nothing on the day), 'ok' (sum = total), or 'bad'
-export function computeSfDay(columns, day, dValue) {
+//
+// `kioskFallback` (number | null | undefined): the 營業 tab's Self O for this
+// day, for a store linked to it. The Self order kiosk figure typed in SF always
+// wins (it can be changed by hand); only when SF's own is empty — and the day
+// already holds some SF figure — is the 營業 Self O used. undefined = this store
+// isn't linked, SF's own figure only.
+export function computeSfDay(columns, day, dValue, kioskFallback) {
   const mains = {}
   const subAmounts = {}
   let kioskAmount = null
+  const useFallback = kioskFallback !== undefined && sfDayHasData(day)
   for (const col of columns) {
     mains[col.id] = mainValue(col, day, dValue)
     for (const sub of col.subs) {
       subAmounts[sub.id] = toNum(day.amounts?.[sub.id])
-      if (sub.name === KIOSK_NAME) kioskAmount = subAmounts[sub.id]
+      if (sub.name === KIOSK_NAME) {
+        if (subAmounts[sub.id] === null && useFallback) subAmounts[sub.id] = toNum(kioskFallback)
+        kioskAmount = subAmounts[sub.id]
+      }
     }
   }
   const posTotalCol = columns.find(isPosTotalColumn)
@@ -173,6 +183,15 @@ export function computeSfDay(columns, day, dValue) {
     check = sum !== null && total !== null && Math.abs(sum - total) < 0.005 ? 'ok' : 'bad'
   }
   return { mains, subAmounts, sum, total, check, oCa: toNum(day.o_ca), oPost: toNum(day.o_post) }
+}
+
+// Self order kiosk typed in SF vs the 營業 tab's Self O for the same day. Returns
+// { sf, biz } when both exist and differ, otherwise null (nothing to warn about).
+export function kioskMismatch(sfValue, bizValue) {
+  const sf = toNum(sfValue)
+  const biz = toNum(bizValue)
+  if (sf === null || biz === null || Math.abs(sf - biz) < 0.005) return null
+  return { sf, biz }
 }
 
 // A column's month of values as clipboard text: one line per day (1st … last,
