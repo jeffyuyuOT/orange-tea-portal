@@ -223,8 +223,8 @@ function StoreMonths({ stores, initialStoreId, active, onLoad }) {
   )
 }
 
-// 個別資料 view: pick a store (or all) and a date range (this month so far by
-// default), then pick categories from a dropdown one at a time and "加入清單"
+// 個別資料 view: pick a store (or all) and a date range (this FY so far by
+// default — AU FY starts 1 July), then pick categories from a dropdown one at a time and "加入清單"
 // (add to list). Each added category gets its own column with its own total
 // at the top; removing a column just drops it from the list.
 function ItemHistory({ stores, initialStoreId, active }) {
@@ -232,7 +232,7 @@ function ItemHistory({ stores, initialStoreId, active }) {
   const [storeId, setStoreId] = useState(initialStoreId) // null = all
   const [addedKinds, setAddedKinds] = useState(['icost'])
   const [pendingKind, setPendingKind] = useState('')
-  const [from, setFrom] = useState(monthStart(t.year, t.month))
+  const [from, setFrom] = useState(monthStart(t.month >= 7 ? t.year : t.year - 1, 7))
   const [to, setTo] = useState(brisbaneTodayStr())
   const [rujuTarget, setRujuTarget] = useState('')
   const [byKind, setByKind] = useState({})
