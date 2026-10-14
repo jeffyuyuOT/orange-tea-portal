@@ -167,3 +167,34 @@ export async function saveSalesDays(storeId, days, { linked }) {
     }
   }
 }
+
+// Save only some of a day's fields — the 手動輸入總頁 writes the four fields it
+// shows (P杯數, CV, Self O, SO杯數) and a store page writes POS, each leaving
+// the other fields of the row alone.
+//   days   { [date]: { pos, self_o, cv, p_cups, so_cups } } (form strings) — only the dates to write
+//   fields the bk_sales_days columns to write, e.g. ['pos']
+// A date whose `fields` are all blank gets those fields cleared; a row left
+// with nothing at all in it is removed.
+export async function saveSalesFields(storeId, days, fields) {
+  const now = new Date().toISOString()
+  const upserts = []
+  const blanks = []
+  for (const [date, day] of Object.entries(days)) {
+    if (fields.every((f) => toNum(day?.[f]) === null)) {
+      blanks.push(date)
+      continue
+    }
+    const row = { store_id: storeId, day: date, updated_at: now }
+    for (const f of fields) row[f] = toNum(day[f])
+    upserts.push(row)
+  }
+  if (upserts.length) unwrap(await supabase.from('bk_sales_days').upsert(upserts, { onConflict: 'store_id,day' }))
+  if (blanks.length) {
+    const clear = { updated_at: now }
+    for (const f of fields) clear[f] = null
+    unwrap(await supabase.from('bk_sales_days').update(clear).eq('store_id', storeId).in('day', blanks))
+    let q = supabase.from('bk_sales_days').delete().eq('store_id', storeId).in('day', blanks)
+    for (const { field } of BIZ_INPUTS) q = q.is(field, null)
+    unwrap(await q)
+  }
+}

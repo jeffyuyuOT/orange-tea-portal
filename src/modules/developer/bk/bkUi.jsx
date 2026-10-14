@@ -2,7 +2,8 @@
 import { useState } from 'react'
 import { brisbaneToday } from './bkUtils'
 
-export function StoreTabs({ stores, storeId, onChange, allowAll = false, className = '' }) {
+// `lead` = [id, label]: an extra tab shown before the stores (e.g. 營業's 手動輸入總頁).
+export function StoreTabs({ stores, storeId, onChange, allowAll = false, lead = null, className = '' }) {
   const tab = (id, label) => (
     <button
       key={id ?? 'all'}
@@ -17,6 +18,7 @@ export function StoreTabs({ stores, storeId, onChange, allowAll = false, classNa
   )
   return (
     <div className={`flex gap-2 overflow-x-auto pb-1 ${className}`}>
+      {lead && tab(lead[0], lead[1])}
       {allowAll && tab(null, '全部分店')}
       {stores.map((s) => tab(s.id, s.name))}
     </div>

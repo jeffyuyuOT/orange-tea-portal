@@ -3,10 +3,13 @@ import Button from '../../../../components/ui/Button'
 import Badge from '../../../../components/ui/Badge'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadSalesMonth, loadSfPostMonth, saveSalesDays } from '../bkSalesData'
+import { loadSalesMonth, loadSfPostMonth, saveSalesFields } from '../bkSalesData'
 import { BIZ_INPUTS, bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import BizExportModal from './BizExportModal'
+import BizOverview from './BizOverview'
+
+const OVERVIEW_ID = '__overview'
 
 const fmtCount = (n) => (n === null || n === undefined ? '' : round2(n).toLocaleString('en-AU', { maximumFractionDigits: 2 }))
 const fmtAvgCount = (n) =>
@@ -24,6 +27,8 @@ const split = 'border-l-2 border-l-brand-300'
 export default function BizTab({ stores, topActive = true }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
+  const [overview, setOverview] = useState(true) // 手動輸入總頁 is the first tab
+  const [ovDirty, setOvDirty] = useState(false)
   const [year, setYear] = useState(today.year)
   const [month, setMonth] = useState(today.month)
   const [days, setDays] = useState({})
@@ -43,7 +48,7 @@ export default function BizTab({ stores, topActive = true }) {
   // The month's saved data. Changing store / month replaces whatever is on
   // screen (the change handlers below already asked about unsaved edits).
   useEffect(() => {
-    if (!store) return
+    if (!store || overview) return
     let cancelled = false
     ;(async () => {
       setLoading(true)
@@ -67,11 +72,11 @@ export default function BizTab({ stores, topActive = true }) {
     return () => {
       cancelled = true
     }
-  }, [store?.id, sfStoreId, year, month]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [store?.id, sfStoreId, year, month, overview]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // SF's O.POST can change while this tab is hidden — re-read it when coming back.
   useEffect(() => {
-    if (!topActive || !sfStoreId) return
+    if (!topActive || !sfStoreId || overview) return
     let cancelled = false
     loadSfPostMonth(sfStoreId, year, month)
       .then((rows) => !cancelled && setPostMap(postMapFromRows(rows)))
@@ -79,11 +84,11 @@ export default function BizTab({ stores, topActive = true }) {
     return () => {
       cancelled = true
     }
-  }, [topActive, sfStoreId, year, month])
+  }, [topActive, sfStoreId, year, month, overview])
 
   const leaveOk = useCallback(
-    () => !dirty || window.confirm('這個月的營業有未儲存的變更，確定要離開並捨棄嗎？'),
-    [dirty]
+    () => (!dirty && !ovDirty) || window.confirm('營業有未儲存的變更，確定要離開並捨棄嗎？'),
+    [dirty, ovDirty]
   )
 
   const dates = useMemo(() => monthDates(year, month), [year, month])
@@ -104,7 +109,7 @@ export default function BizTab({ stores, topActive = true }) {
     setError('')
     setMsg('')
     try {
-      await saveSalesDays(store.id, days, { linked })
+      await saveSalesFields(store.id, days, ['pos'])
       setDirty(false)
       setMsg('已儲存。')
     } catch (e) {
@@ -138,12 +143,34 @@ export default function BizTab({ stores, topActive = true }) {
     <div className="space-y-3">
       <StoreTabs
         stores={stores}
-        storeId={store.id}
+        storeId={overview ? OVERVIEW_ID : store.id}
+        lead={[OVERVIEW_ID, '手動輸入總頁']}
         onChange={(id) => {
-          if (id !== store.id && leaveOk()) setStoreId(id)
+          if (id === OVERVIEW_ID) {
+            if (!overview && leaveOk()) setOverview(true)
+          } else if ((overview || id !== store.id) && leaveOk()) {
+            setStoreId(id)
+            setOverview(false)
+          }
         }}
       />
 
+      {overview && (
+        <BizOverview
+          stores={stores}
+          year={year}
+          month={month}
+          onYearMonth={(v) => {
+            if (leaveOk()) {
+              setYear(v.year)
+              setMonth(v.month)
+            }
+          }}
+          onDirtyChange={setOvDirty}
+        />
+      )}
+
+      {!overview && (<>
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-semibold text-brand-900">{store.name}</span>
         <YearMonthPicker
@@ -191,9 +218,10 @@ export default function BizTab({ stores, topActive = true }) {
 
       {linked && (
         <Notice kind="info">
-          這間分店的 POS 直接讀 Sales figure 的 O.POST（不能在這裡改）。這裡的 Self O 是 Sales figure 的 Self order kiosk 的預設值；SF 那邊可以手動改，兩邊不一致時 SF 會顯示警示。
+          這間分店的 POS 直接讀 Sales figure 的 O.POST（不能在這裡改）。Self O 是 Sales figure 的 Self order kiosk 的預設值；SF 那邊可以手動改，兩邊不一致時 SF 會顯示警示。
         </Notice>
       )}
+      <Notice kind="info">P杯數、CV、Self O、SO杯數 請到「手動輸入總頁」輸入，這裡只顯示那邊的數字。</Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}
 
@@ -254,7 +282,11 @@ export default function BizTab({ stores, topActive = true }) {
                     </td>
                     {BIZ_INPUTS.map(({ key, field, money }, c) => (
                       <td key={key} className={`${td} bg-sky-50/40 ${c === 0 ? split : ''}`}>
-                        {key === 'pos' && linked ? (
+                        {key !== 'pos' ? (
+                          <div className="px-1 py-1 text-right tabular-nums text-gray-700" title="在手動輸入總頁輸入">
+                            {money ? fmtMoney(r[key]) : fmtCount(r[key])}
+                          </div>
+                        ) : linked ? (
                           <div className="px-1 py-1 text-right tabular-nums text-gray-700" title="來自 Sales figure 的 O.POST">
                             {fmtMoney(r.pos)}
                           </div>
@@ -263,20 +295,15 @@ export default function BizTab({ stores, topActive = true }) {
                             value={day[field]}
                             onChange={(v) => setField(date, field, v)}
                             allowNegative={false}
-                            plain={!money}
                             className="!px-1 !text-[13px]"
-                            onBlur={
-                              money
-                                ? () => {
-                                    // money cells settle to two decimals when you leave them
-                                    const n = Number(day[field])
-                                    if (day[field] !== '' && day[field] !== undefined && Number.isFinite(n)) {
-                                      const fixed = (Math.round(n * 100) / 100).toFixed(2)
-                                      if (fixed !== day[field]) setField(date, field, fixed)
-                                    }
-                                  }
-                                : undefined
-                            }
+                            onBlur={() => {
+                              // POS settles to two decimals when you leave the cell
+                              const n = Number(day[field])
+                              if (day[field] !== '' && day[field] !== undefined && Number.isFinite(n)) {
+                                const fixed = (Math.round(n * 100) / 100).toFixed(2)
+                                if (fixed !== day[field]) setField(date, field, fixed)
+                              }
+                            }}
                             data-biz={`${i}:${key}`}
                             onKeyDown={(e) => onKeyDown(e, i, key)}
                           />
@@ -311,6 +338,8 @@ export default function BizTab({ stores, topActive = true }) {
           </table>
         </div>
       )}
+
+      </>)}
 
       <BizExportModal open={!!exportMode} mode={exportMode ?? 'excel'} stores={stores} year={year} month={month} onClose={() => setExportMode(null)} />
     </div>
