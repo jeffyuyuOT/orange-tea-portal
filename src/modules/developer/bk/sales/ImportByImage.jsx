@@ -4,6 +4,7 @@ import Modal from '../../../../components/ui/Modal'
 import { countOverwrites, filterKeepExisting } from '../bkImport'
 import { draftToEntries, textToDraft } from '../bkImageImport'
 import { ocrReportImage } from '../bkImageOcr'
+import { scanReportViaService } from '../bkImageScan'
 import { fmtMoney, monthLabel } from '../bkUtils'
 import { MoneyInput, Notice, inputCls } from '../bkUi'
 
@@ -54,20 +55,27 @@ export default function ImportByImage({ columns, year, month, days, onApply }) {
     }
   }
 
+  // Reading order: the receipt scan service first (it reads these reports accurately);
+  // if it cannot be reached, fall back to OCR in the browser (less accurate, says so).
   async function start() {
     if (!file) return
     setError('')
     setReading(0)
     try {
-      const text = await ocrReportImage(file, (p) => setReading(p))
-      const d = textToDraft(text)
+      let d
+      try {
+        d = await scanReportViaService(file)
+      } catch (serviceErr) {
+        const text = await ocrReportImage(file, (p) => setReading(p))
+        d = { ...textToDraft(text), source: 'browser', serviceError: serviceErr.message }
+      }
       if (d.lines.length === 0) {
         setError('圖片裡讀不到任何 payment 行。請確認截圖是 POS 的 Sale Summary 的 Payments 頁，字不要太小或被遮住，再試一次。')
       } else {
         setDraft(d)
       }
     } catch (e) {
-      setError(`圖片辨識失敗：${e.message}（第一次使用需要連網下載辨識程式）`)
+      setError(`圖片辨識失敗：${e.message}`)
     } finally {
       setReading(null)
     }
@@ -119,9 +127,9 @@ export default function ImportByImage({ columns, year, month, days, onApply }) {
               onClick={start}
               className="rounded-lg bg-brand-500 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-brand-200"
             >
-              {reading !== null ? `辨識中… ${Math.round(reading * 100)}%` : '開始匯入'}
+              {reading !== null ? (reading > 0 ? `辨識中… ${Math.round(reading * 100)}%` : '辨識中…') : '開始匯入'}
             </button>
-            <span className="text-xs text-gray-400">圖片只在這台電腦的瀏覽器裡辨識，不會上傳。辨識完會先讓你檢查再填進表格。</span>
+            <span className="text-xs text-gray-400">圖片會送到公司的收據掃描服務辨識（不會存檔）。辨識完會先讓你檢查再填進表格。</span>
           </div>
           {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
         </div>
@@ -180,6 +188,16 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
       <div className="space-y-3 text-sm">
         <p className="text-xs text-gray-500">請對照原圖檢查每個數字，可以直接改。套用後只是填進表格，要按「提交」才會存起來。</p>
 
+        {draft.source === 'browser' && (
+          <Notice kind="error">
+            掃描服務現在連不上（{draft.serviceError}），這次改用瀏覽器辨識，準確度比較低，請逐項對照原圖，特別是數字。
+          </Notice>
+        )}
+        {draft.strategy === 'columns' && (
+          <Notice kind="error">
+            這張圖的名稱和金額是分開讀的，只能按順序配對，兩個金額被對調時加總檢查看不出來。請逐項確認每個名稱旁邊的金額和原圖一樣。
+          </Notice>
+        )}
         {draft.fixed && (
           <Notice kind="info">
             「{draft.fixed.label}」原本讀成 {fmtMoney(draft.fixed.from)}，因為各項加總要等於 Total，已自動改成 {fmtMoney(draft.fixed.to)}。請對照原圖確認。
@@ -191,6 +209,8 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
             圖片的期間是 {draft.date} 到 {draft.dateTo}，不是單一天。這個匯入一次只填一天，請重新截取只有一天的報表。
           </Notice>
         )}
+
+        {imageUrl && <img src={imageUrl} alt="原圖" className="max-h-48 rounded border border-brand-100" />}
 
         {imageUrl && <img src={imageUrl} alt="原圖" className="max-h-48 rounded border border-brand-100" />}
 
