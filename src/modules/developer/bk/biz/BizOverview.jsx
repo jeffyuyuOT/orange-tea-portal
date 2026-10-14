@@ -8,8 +8,12 @@ import { BIZ_INPUTS, bizDaysFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, YearMonthPicker } from '../bkUi'
 
 // The fields typed here (everything but POS); each store page shows them read-only.
-export const OVERVIEW_INPUTS = BIZ_INPUTS.filter((i) => i.key !== 'pos')
-const FIELDS = OVERVIEW_INPUTS.map((i) => i.field)
+// A store linked to SF reads its POS from SF's O.POST, so POS is not typed here; a store
+// that is NOT linked (no SF) gets a POS column right after P杯數.
+const NO_POS_INPUTS = BIZ_INPUTS.filter((i) => i.key !== 'pos')
+const inputsFor = (store) => (store.sf_store_id ? NO_POS_INPUTS : BIZ_INPUTS)
+const fieldsFor = (store) => inputsFor(store).map((i) => i.field)
+const ALL_FIELDS = BIZ_INPUTS.map((i) => i.field)
 
 const fmtCount = (n) => (n === null || n === undefined ? '' : round2(n).toLocaleString('en-AU', { maximumFractionDigits: 2 }))
 const th = 'border border-brand-100 px-1 py-1.5 text-[11px] font-semibold leading-tight text-gray-700'
@@ -81,7 +85,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
         const [storeId, date] = key.split('|')
         ;(byStore[storeId] ??= {})[date] = data[storeId]?.[date] ?? {}
       }
-      for (const [storeId, days] of Object.entries(byStore)) await saveSalesFields(storeId, days, FIELDS)
+      for (const [storeId, days] of Object.entries(byStore)) await saveSalesFields(storeId, days, fieldsFor(stores.find((s) => s.id === storeId)))
       setTouched({})
       setMsg('已儲存。')
       return true
@@ -105,7 +109,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
     const out = {}
     for (const s of stores) {
       out[s.id] = {}
-      for (const f of FIELDS) {
+      for (const f of ALL_FIELDS) {
         let sum = 0
         let any = false
         for (const d of dates) {
@@ -134,7 +138,6 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
 
   if (stores.length === 0) return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 › 分店管理 新增分店。</Notice>
 
-  const perStore = OVERVIEW_INPUTS.length
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -148,7 +151,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
         </div>
       </div>
       <Notice kind="info">
-        各分店的 P杯數、CV、Self O、SO杯數都在這裡輸入，分店頁面會直接讀這裡的數字（分店頁只能看，不能改）。POS 還是在各分店頁輸入（有連結 SF 的分店讀 SF 的 O.POST）。
+        各分店的 P杯數、CV、Self O、SO杯數都在這裡輸入，分店頁面會直接讀這裡的數字（分店頁只能看，不能改）。有連結 SF 的分店，POS 讀 SF 的 O.POST；沒有連結 SF 的分店，POS 欄也在這裡輸入（P杯數右邊）。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}
@@ -157,23 +160,23 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
         <LoadingSpinner />
       ) : (
         <div className="max-h-[70vh] overflow-auto rounded-xl border border-brand-100">
-          <table className="table-fixed border-collapse text-[13px]" style={{ width: DATE_W + stores.length * OVERVIEW_INPUTS.reduce((a, i) => a + colWidth(i.money), 0) }}>
+          <table className="table-fixed border-collapse text-[13px]" style={{ width: DATE_W + stores.reduce((sum, s) => sum + inputsFor(s).reduce((a, i) => a + colWidth(i.money), 0), 0) }}>
             <colgroup>
               <col style={{ width: DATE_W }} />
-              {stores.flatMap((s) => OVERVIEW_INPUTS.map(({ key, money }) => <col key={`${s.id}${key}`} style={{ width: colWidth(money) }} />))}
+              {stores.flatMap((s) => inputsFor(s).map(({ key, money }) => <col key={`${s.id}${key}`} style={{ width: colWidth(money) }} />))}
             </colgroup>
             <thead className="sticky top-0 z-20">
               <tr>
                 <th rowSpan={2} className={`${th} sticky left-0 z-30 bg-brand-100 text-left`}>日期</th>
                 {stores.map((s, si) => (
-                  <th key={s.id} colSpan={perStore} className={`${th} ${BLOCK_BG[si % 2]} text-center text-[13px] text-brand-900 ${split}`}>
+                  <th key={s.id} colSpan={inputsFor(s).length} className={`${th} ${BLOCK_BG[si % 2]} text-center text-[13px] text-brand-900 ${split}`}>
                     {s.name}
                   </th>
                 ))}
               </tr>
               <tr>
                 {stores.flatMap((s, si) =>
-                  OVERVIEW_INPUTS.map(({ key, label }, i) => (
+                  inputsFor(s).map(({ key, label }, i) => (
                     <th key={`${s.id}${key}`} className={`${th} ${BLOCK_BG[si % 2]} ${i === 0 ? split : ''}`}>
                       {label}
                     </th>
@@ -190,7 +193,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
                       <span className="font-medium">{Number(date.slice(8))}</span> <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
                     </td>
                     {stores.flatMap((s, si) =>
-                      OVERVIEW_INPUTS.map(({ key, field, money }, i) => {
+                      inputsFor(s).map(({ key, field, money }, i) => {
                         const day = data[s.id]?.[date] ?? {}
                         return (
                           <td key={`${s.id}${key}`} className={`${td} ${BLOCK_CELL_BG[si % 2]} ${i === 0 ? split : ''}`}>
@@ -226,7 +229,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
               <tr className="bg-brand-50 font-semibold">
                 <td className={`${td} sticky left-0 z-30 bg-brand-50 px-1.5 py-1.5`}>Total</td>
                 {stores.flatMap((s) =>
-                  OVERVIEW_INPUTS.map(({ key, field, money }, i) => (
+                  inputsFor(s).map(({ key, field, money }, i) => (
                     <td key={`${s.id}${key}`} className={`${td} ${i === 0 ? split : ''}`}>
                       <div className="px-1 py-1 text-right tabular-nums">{money ? fmtMoney(totals[s.id][field]) : fmtCount(totals[s.id][field])}</div>
                     </td>
