@@ -127,3 +127,22 @@ export async function downloadEmmaClaimTemplate() {
   ])
   await download(wb, 'BK匯入範本_積欠Emma.xlsx')
 }
+
+// 營業: one tab per 營業 store, same columns the 營業 tab exports (the two
+// computed ones, 總營業額 / 總杯數, are left out — they would be ignored).
+export async function downloadBizTemplate(salesStores) {
+  const wb = await newWorkbook()
+  for (const store of salesStores) {
+    const ws = wb.addWorksheet(sheetNameForStore(store.name))
+    ws.addRow([
+      store.sf_store_id
+        ? `${store.name} — 連結 SF：POS 讀 SF 的 O.POST，匯入時 POS 欄會略過（可留空）`
+        : `${store.name} — 營業：POS 手動輸入`,
+    ]).font = { italic: true, color: { argb: 'FF888888' } }
+    ws.addRow([])
+    const headers = ['日期', 'P杯數', 'POS', 'CV', 'Self O', 'SO杯數']
+    headerRow(ws, headers)
+    ws.addRow(['2026-10-05', 120, store.sf_store_id ? '' : 1500, 3, 400, 40])
+  }
+  await download(wb, 'BK匯入範本_營業.xlsx')
+}

@@ -4,6 +4,9 @@ import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import {
   RUJU_TARGET_LABELS,
+  brisbaneToday,
+  brisbaneTodayStr,
+  monthStart,
   cashDaysFromRows,
   computeCashDay,
   computeCashSummary,
@@ -19,7 +22,7 @@ import {
   toggleStocked,
   weekdayOf,
 } from '../bkUtils'
-import { loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance } from '../bkData'
+import { listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance } from '../bkData'
 import { exportCashXlsx } from '../bkExcel'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
@@ -37,64 +40,136 @@ function SummaryCard({ label, value, hint, tone = 'text-brand-900' }) {
   )
 }
 
-// A coloured side list (D/W, Icost, Ucost, 入金) with its own Total.
-function Block({ title, tone, headers, rows, total, onNote }) {
+// The side lists (D/W, 入金, Icost, Ucost, 其他收入) as tiles: only the month's
+// total shows; clicking opens the detail window (EntryDetailModal below).
+function TotalTile({ title, tone, total, count, onOpen }) {
   return (
-    <div className={`overflow-hidden rounded-xl border ${tone.border}`}>
-      <div className={`px-3 py-1.5 text-sm font-semibold ${tone.head}`}>{title}</div>
-      <table className="w-full text-sm">
-        <thead className="bg-white text-left text-gray-500">
-          <tr>
-            {headers.map((h, i) => (
-              <th
-                key={h}
-                className={`px-3 py-1.5 font-medium ${
-                  i === headers.length - 1 ? 'whitespace-nowrap text-right' : i === 1 ? 'w-full' : 'whitespace-nowrap'
-                }`}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={headers.length} className="px-3 py-2 text-center text-gray-300">
-                —
-              </td>
-            </tr>
-          )}
-          {rows.map((r) => (
-            <tr key={r.id} className="border-t border-gray-100">
-              {r.cells.map((c, i) => (
-                <td
-                  key={i}
-                  className={`px-3 py-1.5 ${
-                    i === r.cells.length - 1
-                      ? 'whitespace-nowrap text-right tabular-nums'
-                      : i === 1
-                        ? 'break-words'
-                        : 'whitespace-nowrap'
-                  }`}
-                >
-                  {c}
-                  {i === r.cells.length - 1 && <NoteButton note={r.note} onOpen={onNote} />}
-                </td>
-              ))}
-            </tr>
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition hover:shadow-sm ${tone.border} ${tone.foot}`}
+      title="點擊查看明細"
+    >
+      <span>
+        <span className={`block text-sm font-semibold ${tone.head.split(' ')[1]}`}>{title}</span>
+        <span className="text-[11px] text-gray-500">{count} 筆 · 點擊看明細</span>
+      </span>
+      <span className="text-xl font-semibold tabular-nums text-gray-800">{fmtMoney(total)}</span>
+    </button>
+  )
+}
+
+const KIND_LABEL = { deposit: 'Deposit', withdraw: 'Withdraw' }
+
+// What the Description column shows: D/W and 入金 have no free-text description
+// of their own as the primary thing, so their type leads.
+function entryDescription(kindKey, e) {
+  const desc = (e.description ?? '').trim()
+  if (kindKey === 'dw') return desc ? `${KIND_LABEL[e.kind]} · ${desc}` : KIND_LABEL[e.kind]
+  if (kindKey === 'ruju') {
+    const target = RUJU_TARGET_LABELS[e.ruju_target] ?? ''
+    return desc ? `${target} · ${desc}` : target
+  }
+  return desc
+}
+
+function EntryDetailModal({ detail, entries, storeId, onClose, onNote }) {
+  const [range, setRange] = useState('month') // 'month' | 'fy'
+  const [fyRows, setFyRows] = useState(null)
+  const [error, setError] = useState('')
+  const t = brisbaneToday()
+  const fyStartYear = t.month >= 7 ? t.year : t.year - 1
+  const fyFrom = monthStart(fyStartYear, 7)
+  const today = brisbaneTodayStr()
+
+  useEffect(() => {
+    if (range !== 'fy' || fyRows) return
+    let cancelled = false
+    listEntries({ storeId, from: fyFrom, to: today, kinds: detail.kinds })
+      .then((r) => !cancelled && setFyRows(r))
+      .catch((e) => !cancelled && setError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [range, fyRows, storeId, fyFrom, today, detail.kinds])
+
+  const monthRows = entries.filter((e) => detail.kinds.includes(e.kind))
+  const rows = (range === 'month' ? monthRows : fyRows ?? [])
+    .slice()
+    .sort((a, b) => a.entry_date.localeCompare(b.entry_date) || String(a.created_at).localeCompare(String(b.created_at)))
+  const amountOf = (e) => (detail.key === 'dw' ? dwSigned(e) : Number(e.amount))
+  const total = rows.reduce((n, e) => n + amountOf(e), 0)
+  const loading = range === 'fy' && !fyRows && !error
+
+  return (
+    <Modal open onClose={onClose} title={`${detail.title} — 明細`} footer={<Button onClick={onClose}>關閉</Button>}>
+      <div className="space-y-3 text-sm">
+        <div className="flex gap-1 rounded-lg bg-brand-50 p-1">
+          {[
+            ['month', '當月'],
+            ['fy', '會計年度'],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setRange(k)}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                range === k ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-800/70 hover:text-brand-700'
+              }`}
+            >
+              {label}
+            </button>
           ))}
-        </tbody>
-        <tfoot>
-          <tr className={`border-t font-semibold ${tone.foot}`}>
-            <td className="px-3 py-1.5" colSpan={headers.length - 1}>
-              Total
-            </td>
-            <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{fmtMoney(total)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
+        </div>
+        {range === 'fy' && (
+          <div className="text-xs text-gray-500">
+            會計年度：{fyFrom} ～ {today}（今年 7 月 1 日起到今天）
+          </div>
+        )}
+        {error && <Notice kind="error">{error}</Notice>}
+        {loading ? (
+          <LoadingSpinner />
+        ) : (
+          <div className="max-h-[55vh] overflow-auto rounded-lg border border-gray-100">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white text-left text-xs text-gray-500">
+                <tr>
+                  <th className="whitespace-nowrap px-3 py-1.5 font-medium">日期</th>
+                  <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">金額</th>
+                  <th className="w-full px-3 py-1.5 font-medium">Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-3 text-center text-gray-300">
+                      —
+                    </td>
+                  </tr>
+                )}
+                {rows.map((e) => (
+                  <tr key={e.id} className="border-t border-gray-100">
+                    <td className="whitespace-nowrap px-3 py-1.5">{range === 'month' ? e.entry_date.slice(5) : e.entry_date}</td>
+                    <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{fmtMoney(amountOf(e))}</td>
+                    <td className="break-words px-3 py-1.5">
+                      {entryDescription(detail.key, e)}
+                      <NoteButton note={e.note} onOpen={onNote} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t bg-brand-50 font-semibold">
+                  <td className="px-3 py-1.5">Total</td>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{fmtMoney(total)}</td>
+                  <td className="px-3 py-1.5 text-xs font-normal text-gray-500">{rows.length} 筆</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -105,6 +180,14 @@ const TONES = {
   ruju: { border: 'border-emerald-200', head: 'bg-emerald-100 text-emerald-900', foot: 'bg-emerald-50 border-emerald-200' },
   income: { border: 'border-teal-200', head: 'bg-teal-100 text-teal-900', foot: 'bg-teal-50 border-teal-200' },
 }
+
+const SIDE_LISTS = [
+  { key: 'dw', title: 'D/W', kinds: ['deposit', 'withdraw'], total: 'dw' },
+  { key: 'ruju', title: '入金', kinds: ['ruju'], total: 'ruju' },
+  { key: 'icost', title: 'Icost', kinds: ['icost'], total: 'icost' },
+  { key: 'ucost', title: 'Ucost', kinds: ['ucost'], total: 'ucost' },
+  { key: 'income', title: '其他收入', kinds: ['other_income'], total: 'otherIncome' },
+]
 
 // 分店現金: COH / UCOH / D / P/L for one store+month, the day-by-day table you
 // type 實 CA and D into, and the month's 收支 lists beside it.
@@ -124,6 +207,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [balanceForm, setBalanceForm] = useState(null)
   const [dInfo, setDInfo] = useState(null) // date whose 可 D 金額 popup is open
   const [importFile, setImportFile] = useState(null)
+  const [detail, setDetail] = useState(null) // { key, title, kinds } of the open side-list window
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -438,67 +522,17 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
               </table>
             </div>
 
-            <div className="grid min-w-0 flex-1 gap-4">
-              <Block
-                title="D/W"
-                tone={TONES.dw}
-                headers={['日期', '類型', '金額']}
-                total={summary.entryTotals.dw}
-                onNote={setNoteText}
-                rows={byKind('deposit', 'withdraw').map((e) => ({
-                  id: e.id,
-                  note: e.note,
-                  cells: [e.entry_date.slice(5), e.kind === 'deposit' ? 'Deposit' : 'Withdraw', fmtMoney(dwSigned(e))],
-                }))}
-              />
-              <Block
-                title="入金"
-                tone={TONES.ruju}
-                headers={['日期', '類型', '金額']}
-                total={summary.entryTotals.ruju}
-                onNote={setNoteText}
-                rows={byKind('ruju').map((e) => ({
-                  id: e.id,
-                  note: e.note,
-                  cells: [e.entry_date.slice(5), RUJU_TARGET_LABELS[e.ruju_target], fmtMoney(Number(e.amount))],
-                }))}
-              />
-              <Block
-                title="Icost"
-                tone={TONES.icost}
-                headers={['日期', 'Description', '金額']}
-                total={summary.entryTotals.icost}
-                onNote={setNoteText}
-                rows={byKind('icost').map((e) => ({
-                  id: e.id,
-                  note: e.note,
-                  cells: [e.entry_date.slice(5), e.description, fmtMoney(Number(e.amount))],
-                }))}
-              />
-              <Block
-                title="Ucost"
-                tone={TONES.ucost}
-                headers={['日期', 'Description', '金額']}
-                total={summary.entryTotals.ucost}
-                onNote={setNoteText}
-                rows={byKind('ucost').map((e) => ({
-                  id: e.id,
-                  note: e.note,
-                  cells: [e.entry_date.slice(5), e.description, fmtMoney(Number(e.amount))],
-                }))}
-              />
-              <Block
-                title="其他收入"
-                tone={TONES.income}
-                headers={['日期', 'Description', '金額']}
-                total={summary.entryTotals.otherIncome}
-                onNote={setNoteText}
-                rows={byKind('other_income').map((e) => ({
-                  id: e.id,
-                  note: e.note,
-                  cells: [e.entry_date.slice(5), e.description, fmtMoney(Number(e.amount))],
-                }))}
-              />
+            <div className="grid min-w-0 flex-1 content-start gap-3 xl:max-w-sm">
+              {SIDE_LISTS.map(({ key, title, tone, kinds, total }) => (
+                <TotalTile
+                  key={key}
+                  title={title}
+                  tone={TONES[key]}
+                  total={summary.entryTotals[total]}
+                  count={byKind(...kinds).length}
+                  onOpen={() => setDetail({ key, title, kinds })}
+                />
+              ))}
             </div>
           </div>
         </>
@@ -514,6 +548,10 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           }}
         />
       </Modal>
+
+      {detail && (
+        <EntryDetailModal detail={detail} entries={entries} storeId={store.id} onClose={() => setDetail(null)} onNote={setNoteText} />
+      )}
 
       <Modal open={!!dInfo} onClose={() => setDInfo(null)} title={`可 D 金額 — ${dInfo ?? ''}`} footer={<Button onClick={() => setDInfo(null)}>關閉</Button>}>
         {dInfo && (

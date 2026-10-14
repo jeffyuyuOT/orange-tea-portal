@@ -7,6 +7,7 @@ import { loadDividendData } from '../bkDividendData'
 import { exportBkBackup, restoreBkBackup } from '../bkBackup'
 import AutoBackupPanel from './AutoBackupPanel'
 import {
+  downloadBizTemplate,
   downloadDividendTemplate,
   downloadEmmaClaimTemplate,
   downloadJeffOwedTemplate,
@@ -15,6 +16,7 @@ import {
   sheetNameForStore,
 } from '../bkImportTemplates'
 import BackfillGridImport from './BackfillGridImport'
+import BizGridImport from './BizGridImport'
 import EntriesExcelImport from '../ucash/EntriesExcelImport'
 import DividendExcelImport from '../bonus/DividendExcelImport'
 import JeffOwedExcelImport from './JeffOwedExcelImport'
@@ -35,6 +37,7 @@ const SUBTABS = [
 // type columns), so it needs the full store list; the others are generic.
 const TEMPLATES = [
   ['SF', (stores) => downloadSfTemplate(stores)],
+  ['營業', (stores, salesStores) => downloadBizTemplate(salesStores)],
   ['U帳', () => downloadUAccountTemplate()],
   ['收成', () => downloadDividendTemplate()],
   ['積欠 Jeff', () => downloadJeffOwedTemplate()],
@@ -46,6 +49,7 @@ const TEMPLATES = [
 const ROUTES = [
   ['jeff', /jeff/i, '積欠 Jeff'],
   ['emma', /emma/i, '積欠 Emma'],
+  ['biz', /營業|biz/i, '營業'],
   ['bonus', /收成|dividend|bonus/i, '收成'],
   ['u', /u\s*帳|u\s*account|ucash|分店現金|收支/i, 'U帳'],
   // Not \bsf\b: JS treats "_" as a word character, so "範本_SF" has no word
@@ -222,12 +226,17 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
               </select>
               <Button
                 variant="secondary"
-                disabled={templateChoice === 'SF' && stores.length === 0}
-                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores)}
+                disabled={(templateChoice === 'SF' && stores.length === 0) || (templateChoice === '營業' && salesStores.length === 0)}
+                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores, salesStores)}
               >
                 下載範本
               </Button>
             </div>
+            {templateChoice === '營業' && (
+              <div className="text-xs text-gray-500">
+                {salesStores.length === 0 ? '還沒有任何營業分店，無法產生營業範本。' : '營業範本每個營業分店各自一個分頁，欄位：日期、P杯數、POS、CV、Self O、SO杯數。'}
+              </div>
+            )}
             {templateChoice === 'SF' && (
               <div className="text-xs text-gray-500">
                 {stores.length === 0 ? '還沒有任何分店，無法產生 SF 範本。' : 'SF 範本每個分店各自一個分頁，欄位是該分店目前設定的 payment type。'}
@@ -238,7 +247,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
           <div className="space-y-3 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-sm font-semibold text-brand-900">上傳檔案</div>
             <div className="text-xs text-gray-500">
-              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
+              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「營業」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
             </div>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
               選擇 Excel 檔案
@@ -291,6 +300,18 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
                       stores={stores}
                       onClose={reset}
                       onImported={(count) => imported(count, 'SF')}
+                    />
+                  ))}
+
+                {kind === 'biz' &&
+                  (salesStores.length === 0 ? (
+                    <Notice kind="info">還沒有任何營業分店，無法匯入營業。</Notice>
+                  ) : (
+                    <BizGridImport
+                      file={file}
+                      salesStores={salesStores}
+                      onClose={reset}
+                      onImported={(count) => imported(count, '營業')}
                     />
                   ))}
 
