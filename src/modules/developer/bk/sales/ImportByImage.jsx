@@ -211,7 +211,7 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
         )}
 
         {/* original picture beside the numbers, so each figure can be checked at a glance; click = full size in a new tab */}
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:items-start">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,2.6fr)_minmax(0,1fr)] md:items-start">
           {imageUrl && (
             <a
               href={imageUrl}
@@ -236,37 +236,37 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
               {!draft.date && <span className="text-xs text-red-600">沒有讀到日期，請選一天</span>}
             </label>
 
-            <table className="w-full table-fixed border-collapse text-sm">
+            <table className="w-full table-fixed border-collapse text-[13px]">
               <thead>
                 <tr className="bg-brand-100 text-left text-xs">
-                  <th className="border border-brand-100 px-2 py-1">圖片上的名稱</th>
-                  <th className="w-32 border border-brand-100 px-2 py-1 text-right">金額</th>
-                  <th className="border border-brand-100 px-2 py-1">填到</th>
+                  <th className="w-[52%] border border-brand-100 px-1.5 py-1" title="滑鼠移到名稱上可以看會填到哪一格">名稱</th>
+                  <th className="border border-brand-100 px-1.5 py-1 text-right">金額</th>
                 </tr>
               </thead>
               <tbody>
-                {draft.lines.map((l, i) => (
+                {draft.lines.map((l, i) => {
+                  const t = targetOf(l.label, view)
+                  return (
                   <tr key={i}>
-                    <td className="border border-gray-100 p-0">
+                    <td className="border border-gray-100 p-0" title={t.ok ? `填到：${t.text}` : t.text}>
                       <input
                         value={l.label}
                         onChange={(e) => setLine(i, { label: e.target.value })}
-                        className="w-full bg-transparent px-2 py-1 focus:bg-white focus:outline-none"
+                        className={`w-full bg-transparent px-1.5 py-1 focus:bg-white focus:outline-none ${t.ok ? '' : 'text-red-500 line-through decoration-red-300'}`}
                         aria-label="名稱"
                       />
                     </td>
                     <td className="border border-gray-100 p-0">
                       <MoneyInput value={l.amount} onChange={(v) => setLine(i, { amount: v })} />
                     </td>
-                    <td className="border border-gray-100 px-2 py-1 text-xs">{targetOf(l.label, view)}</td>
                   </tr>
-                ))}
+                  )
+                })}
                 <tr className="bg-brand-50 font-semibold">
-                  <td className="border border-gray-100 px-2 py-1">Total</td>
+                  <td className="border border-gray-100 px-1.5 py-1" title="填到：O.POST">Total</td>
                   <td className="border border-gray-100 p-0">
                     <MoneyInput value={draft.total} onChange={(v) => setDraft((d) => ({ ...d, total: v }))} />
                   </td>
-                  <td className="border border-gray-100 px-2 py-1 text-xs">O.POST</td>
                 </tr>
               </tbody>
             </table>
@@ -324,15 +324,15 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
   )
 }
 
-// What a picture line fills: Cash -> O.CA, Eftpos lines -> POS eftpos, a matched
-// payment type, or "不會匯入".
+// What a picture line fills (shown as a hover tooltip on the name): Cash -> O.CA,
+// Eftpos lines -> POS eftpos, a matched payment type, or "不會匯入" (ok:false).
 function targetOf(label, view) {
   const key = String(label).replace(/\s+/g, ' ').trim().toLowerCase()
-  if (key === 'cash') return 'O.CA'
+  if (key === 'cash') return { ok: true, text: 'O.CA' }
   if (key === 'eftpos' || key === 'eftpos offline') {
     const m = view.merged.find((l) => l.label === 'POS eftpos')
-    return m?.target ? `${m.target.name}（Eftpos 相加）` : <span className="text-gray-400">不會匯入（沒有 POS eftpos）</span>
+    return m?.target ? { ok: true, text: `${m.target.name}（Eftpos 相加）` } : { ok: false, text: '不會匯入（沒有 POS eftpos）' }
   }
   const m = view.merged.find((l) => l.label === label)
-  return m?.target?.name ?? <span className="text-gray-400">不會匯入（沒有這個 payment type）</span>
+  return m?.target ? { ok: true, text: m.target.name } : { ok: false, text: '不會匯入（沒有這個 payment type）' }
 }
