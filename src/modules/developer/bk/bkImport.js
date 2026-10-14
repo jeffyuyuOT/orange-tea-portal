@@ -433,6 +433,43 @@ export function parseCashDayRows(rows, { year, month }) {
   }
 }
 
+// 分店現金 files carry a Store column (the downloadable template does), so the
+// store comes from each row, not from a picker. Splits a sheet's rows into one
+// group per known store (each group still has the header rows on top, ready for
+// parseCashDayRows). Rows whose store is blank or not in `stores` are counted in
+// `unknown` and never imported. `hasStoreColumn` false = old-style file with no
+// Store column (the caller must then ask which store it is for).
+export function splitCashRowsByStore(rows, stores) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) return { hasStoreColumn: false, groups: [], unknown: [] }
+  const headers = rows[headerIdx]
+  const storeCol = headers.findIndex((h) => typeof h === 'string' && ['store', '分店'].includes(norm(h)))
+  if (storeCol < 0) return { hasStoreColumn: false, groups: [], unknown: [] }
+  const dateCol = headers.findIndex((h) => typeof h === 'string' && DATE_HEADERS.has(norm(h)))
+  const head = rows.slice(0, headerIdx + 1)
+  const groups = new Map() // store id -> { store, rows }
+  const unknown = new Map() // name -> count
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    if (!row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')) continue
+    const dateCell = row[dateCol]
+    if (typeof dateCell === 'string' && SUMMARY_LABELS.test(dateCell.trim())) continue
+    const store = findStoreByName(stores, row[storeCol])
+    if (!store) {
+      const name = String(row[storeCol] ?? '').trim() || '（空白）'
+      unknown.set(name, (unknown.get(name) ?? 0) + 1)
+      continue
+    }
+    if (!groups.has(store.id)) groups.set(store.id, { store, rows: [...head] })
+    groups.get(store.id).rows.push(row)
+  }
+  return {
+    hasStoreColumn: true,
+    groups: [...groups.values()],
+    unknown: [...unknown].map(([name, count]) => ({ name, count })),
+  }
+}
+
 // U帳 > 收支 (the ledger) and 分店transfer. Not month-scoped — each row
 // carries its own date, and rows are independent records rather than a
 // per-day grid, so parsing produces a flat candidate list instead of an
