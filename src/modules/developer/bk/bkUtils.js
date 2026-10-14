@@ -286,9 +286,11 @@ export const RUJU_TARGET_LABELS = { jeff_bank: '入 Jeff bank', mao_safe: '入 M
 //   actual   實 CA, typed
 //   pm       +/−  = 實 CA − O.CA  (only once 實 CA is typed)
 //   d        D 欄, typed
-//   sfCash   = O.CA − D
-export function computeCashDay(oCa, cashDay) {
+//   sfCash   = (O.CA + that day's 其他收入) − D  — i.e. maxD − D, so it never
+//              goes negative for a D within the limit. O.CA itself is unchanged.
+export function computeCashDay(oCa, cashDay, otherIncome = 0) {
   const o = toNum(oCa)
+  const income = otherIncome ?? 0
   const actual = toNum(cashDay?.actual_ca)
   const d = toNum(cashDay?.d_amount)
   return {
@@ -297,11 +299,12 @@ export function computeCashDay(oCa, cashDay) {
     pm: actual === null ? null : round2(actual - (o ?? 0)),
     d,
     stocked: !!cashDay?.d_stocked,
-    sfCash: cashValue(o, d),
+    sfCash: o === null && income === 0 ? null : round2((o ?? 0) + income - (d ?? 0)),
   }
 }
 
 // The four header numbers + column totals for one month.
+//   (SF cash here = O.CA + 其他收入 − D, see computeCashDay)
 //   COH  = opening COH  + Σ SF cash − Σ deposit + Σ withdraw − Σ Icost
 //   UCOH = opening UCOH + Σ D + Σ(+/−) − Σ Ucost − Σ 入金
 //   D    = Σ D of days whose 入庫 is NOT ticked

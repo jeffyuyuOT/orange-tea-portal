@@ -181,7 +181,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     () =>
       dates.map((date) => ({
         date,
-        ...computeCashDay(sfMap[date], cashDays[date]),
+        ...computeCashDay(sfMap[date], cashDays[date], incomeMap[date] ?? 0),
         income: incomeMap[date] ?? 0,
         maxD: dMaxAmount(sfMap[date], incomeMap[date]),
       })),
@@ -417,7 +417,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                             title="勾選後，這天以前的日期也會自動勾選"
                           />
                         </td>
-                        <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-700`} title="O.CA − D">
+                        <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-700`} title="O.CA + 其他收入 − D">
                           {fmtMoney(r.sfCash)}
                         </td>
                       </tr>
