@@ -14,7 +14,7 @@ const SUBTABS = [
 // jumping "載入" from there comes back in here via `jumpTarget` (set by
 // BkPage) rather than a local sub-tab. 分店現金 stays mounted while 新增編輯收支
 // is open so typed-in 實 CA / D values aren't lost.
-export default function UAccountTab({ stores, topActive = true, jumpTarget, onJumpHandled }) {
+export default function UAccountTab({ stores, topActive = true, jumpTarget, onJumpHandled, onTabDirty, registerSaver }) {
   const today = brisbaneToday()
   const [sub, setSub] = useState('cash')
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
@@ -24,9 +24,13 @@ export default function UAccountTab({ stores, topActive = true, jumpTarget, onJu
   // 分店現金 re-reads its lists.
   const [entriesVersion, setEntriesVersion] = useState(0)
   const dirtyRef = useRef(false)
+  const tabDirtyRef = useRef(onTabDirty)
+  tabDirtyRef.current = onTabDirty
   const onDirtyChange = useCallback((d) => {
     dirtyRef.current = d
+    tabDirtyRef.current?.(d)
   }, [])
+  const onSaveReady = useCallback((fn) => registerSaver?.('u', fn), [registerSaver])
 
   const navigate = useCallback((next) => {
     if (dirtyRef.current && !window.confirm('分店現金有未儲存的變更，確定要離開並捨棄嗎？')) return false
@@ -62,6 +66,7 @@ export default function UAccountTab({ stores, topActive = true, jumpTarget, onJu
           entriesVersion={entriesVersion}
           onNavigate={navigate}
           onDirtyChange={onDirtyChange}
+          onSaveReady={onSaveReady}
           onEntriesChanged={bump}
         />
       </div>

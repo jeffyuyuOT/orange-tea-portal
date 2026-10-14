@@ -194,7 +194,7 @@ const SIDE_LISTS = [
 
 // 分店現金: COH / UCOH / D / P/L for one store+month, the day-by-day table you
 // type 實 CA and D into, and the month's 收支 lists beside it.
-export default function StoreCashPanel({ stores, store, year, month, active, entriesVersion, onNavigate, onDirtyChange, onEntriesChanged }) {
+export default function StoreCashPanel({ stores, store, year, month, active, entriesVersion, onNavigate, onDirtyChange, onSaveReady, onEntriesChanged }) {
   const [open, setOpen] = useState({ coh: 0, ucoh: 0 })
   const [sfMap, setSfMap] = useState({})
   const [cashDays, setCashDays] = useState({})
@@ -217,6 +217,14 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
+
+  // Hand the parent this sheet's save (→ true / false) for BK's 儲存 button.
+  const saveRef = useRef(null)
+  saveRef.current = save
+  useEffect(() => {
+    onSaveReady?.(() => saveRef.current())
+    return () => onSaveReady?.(null)
+  }, [onSaveReady])
 
   // Full load whenever the store / month changes.
   useEffect(() => {
@@ -342,7 +350,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           .map((r) => `${r.date.slice(5)}（D ${fmtMoney(r.d)} > 可 D ${fmtMoney(r.maxD)}）`)
           .join('、')}`
       )
-      return
+      return false
     }
     setSaving(true)
     setError('')
@@ -351,8 +359,10 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       await saveCashDays(store.id, cashDays)
       setDirty(false)
       setMsg('已儲存。')
+      return true
     } catch (e) {
       setError(e.message)
+      return false
     } finally {
       setSaving(false)
     }

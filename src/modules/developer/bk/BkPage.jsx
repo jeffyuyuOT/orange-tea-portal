@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import { loadStores } from './bkData'
 import { loadSalesStores } from './bkSalesData'
@@ -47,6 +48,8 @@ const TABS = [
   ['settings', '系統設置'],
 ]
 
+const TAB_NAMES = { sf: 'Sales figure', biz: '營業', u: 'U帳' }
+
 export default function BkPage() {
   const [tab, setTab] = useState('sf')
   const [visited, setVisited] = useState(() => new Set(['sf']))
@@ -56,6 +59,55 @@ export default function BkPage() {
   const [typesVersion, setTypesVersion] = useState(0)
   const [sfJumpTarget, setSfJumpTarget] = useState(null)
   const [cashJumpTarget, setCashJumpTarget] = useState(null)
+
+  // 儲存 (next to the title): every tab with typing in it reports "dirty" here
+  // and hands over its own save function, so one click saves them all.
+  //   sf   → saves the open month as a draft (not submitted)
+  //   biz  → 營業's store sheet and 手動輸入總頁
+  //   u    → 分店現金
+  const savers = useRef({})
+  const [dirtyTabs, setDirtyTabs] = useState({})
+  const [saveAllBusy, setSaveAllBusy] = useState(false)
+  const [saveAllMsg, setSaveAllMsg] = useState(null) // { kind, text }
+  const registerSaver = useCallback((key, fn) => {
+    if (fn) savers.current[key] = fn
+    else delete savers.current[key]
+  }, [])
+  const setTabDirty = useCallback((key, d) => {
+    setDirtyTabs((prev) => (!!prev[key] === !!d ? prev : { ...prev, [key]: !!d }))
+  }, [])
+  const onSfDirty = useCallback((d) => setTabDirty('sf', d), [setTabDirty])
+  const onBizDirty = useCallback((d) => setTabDirty('biz', d), [setTabDirty])
+  const onUDirty = useCallback((d) => setTabDirty('u', d), [setTabDirty])
+  const dirtyKeys = Object.keys(dirtyTabs).filter((k) => dirtyTabs[k])
+
+  async function saveAll() {
+    setSaveAllBusy(true)
+    setSaveAllMsg(null)
+    const done = []
+    const failed = []
+    for (const key of dirtyKeys) {
+      const fn = savers.current[key]
+      if (!fn) continue
+      try {
+        if (await fn()) done.push(TAB_NAMES[key])
+        else failed.push(TAB_NAMES[key])
+      } catch {
+        failed.push(TAB_NAMES[key])
+      }
+    }
+    setSaveAllBusy(false)
+    if (failed.length > 0) {
+      setSaveAllMsg({ kind: 'error', text: `${failed.join('、')} 沒有儲存成功，請到該分頁查看原因。${done.length ? `已儲存：${done.join('、')}。` : ''}` })
+    } else {
+      setSaveAllMsg({ kind: 'ok', text: `已儲存：${done.join('、')}。` })
+    }
+  }
+  useEffect(() => {
+    if (saveAllMsg?.kind !== 'ok') return
+    const t = setTimeout(() => setSaveAllMsg(null), 4000)
+    return () => clearTimeout(t)
+  }, [saveAllMsg])
 
   // Re-read BK's store list; called after 分店管理 adds / renames / deletes one.
   const reloadStores = useCallback(async () => {
@@ -82,7 +134,12 @@ export default function BkPage() {
     reloadSalesStores()
   }, [reloadStores, reloadSalesStores])
 
-  function select(key) {
+  async function select(key) {
+    // Leaving Sales figure with typing in it: keep it as a draft first, so the
+    // other tabs (U帳's O.CA, …) see it without a 提交. Stay if that fails.
+    if (tab === 'sf' && key !== 'sf' && dirtyTabs.sf && savers.current.sf) {
+      if (!(await savers.current.sf())) return
+    }
     setTab(key)
     setVisited((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
   }
@@ -98,7 +155,15 @@ export default function BkPage() {
 
   return (
     <div className="font-zh mx-auto w-full max-w-[1600px] space-y-4 p-4">
-      <h1 className="text-xl font-semibold text-brand-900">BK 記帳</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-semibold text-brand-900">BK 記帳</h1>
+        <Button onClick={saveAll} disabled={saveAllBusy || dirtyKeys.length === 0}>
+          {saveAllBusy ? '儲存中…' : dirtyKeys.length ? `儲存（${dirtyKeys.map((k) => TAB_NAMES[k]).join('、')}）` : '儲存'}
+        </Button>
+        {saveAllMsg && (
+          <span className={`text-sm ${saveAllMsg.kind === 'error' ? 'text-red-600' : 'text-green-700'}`}>{saveAllMsg.text}</span>
+        )}
+      </div>
       <BackupGuard />
 
       <div className="flex gap-1 overflow-x-auto rounded-xl bg-brand-50 p-1">
@@ -131,12 +196,14 @@ export default function BkPage() {
                 jumpTarget={sfJumpTarget}
                 onJumpHandled={() => setSfJumpTarget(null)}
                 onStoresChanged={reloadStores}
+                onTabDirty={onSfDirty}
+                registerSaver={registerSaver}
               />
             </div>
           )}
           {visited.has('biz') && (
             <div className={tab === 'biz' ? '' : 'hidden'}>
-              <BizTab stores={salesStores} topActive={tab === 'biz'} />
+              <BizTab stores={salesStores} topActive={tab === 'biz'} onTabDirty={onBizDirty} registerSaver={registerSaver} />
             </div>
           )}
           {visited.has('u') && (
@@ -146,6 +213,8 @@ export default function BkPage() {
                 topActive={tab === 'u'}
                 jumpTarget={cashJumpTarget}
                 onJumpHandled={() => setCashJumpTarget(null)}
+                onTabDirty={onUDirty}
+                registerSaver={registerSaver}
               />
             </div>
           )}

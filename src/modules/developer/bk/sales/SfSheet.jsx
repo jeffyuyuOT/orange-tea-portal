@@ -26,8 +26,9 @@ import {
   sfSubmitProblems,
   weekdayOf,
 } from '../bkUtils'
-import { loadCashDays, loadPaymentTypes, loadSfDataDayCounts, loadSfMonth, saveSfMonth } from '../bkData'
+import { loadCashDays, loadPaymentTypes, loadSfMonth, saveSfMonth } from '../bkData'
 import { exportSfXlsx } from '../bkExcel'
+import { loadStoreMonthForSubmit, submitStoreMonth } from './sfSubmitAll'
 import { loadSalesMonth } from '../bkSalesData'
 import { selfOMapFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
@@ -44,7 +45,7 @@ const emptyDay = () => ({ o_ca: '', o_post: '', total: '', amounts: {} })
 // cell falls back to 營業's Self O for that day (grey placeholder); a figure typed
 // here always wins and can be changed by hand. When both exist and differ, the
 // cell gets a ⚠ — click it to see the 營業 number.
-export default function SfSheet({ stores, salesStores, store, year, month, typesVersion, active, onNavigate, onDirtyChange }) {
+export default function SfSheet({ stores, salesStores, store, year, month, typesVersion, active, onNavigate, onDirtyChange, onSaveReady }) {
   const [types, setTypes] = useState([])
   const [sfMonth, setSfMonth] = useState(null)
   const [days, setDays] = useState({})
@@ -63,10 +64,24 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
   const [menuOpen, setMenuOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const fileInputRef = useRef(null)
+  // The saved month row of what is on screen (keyed, so a save can never use another store / month's row)
+  const monthKey = `${store.id}|${year}|${month}`
+  const sfMonthRef = useRef({ key: '', month: null })
+  const saveQueue = useRef(Promise.resolve())
 
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
+
+  // Hand the parent a "save as draft" function (→ true / false): used when
+  // leaving the store / month and by BK's 儲存 button. Unsubmitted typing is kept
+  // as a draft, so nothing is lost and nothing needs asking.
+  const persistRef = useRef(null)
+  persistRef.current = persist
+  useEffect(() => {
+    onSaveReady?.(() => persistRef.current(false))
+    return () => onSaveReady?.(null)
+  }, [onSaveReady])
 
   // Columns of this store (re-read after 資料維護 changes them).
   useEffect(() => {
@@ -95,6 +110,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
         ])
         if (cancelled) return
         setSfMonth(sf.sfMonth)
+        sfMonthRef.current = { key: monthKey, month: sf.sfMonth }
         setDays(sfDaysFromRows(sf.days))
         setDMap(dMapFromRows(cash))
         setSelfOMap(selfOMapFromRows(biz))
@@ -190,58 +206,107 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
       </button>
     ) : null
 
-  async function persist(submit) {
+  // Saves run one after another (typing autosave, leaving a store, 儲存, 提交 can overlap).
+  function persist(submit, opts) {
+    const run = () => doPersist(submit, opts)
+    const p = saveQueue.current.then(run, run)
+    saveQueue.current = p.catch(() => {})
+    return p
+  }
+
+  async function doPersist(submit, { silent = false } = {}) {
     setSaving(true)
     setError('')
-    setMsg('')
+    if (!silent) setMsg('')
     try {
       // Total is never typed: store the calculated one (Pos total + Self order kiosk).
       const daysToSave = Object.fromEntries(
         dates.map((date, i) => [date, { ...(days[date] ?? emptyDay()), total: numToInput(rows[i].total) }])
       )
-      const saved = await saveSfMonth({ storeId: store.id, year, month, existing: sfMonth, days: daysToSave, submit })
+      const existing = sfMonthRef.current.key === monthKey ? sfMonthRef.current.month : sfMonth
+      const saved = await saveSfMonth({ storeId: store.id, year, month, existing, days: daysToSave, submit })
+      sfMonthRef.current = { key: monthKey, month: saved }
       setSfMonth(saved)
       setDirty(false)
-      setMsg(submit ? '已提交。' : '已儲存（狀態：未提交）。')
+      if (!silent) setMsg(submit ? '已提交。' : '已儲存（狀態：未提交）。')
+      return true
     } catch (e) {
       setError(e.message)
+      return false
     } finally {
       setSaving(false)
     }
   }
 
-  // Submit checks: (1) a day with any other main payment figure needs Cash;
-  // (2) every store should have the same number of days with data this month —
-  // that one only warns (a store may genuinely have fewer days), 仍要提交 goes on.
+  // Typing is kept as a draft by itself a moment after you stop (so U帳 sees
+  // the new O.CA without a 提交). Silent: no message.
+  useEffect(() => {
+    if (!dirty || loading) return
+    const t = setTimeout(() => persistRef.current?.(false, { silent: true }), 1200)
+    return () => clearTimeout(t)
+  }, [dirty, days, loading])
+
+  // 提交 = submit ALL stores' month. Checks (all stores): (1) a day with any other
+  // main payment figure needs Cash; (2) every store should have the same number
+  // of days with data — that one only warns, 仍要提交 goes on.
+  async function loadOthers() {
+    const others = stores.filter((s) => s.id !== store.id)
+    return Promise.all(others.map((s) => loadStoreMonthForSubmit(s, salesStores, year, month)))
+  }
+
   async function submit() {
-    const found = sfSubmitProblems(dates, days, columns)
-    if (found.length > 0) {
-      setProblems(found)
-      return
-    }
     setSaving(true)
     setError('')
     try {
-      const saved = await loadSfDataDayCounts(year, month)
+      const loaded = await loadOthers()
+      const found = sfSubmitProblems(dates, days, columns).map((p) => ({ ...p, storeName: store.name }))
+      for (const m of loaded) {
+        found.push(...sfSubmitProblems(m.dates, m.days, m.columns).map((p) => ({ ...p, storeName: m.store.name })))
+      }
+      if (found.length > 0) {
+        setProblems(found)
+        return
+      }
+      // this store: what is on screen; the others: what is saved
       const counts = stores.map((s) => ({
         id: s.id,
         name: s.name,
-        // this store: what is on screen (may be unsaved); the others: what is saved
-        days: s.id === store.id ? countSfDataDays(days) : (saved[s.id] ?? 0),
+        days: s.id === store.id ? countSfDataDays(days) : (loaded.find((m) => m.store.id === s.id)?.dataDays ?? 0),
       }))
       const { reference, mismatched } = sfDayCountMismatch(counts)
       if (mismatched.length > 0) {
         setMismatch({ reference, counts })
-        setSaving(false)
         return
       }
     } catch (e) {
-      setError(`無法檢查各分店的天數：${e.message}`)
-      setSaving(false)
+      setError(`無法檢查各分店：${e.message}`)
       return
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
-    await persist(true)
+    await submitAll()
+  }
+
+  // Submit the store on screen (from the screen) and every other store that has data (from the saved data).
+  async function submitAll() {
+    setError('')
+    try {
+      const loaded = await loadOthers()
+      const ok = await persist(true, { silent: true })
+      if (!ok) return
+      let n = 1
+      setSaving(true)
+      for (const m of loaded) {
+        if (m.dataDays === 0) continue
+        await submitStoreMonth(m, year, month)
+        n++
+      }
+      setMsg(`已提交 ${monthLabel(year, month)} 全部分店（${n} 間）。`)
+    } catch (e) {
+      setError(`提交失敗：${e.message}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function doExport() {
@@ -313,16 +378,20 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
 
   return (
     <div className="space-y-3">
-      <StoreTabs stores={stores} storeId={store.id} onChange={(id) => onNavigate({ storeId: id })} />
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <StoreTabs stores={stores} storeId={store.id} onChange={(id) => onNavigate({ storeId: id })} />
+        </div>
+        <Button onClick={submit} disabled={saving || loading} title="提交全部分店這個月的 Sales figure">
+          提交全部分店
+        </Button>
+      </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-semibold text-brand-900">{store.name}</span>
         <YearMonthPicker year={year} month={month} onChange={(v) => onNavigate(v)} />
         <Badge color={status.color}>{status.text}</Badge>
         <div className="ml-auto flex items-center gap-2">
-          <Button onClick={submit} disabled={saving || loading}>
-            提交
-          </Button>
           <div className="relative">
             <Button variant="secondary" onClick={() => setMenuOpen((v) => !v)}>
               Action ▾
@@ -381,7 +450,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}
       {sfMonth?.status === 'submitted' && dirty && (
-        <Notice kind="info">這個月已提交；修改後要再按「提交」才會儲存這些變更。</Notice>
+        <Notice kind="info">這個月已提交；修改後會先暫存成「未提交」，要再按「提交」才算正式提交。</Notice>
       )}
 
       <ImportByImage columns={columns} year={year} month={month} days={days} onApply={applyImport} />
@@ -596,8 +665,8 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
         <p className="mb-2 text-sm text-gray-600">這些日期已經有其他 payment 的資料，但沒有 Cash（O.CA）的紀錄。完全沒有資料的日期不需要填。缺少的日期：</p>
         <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
           {problems?.map((p) => (
-            <li key={p.date} className="flex justify-between rounded bg-red-50 px-2 py-1">
-              <span>{p.date}</span>
+            <li key={`${p.storeName}${p.date}`} className="flex justify-between rounded bg-red-50 px-2 py-1">
+              <span>{p.storeName ? `${p.storeName}　${p.date}` : p.date}</span>
               <span className="text-red-600">缺少 {p.missing.join('、')}</span>
             </li>
           ))}
@@ -616,7 +685,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
             <Button
               onClick={async () => {
                 setMismatch(null)
-                await persist(true)
+                await submitAll()
               }}
             >
               仍要提交
@@ -628,7 +697,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
           <div className="space-y-2 text-sm">
             <p className="text-gray-600">
               {monthLabel(year, month)} 大部分分店有 {mismatch.reference} 天有資料，但以下分店的天數跟其他店不符
-              （目前這間分店以畫面上的資料計算，其他分店以已儲存的資料計算）：
+              （目前這間分店以畫面上的資料計算，其他分店以已儲存的資料計算）。按「仍要提交」會提交全部分店：
             </p>
             <ul className="max-h-72 space-y-1 overflow-y-auto">
               {mismatch.counts.map((c) => {

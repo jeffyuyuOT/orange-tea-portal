@@ -165,14 +165,21 @@ export function computeSfDay(columns, day, dValue, kioskFallback) {
   const subAmounts = {}
   let kioskAmount = null
   const useFallback = kioskFallback !== undefined && sfDayHasData(day)
+  // The kiosk figure that counts for this day: SF's own, else (linked store) 營業's Self O.
+  // It has to be in place BEFORE the mains are added up, because Total Eftpos is made of
+  // its subs (POS eftpos + Self order kiosk) — otherwise the check would miss the kiosk.
+  let eff = day
+  if (useFallback) {
+    const kioskSub = columns.flatMap((c) => c.subs).find((s) => s.name === KIOSK_NAME)
+    if (kioskSub && toNum(day.amounts?.[kioskSub.id]) === null && toNum(kioskFallback) !== null) {
+      eff = { ...day, amounts: { ...(day.amounts ?? {}), [kioskSub.id]: kioskFallback } }
+    }
+  }
   for (const col of columns) {
-    mains[col.id] = mainValue(col, day, dValue)
+    mains[col.id] = mainValue(col, eff, dValue)
     for (const sub of col.subs) {
-      subAmounts[sub.id] = toNum(day.amounts?.[sub.id])
-      if (sub.name === KIOSK_NAME) {
-        if (subAmounts[sub.id] === null && useFallback) subAmounts[sub.id] = toNum(kioskFallback)
-        kioskAmount = subAmounts[sub.id]
-      }
+      subAmounts[sub.id] = toNum(eff.amounts?.[sub.id])
+      if (sub.name === KIOSK_NAME) kioskAmount = subAmounts[sub.id]
     }
   }
   const posTotalCol = columns.find(isPosTotalColumn)

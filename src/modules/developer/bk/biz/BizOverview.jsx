@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Badge from '../../../../components/ui/Badge'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
@@ -15,13 +15,18 @@ const fmtCount = (n) => (n === null || n === undefined ? '' : round2(n).toLocale
 const th = 'border border-brand-100 px-1 py-1.5 text-[11px] font-semibold leading-tight text-gray-700'
 const td = 'border border-gray-100 p-0'
 const split = 'border-l-2 border-l-brand-300'
+// Counts (P杯數, CV, SO杯數) are narrow, the money column (Self O) a bit wider, so five stores fit on one screen.
+const COUNT_W = 54
+const MONEY_W = 78
+const DATE_W = 64
+const colWidth = (money) => (money ? MONEY_W : COUNT_W)
 const BLOCK_BG = ['bg-sky-50', 'bg-amber-50']
 const BLOCK_CELL_BG = ['bg-sky-50/40', 'bg-amber-50/40']
 
 // 手動輸入總頁: P杯數 / CV / Self O / SO杯數 of every store in one sheet (one
 // block per store), so figures of several stores can be typed without switching
 // tabs. Same data as the store pages: they read these four columns from here.
-export default function BizOverview({ stores, year, month, onYearMonth, onDirtyChange, topActive = true }) {
+export default function BizOverview({ stores, year, month, onYearMonth, onDirtyChange, onSaveReady }) {
   const [data, setData] = useState({}) // { [storeId]: { [date]: day } }
   const [touched, setTouched] = useState({}) // { 'storeId|date': true }
   const [loading, setLoading] = useState(true)
@@ -36,6 +41,8 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Leaving this view (or discarding) must not leave the parent thinking it is still dirty.
+  useEffect(() => () => onDirtyChange?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -77,12 +84,22 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
       for (const [storeId, days] of Object.entries(byStore)) await saveSalesFields(storeId, days, FIELDS)
       setTouched({})
       setMsg('已儲存。')
+      return true
     } catch (e) {
       setError(e.message)
+      return false
     } finally {
       setSaving(false)
     }
   }
+
+  // Hand the parent this page's save (→ true / false) for BK's 儲存 button.
+  const saveRef = useRef(null)
+  saveRef.current = save
+  useEffect(() => {
+    onSaveReady?.(() => saveRef.current())
+    return () => onSaveReady?.(null)
+  }, [onSaveReady])
 
   const totals = useMemo(() => {
     const out = {}
@@ -140,10 +157,10 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
         <LoadingSpinner />
       ) : (
         <div className="max-h-[70vh] overflow-auto rounded-xl border border-brand-100">
-          <table className="table-fixed border-collapse text-[13px]" style={{ minWidth: 70 + stores.length * perStore * 84, width: '100%' }}>
+          <table className="table-fixed border-collapse text-[13px]" style={{ width: DATE_W + stores.length * OVERVIEW_INPUTS.reduce((a, i) => a + colWidth(i.money), 0) }}>
             <colgroup>
-              <col style={{ width: 70 }} />
-              {stores.flatMap((s) => OVERVIEW_INPUTS.map(({ key }) => <col key={`${s.id}${key}`} />))}
+              <col style={{ width: DATE_W }} />
+              {stores.flatMap((s) => OVERVIEW_INPUTS.map(({ key, money }) => <col key={`${s.id}${key}`} style={{ width: colWidth(money) }} />))}
             </colgroup>
             <thead className="sticky top-0 z-20">
               <tr>

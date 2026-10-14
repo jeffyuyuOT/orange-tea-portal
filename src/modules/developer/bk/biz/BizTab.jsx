@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Badge from '../../../../components/ui/Badge'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
@@ -24,7 +24,7 @@ const split = 'border-l-2 border-l-brand-300'
 // CV × 4 and 總杯數 = P杯數 + SO杯數 are computed; POS, CV, Self O and the two
 // cup counts are typed — except POS for a store linked to SF, which is SF's
 // O.POST. Self O also feeds that store's Self order kiosk column in SF.
-export default function BizTab({ stores, topActive = true }) {
+export default function BizTab({ stores, topActive = true, onTabDirty, registerSaver }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
   const [overview, setOverview] = useState(true) // 手動輸入總頁 is the first tab
@@ -112,12 +112,35 @@ export default function BizTab({ stores, topActive = true }) {
       await saveSalesFields(store.id, days, ['pos'])
       setDirty(false)
       setMsg('已儲存。')
+      return true
     } catch (e) {
       setError(e.message)
+      return false
     } finally {
       setSaving(false)
     }
   }
+
+  // BK's 儲存 button: report whether anything here is unsaved, and save the
+  // store sheet (POS) and the 手動輸入總頁 together.
+  const ovSaveRef = useRef(null)
+  const onOvSaveReady = useCallback((fn) => {
+    ovSaveRef.current = fn
+  }, [])
+  const stateRef = useRef({})
+  stateRef.current = { dirty, ovDirty, save }
+  useEffect(() => {
+    onTabDirty?.(dirty || ovDirty)
+  }, [dirty, ovDirty]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    registerSaver?.('biz', async () => {
+      const cur = stateRef.current
+      let ok = true
+      if (cur.ovDirty && ovSaveRef.current) ok = (await ovSaveRef.current()) && ok
+      if (cur.dirty) ok = (await cur.save()) && ok
+      return ok
+    })
+  }, [registerSaver])
 
   // Enter moves to the same column on the next day, like a spreadsheet.
   function onKeyDown(e, rowIdx, key) {
@@ -167,6 +190,7 @@ export default function BizTab({ stores, topActive = true }) {
             }
           }}
           onDirtyChange={setOvDirty}
+          onSaveReady={onOvSaveReady}
         />
       )}
 

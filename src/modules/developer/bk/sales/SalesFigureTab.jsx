@@ -10,20 +10,36 @@ import StoreManager from './StoreManager'
 // sub-tab bar any more. `typesVersion` is now owned by BkPage (bumped by
 // 系統設置's SF payment-type editor) so the sheet re-reads its columns after
 // a change made from that other tab.
-export default function SalesFigureTab({ stores, salesStores, topActive = true, typesVersion, jumpTarget, onJumpHandled, onStoresChanged }) {
+export default function SalesFigureTab({ stores, salesStores, topActive = true, typesVersion, jumpTarget, onJumpHandled, onStoresChanged, onTabDirty, registerSaver }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
   const [year, setYear] = useState(today.year)
   const [month, setMonth] = useState(today.month)
   const dirtyRef = useRef(false)
+  const saveRef = useRef(null)
+  const tabDirtyRef = useRef(onTabDirty)
+  tabDirtyRef.current = onTabDirty
   const onDirtyChange = useCallback((d) => {
     dirtyRef.current = d
+    tabDirtyRef.current?.(d)
   }, [])
+  // The sheet's "save as draft"; also what BK's 儲存 button calls.
+  const onSaveReady = useCallback(
+    (fn) => {
+      saveRef.current = fn
+      registerSaver?.('sf', fn)
+    },
+    [registerSaver]
+  )
 
   // Every store / month change (from inside the SF sheet, or a "載入" jump
-  // from 歷史紀錄) goes through here so unsaved edits are never dropped silently.
-  const navigate = useCallback((next) => {
-    if (dirtyRef.current && !window.confirm('這個月的 SF 有未儲存的變更，確定要離開並捨棄嗎？')) return false
+  // from 歷史紀錄) goes through here. Typing that was not submitted is kept
+  // as a draft (no question asked); if that save fails we stay where we are.
+  const navigate = useCallback(async (next) => {
+    if (dirtyRef.current && saveRef.current) {
+      const ok = await saveRef.current()
+      if (!ok) return false
+    }
     if (next.storeId) setStoreId(next.storeId)
     if (next.year) setYear(next.year)
     if (next.month) setMonth(next.month)
@@ -51,6 +67,7 @@ export default function SalesFigureTab({ stores, salesStores, topActive = true, 
       active={topActive}
       onNavigate={navigate}
       onDirtyChange={onDirtyChange}
+      onSaveReady={onSaveReady}
     />
   )
 }
