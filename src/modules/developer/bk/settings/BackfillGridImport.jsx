@@ -197,7 +197,7 @@ export default function BackfillGridImport({ file, kind, stores, sheetNames, onI
       <div className="space-y-3 text-sm">
         {kind === 'cashday' && <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} />}
         <Notice kind="info">
-          這裡直接寫入資料庫（不像分店現金/SF頁面需要再按「儲存」）。
+          這裡直接寫入資料庫（不像分店現金頁面要再按「儲存」、SF 頁面要再按「提交」）。
           {kind === 'sf'
             ? '每個分店會讀檔案裡同名的那個工作表（SF 範本每個分店各自一個分頁），檔案裡有幾個月份的資料就會匯入幾個月份，一次套用全部分店。'
             : '檔案裡有幾個月份的資料就會匯入幾個月份，不需要先選月份。'}

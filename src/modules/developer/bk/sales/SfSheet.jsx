@@ -247,7 +247,7 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
     setDirty(true)
     setImportFile(null)
     setError('')
-    setMsg(`已把 ${Object.keys(entries).length} 天的 Excel 資料填進表格，請檢查後按「儲存」。`)
+    setMsg(`已把 ${Object.keys(entries).length} 天的 Excel 資料填進表格，請檢查後按「提交」。`)
   }
 
   // Enter moves to the same column on the next day, like a spreadsheet.
@@ -262,9 +262,9 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
   }
 
   const status = dirty
-    ? { color: 'brand', text: '有未儲存的變更' }
+    ? { color: 'brand', text: '有未提交的變更' }
     : !sfMonth
-      ? { color: 'gray', text: '尚未儲存' }
+      ? { color: 'gray', text: '尚未提交' }
       : sfMonth.status === 'submitted'
         ? { color: 'green', text: '已提交' }
         : { color: 'red', text: '未提交' }
@@ -291,9 +291,6 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
         <YearMonthPicker year={year} month={month} onChange={(v) => onNavigate(v)} />
         <Badge color={status.color}>{status.text}</Badge>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="secondary" onClick={() => persist(false)} disabled={saving || loading}>
-            儲存
-          </Button>
           <Button onClick={submit} disabled={saving || loading}>
             提交
           </Button>
@@ -307,7 +304,7 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
                   type="button"
                   disabled={!canExport}
                   onClick={doExport}
-                  title={canExport ? '' : '只有已提交且沒有未儲存變更的 SF 才能匯出'}
+                  title={canExport ? '' : '只有已提交且沒有未提交變更的 SF 才能匯出'}
                   className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-white"
                 >
                   匯出 Excel
@@ -355,7 +352,7 @@ export default function SfSheet({ stores, store, year, month, typesVersion, acti
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}
       {sfMonth?.status === 'submitted' && dirty && (
-        <Notice kind="info">這個月已提交；按「儲存」後狀態會變回「未提交」，需要重新提交。</Notice>
+        <Notice kind="info">這個月已提交；修改後要再按「提交」才會儲存這些變更。</Notice>
       )}
 
       <ImportByImage />
