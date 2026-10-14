@@ -95,7 +95,7 @@ export default function DividendExcelImport({ file, stores, data, onImported, on
             {state.sheetName ? `（工作表：${state.sheetName}）` : ''}
           </div>
           <Notice kind="info">
-            需要 Date / Store / Type / Amount 欄（Type 填 income / cost / payout；payout 還需要 Party 跟 Method 欄（Bank / Cash）；cost 需要 Method 欄（Bank 從 Jeff B 扣 / Cash 從 Mao保 扣 / 其他 從「其他」扣））。已經在系統裡的紀錄會自動跳過，不會重複匯入。
+            需要 Date / Store / Type / Amount 欄（Type 填 income / cost / payout；payout 還需要 Party 跟 Method 欄（Bank / Cash）；cost 需要 Method 欄（Bank 從 Jeff B 扣 / Cash 從 Mao保 扣 / 其他 從「其他」扣 / 金庫外 不扣金庫、領取收成時才扣）。已經在系統裡的紀錄會自動跳過，不會重複匯入。
           </Notice>
 
           {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}

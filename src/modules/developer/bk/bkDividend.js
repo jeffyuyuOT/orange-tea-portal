@@ -5,7 +5,7 @@
 //   income   入金: U帳 入金 (Jeff B / Mao保 / 其他) + 入金 typed on the 收成 tab (其他)
 //   cost     cost typed on the 收成 tab
 //   payout   收成 paid to a party (bank / cash)
-//   vault    income − cost − payouts, counted from the last 收成完全結算 of the store
+//   vault    income − cost (except 金庫外 cost) − payouts, counted from the last 收成完全結算 of the store
 //
 // A payout ticked 收成結算 is a 收成完全結算 when the vault is exactly zero right
 // after it. Everything before the last 完全結算 is left out of the vault (and of
@@ -22,7 +22,8 @@ export const BUCKETS = [
 export const BUCKET_LABELS = Object.fromEntries(BUCKETS)
 export const METHOD_LABELS = { bank: 'Bank', cash: 'Cash' }
 // Where a cost is paid from: Bank = Jeff B, Cash = Mao保, 其他 = 其他.
-export const COST_METHOD_LABELS = { bank: 'Bank', cash: 'Cash', other: '其他' }
+// 金庫外 = not taken out of any vault pot, only deducted from the profit pool when 收成 is claimed.
+export const COST_METHOD_LABELS = { bank: 'Bank', cash: 'Cash', other: '其他', outside: '金庫外' }
 
 const sortKey = (a, b) =>
   a.date < b.date ? -1 : a.date > b.date ? 1 : a.created < b.created ? -1 : a.created > b.created ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0
@@ -88,7 +89,7 @@ const signed = (ev) => (ev.type === 'income' ? ev.amount : -ev.amount)
 export function summarize(events) {
   const incomeBy = { jeff_bank: 0, mao_safe: 0, other: 0 }
   let cost = 0
-  const costBy = { bank: 0, cash: 0, other: 0 }
+  const costBy = { bank: 0, cash: 0, other: 0, outside: 0 }
   let paid = 0
   let bankPaid = 0
   let cashPaid = 0
@@ -115,7 +116,7 @@ export function summarize(events) {
     mao_safe: round2(incomeBy.mao_safe - cashPaid - costBy.cash),
     other: round2(incomeBy.other - costBy.other),
   }
-  return { incomeBy, assets, costBy, income, cost, paid, bankPaid, cashPaid, paidByParty, pool: round2(income - cost), vault: round2(income - cost - paid) }
+  return { incomeBy, assets, costBy, income, cost, paid, bankPaid, cashPaid, paidByParty, pool: round2(income - cost), vault: round2(income - (cost - costBy.outside) - paid) }
 }
 
 // One store's events (time-ordered) -> where the current window starts.

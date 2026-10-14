@@ -647,6 +647,7 @@ function parseDividendKindCell(v) {
 function parseCostMethodCell(v) {
   const n = norm(v)
   if (['其他', 'other'].includes(n)) return 'other'
+  if (['金庫外', 'outside'].includes(n)) return 'outside'
   return parseMethodCell(v)
 }
 function parseMethodCell(v) {
@@ -739,7 +740,7 @@ export function parseDividendRows(rows, { stores, parties }) {
     if (kind === 'cost') {
       const method = col.method !== undefined ? parseCostMethodCell(row[col.method]) : null
       if (!method) {
-        out.push({ rowNumber, date, kind, problem: 'cost 需要「方式」欄（Bank / Cash / 其他）' })
+        out.push({ rowNumber, date, kind, problem: 'cost 需要「方式」欄（Bank / Cash / 其他 / 金庫外）' })
         continue
       }
       out.push({ rowNumber, date, kind, amount, note, storeId: store.id, method })

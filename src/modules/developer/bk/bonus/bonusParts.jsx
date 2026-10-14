@@ -106,11 +106,12 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
         </select>
       </Field>
       {kind === 'cost' && (
-        <Field label="方式" hint="Bank 從 Jeff B 扣，Cash 從 Mao保 扣，其他 從「其他」扣">
+        <Field label="方式" hint="Bank 從 Jeff B 扣，Cash 從 Mao保 扣，其他 從「其他」扣，金庫外 不動金庫、只在領取收成時扣">
           <select className={`${inputCls} w-full`} value={costMethod} onChange={(e) => setCostMethod(e.target.value)}>
             <option value="bank">Bank（從 Jeff B 扣）</option>
             <option value="cash">Cash（從 Mao保 扣）</option>
             <option value="other">其他（從「其他」扣）</option>
+            <option value="outside">金庫外（不扣金庫，領取收成時才扣）</option>
           </select>
         </Field>
       )}

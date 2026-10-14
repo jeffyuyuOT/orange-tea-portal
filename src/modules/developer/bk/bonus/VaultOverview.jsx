@@ -29,7 +29,7 @@ export default function VaultOverview({ view }) {
   const detailEvents = !detail
     ? []
     : c.windowEvents.filter((ev) => {
-        if (detail === 'total') return true
+        if (detail === 'total') return !(ev.type === 'cost' && ev.method === 'outside')
         if (detail === 'cost') return ev.type === 'cost'
         if (ev.type === 'income') return ev.bucket === detail
         // Bank (payout or cost) comes out of Jeff B, Cash out of Mao保, a 其他 cost out of 其他
@@ -68,7 +68,7 @@ export default function VaultOverview({ view }) {
 
       <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="space-y-3">
-          <StatCard label="金庫目前總額" value={w.vault} onClick={() => setDetail('total')} hint="入金 − Cost − 已領取收成" />
+          <StatCard label="金庫目前總額" value={w.vault} onClick={() => setDetail('total')} hint="入金 − Cost（不含金庫外）− 已領取收成" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatCard label="Jeff B" value={w.assets.jeff_bank} onClick={() => setDetail('jeff_bank')} hint="扣掉 Bank 收成和 Bank Cost" />
             <StatCard label="Mao保" value={w.assets.mao_safe} onClick={() => setDetail('mao_safe')} hint="扣掉 Cash 收成和 Cash Cost" />
