@@ -253,9 +253,9 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
     }
   }
 
-  // 匯入 Excel: the picked file is previewed in SfExcelImport; 套用 fills the
-  // sheet (never saves). Only the cells the file actually has are touched.
-  function applyImport(entries) {
+  // 匯入 Excel / 匯入 by 圖檔: the picked file is previewed in SfExcelImport (or the
+  // image review step); 套用 fills the sheet (never saves). Only the cells the file actually has are touched.
+  function applyImport(entries, source = 'Excel') {
     setDays((prev) => {
       const next = { ...prev }
       for (const [date, entry] of Object.entries(entries)) {
@@ -275,7 +275,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
     setDirty(true)
     setImportFile(null)
     setError('')
-    setMsg(`已把 ${Object.keys(entries).length} 天的 Excel 資料填進表格，請檢查後按「提交」。`)
+    setMsg(`已把 ${Object.keys(entries).length} 天的${source}資料填進表格，請檢查後按「提交」。`)
   }
 
   // Enter moves to the same column on the next day, like a spreadsheet.
@@ -384,7 +384,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
         <Notice kind="info">這個月已提交；修改後要再按「提交」才會儲存這些變更。</Notice>
       )}
 
-      <ImportByImage />
+      <ImportByImage columns={columns} year={year} month={month} days={days} onApply={applyImport} />
 
       {loading ? (
         <LoadingSpinner />
