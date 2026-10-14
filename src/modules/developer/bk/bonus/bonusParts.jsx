@@ -2,7 +2,7 @@ import { useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import { brisbaneTodayStr, fmtMoney, numToInput, toNum } from '../bkUtils'
-import { BUCKET_LABELS, METHOD_LABELS, payoutLabel } from '../bkDividend'
+import { BUCKET_LABELS, COST_METHOD_LABELS, METHOD_LABELS, payoutLabel } from '../bkDividend'
 import { saveDividendEntry, savePayout } from '../bkDividendData'
 import { Field, MoneyInput, NoteButton, Notice, inputCls } from '../bkUi'
 
@@ -78,6 +78,7 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
   const [kind, setKind] = useState(initial ? (initial.type === 'cost' ? 'cost' : 'income') : 'income')
   const [date, setDate] = useState(initial?.date ?? brisbaneTodayStr())
   const [amount, setAmount] = useState(initial ? numToInput(initial.amount) : '')
+  const [costMethod, setCostMethod] = useState(initial?.method ?? 'bank')
   const [note, setNote] = useState(initial?.note ?? '')
   const [error, setError] = useState('')
 
@@ -88,7 +89,7 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
     if (!date) return setError('請輸入日期。')
     if (n === null || n <= 0) return setError('金額必須是大於 0 的數字。')
     try {
-      await saveDividendEntry(store, { id: initial?.id, entry_date: date, kind, amount: n, note })
+      await saveDividendEntry(store, { id: initial?.id, entry_date: date, kind, method: costMethod, amount: n, note })
       onSaved?.()
     } catch (e) {
       setError(e.message)
@@ -104,6 +105,15 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
           <option value="cost">Cost</option>
         </select>
       </Field>
+      {kind === 'cost' && (
+        <Field label="方式" hint="Bank 從 Jeff B 扣，Cash 從 Mao保 扣，其他 從「其他」扣">
+          <select className={`${inputCls} w-full`} value={costMethod} onChange={(e) => setCostMethod(e.target.value)}>
+            <option value="bank">Bank（從 Jeff B 扣）</option>
+            <option value="cash">Cash（從 Mao保 扣）</option>
+            <option value="other">其他（從「其他」扣）</option>
+          </select>
+        </Field>
+      )}
       <Field label="日期">
         <input type="date" className={`${inputCls} w-full`} value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
@@ -228,7 +238,7 @@ export function EventTable({ events, storeNames, showStore, partyNames, fullKeys
   if (events.length === 0) return <p className="py-6 text-center text-sm text-gray-400">沒有紀錄。</p>
   const describe = (ev) => {
     if (ev.type === 'income') return `入金 · ${BUCKET_LABELS[ev.bucket] ?? ev.bucket}${ev.source === 'ucash' ? '（U帳）' : ''}`
-    if (ev.type === 'cost') return 'Cost'
+    if (ev.type === 'cost') return `Cost · ${COST_METHOD_LABELS[ev.method] ?? '（未選方式）'}`
     return `收成 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'} · ${METHOD_LABELS[ev.method] ?? ev.method}`
   }
   return (

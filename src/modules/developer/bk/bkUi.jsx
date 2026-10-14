@@ -1,4 +1,5 @@
 // Small shared widgets for the BK page.
+import { useState } from 'react'
 import { brisbaneToday } from './bkUtils'
 
 export function StoreTabs({ stores, storeId, onChange, allowAll = false, className = '' }) {
@@ -78,16 +79,32 @@ export function YearMonthPicker({ year, month, onChange, allowAllMonths = false 
 }
 
 // Numeric text input that only accepts digits, one dot and an optional minus.
-export function MoneyInput({ value, onChange, allowNegative = true, className = '', ...rest }) {
+// While you are NOT typing in it, a valid number is shown with two decimals
+// (595 -> 595.00); the text you type is left alone while the box has focus.
+// `plain` turns that off for counts (cups, CV) that are not money.
+export function MoneyInput({ value, onChange, allowNegative = true, plain = false, className = '', onFocus, onBlur, ...rest }) {
   const re = allowNegative ? /^-?\d*\.?\d*$/ : /^\d*\.?\d*$/
+  const [focused, setFocused] = useState(false)
+  const raw = value ?? ''
+  const n = Number(raw)
+  const shown =
+    !plain && !focused && raw !== '' && raw !== '-' && raw !== '.' && Number.isFinite(n) ? (Math.round(n * 100) / 100).toFixed(2) : raw
   return (
     <input
       inputMode="decimal"
       autoComplete="off"
-      value={value ?? ''}
+      value={shown}
       onChange={(e) => {
         const v = e.target.value
         if (v === '' || re.test(v)) onChange(v)
+      }}
+      onFocus={(e) => {
+        setFocused(true)
+        onFocus?.(e)
+      }}
+      onBlur={(e) => {
+        setFocused(false)
+        onBlur?.(e)
       }}
       className={`w-full min-w-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-right text-sm tabular-nums hover:border-brand-200 focus:border-brand-400 focus:bg-white focus:outline-none ${className}`}
       {...rest}

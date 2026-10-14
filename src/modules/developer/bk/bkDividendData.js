@@ -39,6 +39,7 @@ export async function saveDividendEntry(storeId, form) {
   const payload = {
     entry_date: form.entry_date,
     kind: form.kind,
+    method: form.kind === 'cost' ? form.method : null,
     amount: toNum(form.amount),
     note: form.note?.trim() || null,
     updated_at: new Date().toISOString(),
@@ -79,7 +80,14 @@ export async function bulkImportDividendRows(rows) {
   if (entryRows.length) {
     unwrap(
       await supabase.from('bk_dividend_entries').insert(
-        entryRows.map((r) => ({ store_id: r.storeId, entry_date: r.date, kind: r.kind, amount: toNum(r.amount), note: r.note || null }))
+        entryRows.map((r) => ({
+          store_id: r.storeId,
+          entry_date: r.date,
+          kind: r.kind,
+          method: r.kind === 'cost' ? r.method : null,
+          amount: toNum(r.amount),
+          note: r.note || null,
+        }))
       )
     )
   }

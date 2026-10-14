@@ -96,9 +96,9 @@ export async function downloadDividendTemplate() {
   const wb = await buildTemplate([
     {
       name: '收成',
-      note: 'Type 填 income / cost / payout。payout 另外需要 Party（這個分店設定好的 party 名稱）跟 Method（Bank / Cash）。',
+      note: 'Type 填 income / cost / payout。payout 另外需要 Party（這個分店設定好的 party 名稱）跟 Method（Bank / Cash）。cost 一定要填 Method：Bank 從 Jeff B 扣、Cash 從 Mao保 扣、其他 從「其他」扣。',
       headers: ['Date', 'Store', 'Type', 'Party', 'Method', 'Amount', 'Note'],
-      example: ['2026-10-05', 'Sunnybank', 'cost', '', '', 300, '維修費'],
+      example: ['2026-10-05', 'Sunnybank', 'cost', '', 'Bank', 300, '維修費'],
     },
   ])
   await download(wb, 'BK匯入範本_收成.xlsx')

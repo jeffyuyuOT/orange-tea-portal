@@ -8,9 +8,9 @@ import { DividendEntryForm, EventEditor, EventTable, NoteModal, StatCard } from 
 
 const DETAIL_TITLES = {
   total: '金庫目前總額 — 明細',
-  jeff_bank: 'Jeff B — 明細（入金 − Bank 收成）',
-  mao_safe: 'Mao保 — 明細（入金 − Cash 收成）',
-  other: '其他 — 入金明細',
+  jeff_bank: 'Jeff B — 明細（入金 − Bank 收成 − Bank Cost）',
+  mao_safe: 'Mao保 — 明細（入金 − Cash 收成 − Cash Cost）',
+  other: '其他 — 明細（入金 − 其他 Cost）',
   cost: 'Cost — 明細',
 }
 
@@ -32,7 +32,8 @@ export default function VaultOverview({ view }) {
         if (detail === 'total') return true
         if (detail === 'cost') return ev.type === 'cost'
         if (ev.type === 'income') return ev.bucket === detail
-        // bank payouts come out of Jeff B, cash payouts out of Mao保
+        // Bank (payout or cost) comes out of Jeff B, Cash out of Mao保, a 其他 cost out of 其他
+        if (ev.type === 'cost') return (detail === 'jeff_bank' && ev.method === 'bank') || (detail === 'mao_safe' && ev.method === 'cash') || (detail === 'other' && ev.method === 'other')
         return ev.type === 'payout' && ((detail === 'jeff_bank' && ev.method !== 'cash') || (detail === 'mao_safe' && ev.method === 'cash'))
       })
 
@@ -69,9 +70,9 @@ export default function VaultOverview({ view }) {
         <div className="space-y-3">
           <StatCard label="金庫目前總額" value={w.vault} onClick={() => setDetail('total')} hint="入金 − Cost − 已領取收成" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Jeff B" value={w.assets.jeff_bank} onClick={() => setDetail('jeff_bank')} hint="扣掉 Bank 收成" />
-            <StatCard label="Mao保" value={w.assets.mao_safe} onClick={() => setDetail('mao_safe')} hint="扣掉 Cash 收成" />
-            <StatCard label="其他" value={w.incomeBy.other} onClick={() => setDetail('other')} />
+            <StatCard label="Jeff B" value={w.assets.jeff_bank} onClick={() => setDetail('jeff_bank')} hint="扣掉 Bank 收成和 Bank Cost" />
+            <StatCard label="Mao保" value={w.assets.mao_safe} onClick={() => setDetail('mao_safe')} hint="扣掉 Cash 收成和 Cash Cost" />
+            <StatCard label="其他" value={w.assets.other} onClick={() => setDetail('other')} hint="扣掉 其他 Cost" />
             <StatCard label="Cost" value={w.cost} tone="cost" onClick={() => setDetail('cost')} />
           </div>
         </div>
@@ -111,7 +112,7 @@ export default function VaultOverview({ view }) {
           showStore={showStore}
           partyNames={partyNames}
           fullKeys={c.fullKeys}
-          signed={detail === 'total' || detail === 'jeff_bank' || detail === 'mao_safe'}
+          signed={detail === 'total' || detail === 'jeff_bank' || detail === 'mao_safe' || detail === 'other'}
           onNote={setNote}
           onOpen={(ev) => {
             setDetail(null)

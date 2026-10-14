@@ -263,6 +263,7 @@ export default function BizTab({ stores, topActive = true }) {
                             value={day[field]}
                             onChange={(v) => setField(date, field, v)}
                             allowNegative={false}
+                            plain={!money}
                             className="!px-1 !text-[13px]"
                             onBlur={
                               money

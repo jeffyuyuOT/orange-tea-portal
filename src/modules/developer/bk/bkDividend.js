@@ -21,6 +21,8 @@ export const BUCKETS = [
 ]
 export const BUCKET_LABELS = Object.fromEntries(BUCKETS)
 export const METHOD_LABELS = { bank: 'Bank', cash: 'Cash' }
+// Where a cost is paid from: Bank = Jeff B, Cash = Mao保, 其他 = 其他.
+export const COST_METHOD_LABELS = { bank: 'Bank', cash: 'Cash', other: '其他' }
 
 const sortKey = (a, b) =>
   a.date < b.date ? -1 : a.date > b.date ? 1 : a.created < b.created ? -1 : a.created > b.created ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0
@@ -56,6 +58,7 @@ export function buildEvents({ ruju = [], manual = [], payouts = [] }) {
       created: e.created_at ?? '',
       type: cost ? 'cost' : 'income',
       bucket: cost ? 'cost' : 'other',
+      method: cost ? e.method ?? null : undefined,
       amount: toNum(e.amount) ?? 0,
       note: e.note ?? null,
     })
@@ -85,13 +88,17 @@ const signed = (ev) => (ev.type === 'income' ? ev.amount : -ev.amount)
 export function summarize(events) {
   const incomeBy = { jeff_bank: 0, mao_safe: 0, other: 0 }
   let cost = 0
+  const costBy = { bank: 0, cash: 0, other: 0 }
   let paid = 0
   let bankPaid = 0
   let cashPaid = 0
   const paidByParty = {}
   for (const ev of events) {
     if (ev.type === 'income') incomeBy[ev.bucket] = round2((incomeBy[ev.bucket] ?? 0) + ev.amount)
-    else if (ev.type === 'cost') cost = round2(cost + ev.amount)
+    else if (ev.type === 'cost') {
+      cost = round2(cost + ev.amount)
+      if (ev.method && ev.method in costBy) costBy[ev.method] = round2(costBy[ev.method] + ev.amount)
+    }
     else {
       paid = round2(paid + ev.amount)
       if (ev.method === 'cash') cashPaid = round2(cashPaid + ev.amount)
@@ -100,14 +107,15 @@ export function summarize(events) {
     }
   }
   const income = round2(incomeBy.jeff_bank + incomeBy.mao_safe + incomeBy.other)
-  // What is left in each vault pot: a bank payout comes out of Jeff B, a cash
-  // payout out of Mao保. 其他 is untouched; cost is not taken from any pot.
+  // What is left in each vault pot. Bank comes out of Jeff B, Cash out of
+  // Mao保, 其他 out of 其他 — for a payout (Bank / Cash only) and for a cost
+  // (Bank / Cash / 其他, chosen on the cost).
   const assets = {
-    jeff_bank: round2(incomeBy.jeff_bank - bankPaid),
-    mao_safe: round2(incomeBy.mao_safe - cashPaid),
-    other: incomeBy.other,
+    jeff_bank: round2(incomeBy.jeff_bank - bankPaid - costBy.bank),
+    mao_safe: round2(incomeBy.mao_safe - cashPaid - costBy.cash),
+    other: round2(incomeBy.other - costBy.other),
   }
-  return { incomeBy, assets, income, cost, paid, bankPaid, cashPaid, paidByParty, pool: round2(income - cost), vault: round2(income - cost - paid) }
+  return { incomeBy, assets, costBy, income, cost, paid, bankPaid, cashPaid, paidByParty, pool: round2(income - cost), vault: round2(income - cost - paid) }
 }
 
 // One store's events (time-ordered) -> where the current window starts.

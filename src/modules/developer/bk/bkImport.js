@@ -643,6 +643,12 @@ function parseDividendKindCell(v) {
   for (const [kind, aliases] of DIVIDEND_KIND_ALIASES) if (aliases.includes(n)) return kind
   return null
 }
+// A cost says where it is paid from: Bank (Jeff B) / Cash (Mao保) / 其他.
+function parseCostMethodCell(v) {
+  const n = norm(v)
+  if (['其他', 'other'].includes(n)) return 'other'
+  return parseMethodCell(v)
+}
 function parseMethodCell(v) {
   const n = norm(v)
   if (['bank', '銀行'].includes(n)) return 'bank'
@@ -730,7 +736,16 @@ export function parseDividendRows(rows, { stores, parties }) {
       out.push({ rowNumber, date, kind, amount, note, storeId: store.id, partyId: party.id, method })
       continue
     }
-    // income / cost -> bk_dividend_entries
+    if (kind === 'cost') {
+      const method = col.method !== undefined ? parseCostMethodCell(row[col.method]) : null
+      if (!method) {
+        out.push({ rowNumber, date, kind, problem: 'cost 需要「方式」欄（Bank / Cash / 其他）' })
+        continue
+      }
+      out.push({ rowNumber, date, kind, amount, note, storeId: store.id, method })
+      continue
+    }
+    // income -> bk_dividend_entries
     out.push({ rowNumber, date, kind, amount, note, storeId: store.id })
   }
   return { rows: out, mapped, ignored }
