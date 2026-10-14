@@ -151,7 +151,7 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
   const [draft, setDraft] = useState(initial)
   const [overwrite, setOverwrite] = useState(false)
 
-  const view = useMemo(() => draftToEntries(draft, { year, month, columns }), [draft, year, month, columns])
+  const view = useMemo(() => draftToEntries(draft, { year, month, columns, days }), [draft, year, month, columns, days])
   const parsed = view.result
   const kept = useMemo(() => filterKeepExisting(parsed.entries, days), [parsed, days])
   const overwrites = countOverwrites(parsed.entries, days)
@@ -248,7 +248,12 @@ function ImageReview({ draft: initial, imageUrl, columns, year, month, days, onC
               各項加總 {fmtMoney(view.sum)} ≠ Total {fmtMoney(view.totalAmount)}（差 {fmtMoney(view.sum - view.totalAmount)}），代表有數字讀錯了，請對照原圖修正。
             </Notice>
           ))}
-        {!view.hasCash && <Notice kind="info">圖片裡沒有 Cash 那一行，O.CA 不會填。</Notice>}
+        {!view.hasCash && (
+          <Notice kind="info">圖片裡沒有 Cash 那一行，{view.zeroCash ? 'O.CA 會填 0。' : 'O.CA 已經有數字，不會改。'}</Notice>
+        )}
+        {view.zeroFilled.length > 0 && (
+          <Notice kind="info">圖片裡沒有這些 payment type，會自動填 0：{view.zeroFilled.join('、')}。（表格已經有數字的格子不會被改成 0）</Notice>
+        )}
 
         {view.merged.some((l) => !l.target) && (
           <Notice kind="info">

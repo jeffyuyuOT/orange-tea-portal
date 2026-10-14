@@ -13,7 +13,7 @@
 // Total -> O.POST, Eftpos + Eftpos offline -> POS eftpos (mergeEftposLines);
 // every other line goes to the payment type of the same name on this store.
 import { mergeEftposLines } from './bkImport'
-import { daysInMonth, round2, ymd } from './bkUtils'
+import { daysInMonth, KIOSK_NAME, round2, toNum, ymd } from './bkUtils'
 
 const norm = (s) =>
   String(s ?? '')
@@ -147,9 +147,10 @@ const dollars = (cents) => round2(cents / 100)
 // Returns { merged, hasCash, cashAmount, totalAmount, sum, sumOk, result } where
 // `merged` is every non-Cash line after Eftpos + Eftpos offline became one
 // POS eftpos line, each with the payment type it maps to (target) or null, and
+// `zeroFilled` / `zeroCash` = what got an automatic 0, and
 // `result` = { error?, entries, dayCount, cellCount, otherMonths }, entries being
 // { [date]: { o_ca?, o_post?, amounts: { [typeId]: number } } }.
-export function draftToEntries(draft, { year, month, columns }) {
+export function draftToEntries(draft, { year, month, columns, days }) {
   const num = (v) => {
     const n = Number(String(v ?? '').replace(/,/g, '').trim())
     return String(v ?? '').trim() === '' || !Number.isFinite(n) ? null : n
@@ -168,6 +169,8 @@ export function draftToEntries(draft, { year, month, columns }) {
   const sumOk = totalAmount !== null && Math.abs(sum - totalAmount) < 0.005
 
   const result = { entries: {}, dayCount: 0, cellCount: 0, otherMonths: [] }
+  const zeroFilled = [] // payment types filled with 0 because the picture has no line for them
+  let zeroCash = false
   const monthKey = `${year}-${String(month).padStart(2, '0')}`
   if (!draft.date) {
     result.error = '沒有日期，請在上面選一天。'
@@ -188,12 +191,29 @@ export function draftToEntries(draft, { year, month, columns }) {
       entry.amounts[l.target.id] = l.amount
       result.cellCount++
     }
+    // A payment type the picture has no line for means nothing was paid that way:
+    // fill 0 (Cash -> O.CA 0 too). Only once something real was read, and never over
+    // a number the sheet already holds (an automatic 0 must not wipe typed figures).
     if (result.cellCount > 0) {
+      const existing = days?.[draft.date]
+      const taken = new Set(Object.keys(entry.amounts))
+      for (const t of types) {
+        // Self order kiosk is not on the POS Payments screen: it comes from 營業's Self O (left empty so that default applies).
+        if (t.name === KIOSK_NAME || taken.has(t.id) || toNum(existing?.amounts?.[t.id]) !== null) continue
+        entry.amounts[t.id] = 0
+        zeroFilled.push(t.name)
+        result.cellCount++
+      }
+      if (!hasCash && toNum(existing?.o_ca) === null) {
+        entry.o_ca = 0
+        zeroCash = true
+        result.cellCount++
+      }
       result.entries[draft.date] = entry
       result.dayCount = 1
     }
   }
-  return { merged, hasCash, cashAmount, totalAmount, sum, sumOk, result }
+  return { merged, hasCash, cashAmount, totalAmount, sum, sumOk, zeroFilled, zeroCash, result }
 }
 
 // Used by the OCR step: text -> a ready-to-edit draft (cents -> dollar strings).
