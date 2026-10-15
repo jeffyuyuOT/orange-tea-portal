@@ -492,7 +492,7 @@ function parseLedgerKindCell(v) {
   return null
 }
 const RUJU_TARGET_ALIASES = {
-  jeff_bank: ['jeff bank', 'jeff', 'jeffbank', '入jeff bank', '入 jeff bank'],
+  jeff_bank: ['jeff bank', 'jeff', 'jeffbank', 'jeff b', 'jeffb', '入jeff bank', '入 jeff bank'],
   mao_safe: ['mao safe', 'mao保', 'mao', '入mao保', '入 mao 保險箱', 'mao保险箱', 'mao 保險箱'],
   other: ['其他', 'other'],
 }
@@ -894,11 +894,22 @@ export function markJeffOwedDuplicates(rows, existing) {
 // bundles specific U帳 入金 rows, but a backfilled historical claim has no
 // such rows to point at — it's imported as a claim with an empty `rows: []`
 // (the submitted date, total amount and note are all that's known about it).
+//
+// Two layouts are read:
+//  - 入金明細 (the template): one row per 入金 — Date (the claim's 提交日期),
+//    入金日期, 入金金額, 入金對象 (Jeff B / Mao保 / 其他), Note. Rows with the same
+//    Date form ONE claim whose bonus is 10% of its 入金 total, and its detail
+//    view lists each 入金 with where it went.
+//  - 舊格式: Date + Amount (the bonus itself) + Note, no 入金 detail.
 const EMMA_CLAIM_HEADER_MAP = [
   ['date', ['date', '日期', '日', 'submitted', '提交日期']],
+  ['depDate', ['入金日期', 'deposit date', 'depositdate', '入金 日期']],
+  ['depAmount', ['入金金額', '入金金额', 'deposit amount', 'depositamount', '入金 金額']],
+  ['target', ['入金對象', '入金对象', 'deposit target', 'target', '對象']],
   ['amount', ['amount', '金額', 'bonus', '收成金額']],
   ['note', ['note', '附註', '備註']],
 ]
+const EMMA_BONUS_RATE = 0.1
 
 export function parseEmmaClaimRows(rows) {
   const headerIdx = findHeaderRow(rows)
@@ -918,7 +929,11 @@ export function parseEmmaClaimRows(rows) {
     } else ignored.push({ header: label, reason: '沒有對應的欄位' })
   })
   if (col.date === undefined) return { error: '找不到「Date」或「日期」欄。', rows: [], mapped, ignored }
-  if (col.amount === undefined) return { error: '找不到「Amount」或「金額」欄。', rows: [], mapped, ignored }
+  const detailMode = col.depDate !== undefined || col.depAmount !== undefined
+  if (detailMode && (col.depDate === undefined || col.depAmount === undefined)) {
+    return { error: '入金明細需要同時有「入金日期」和「入金金額」兩欄。', rows: [], mapped, ignored }
+  }
+  if (!detailMode && col.amount === undefined) return { error: '找不到「Amount」或「金額」欄（或「入金日期」＋「入金金額」）。', rows: [], mapped, ignored }
 
   const out = []
   for (let r = headerIdx + 1; r < rows.length; r++) {
@@ -931,15 +946,84 @@ export function parseEmmaClaimRows(rows) {
       out.push({ rowNumber, problem: '日期看不懂（需要完整日期，格式 DD/MM/YY，例如 05/10/26）' })
       continue
     }
+    const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
+    if (detailMode) {
+      const depDate = parseDateCell(row[col.depDate], 0, 0)
+      if (!depDate) {
+        out.push({ rowNumber, date, problem: '入金日期看不懂（需要完整日期，格式 DD/MM/YY，例如 05/10/26）' })
+        continue
+      }
+      const dep = cellNumber(row[col.depAmount])
+      if (dep.bad || dep.value === undefined || dep.value <= 0) {
+        out.push({ rowNumber, date, problem: '入金金額必須是大於 0 的數字' })
+        continue
+      }
+      const rawTarget = col.target !== undefined ? row[col.target] : null
+      const blank = rawTarget === null || rawTarget === undefined || String(rawTarget).trim() === ''
+      const target = blank ? 'other' : parseRujuTargetCell(rawTarget)
+      if (!target) {
+        out.push({ rowNumber, date, problem: `入金對象看不懂：「${rawTarget}」（需要 Jeff B / Mao保 / 其他）` })
+        continue
+      }
+      out.push({ rowNumber, date, depositDate: depDate, depositAmount: dep.value, target, note })
+      continue
+    }
     const amtRes = cellNumber(row[col.amount])
     if (amtRes.bad || amtRes.value === undefined || amtRes.value <= 0) {
       out.push({ rowNumber, date, problem: '金額必須是大於 0 的數字' })
       continue
     }
-    const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
     out.push({ rowNumber, date, amount: amtRes.value, note })
   }
-  return { rows: out, mapped, ignored }
+  return { rows: out, mapped, ignored, detailMode }
+}
+
+// 入金明細 layout: group the valid rows by claim Date into one claim each.
+// bonus = 10% of the claim's 入金 total. Old-layout rows pass through as they are.
+// Rows with a `problem` are left out (the caller lists them separately).
+export function buildEmmaClaims(rows) {
+  const claims = []
+  const byDate = new Map()
+  for (const r of rows) {
+    if (r.problem) continue
+    if (r.depositAmount === undefined) {
+      claims.push(r)
+      continue
+    }
+    let c = byDate.get(r.date)
+    if (!c) {
+      c = { rowNumber: r.rowNumber, date: r.date, amount: 0, note: '', detail: [], depositTotal: 0 }
+      byDate.set(r.date, c)
+      claims.push(c)
+    }
+    c.detail.push({ entry_date: r.depositDate, amount: r.depositAmount, target: r.target, note: r.note, rowNumber: r.rowNumber })
+    c.depositTotal = Math.round((c.depositTotal + r.depositAmount + Number.EPSILON) * 100) / 100
+    c.amount = Math.round((c.depositTotal * EMMA_BONUS_RATE + Number.EPSILON) * 100) / 100
+  }
+  return claims
+}
+
+// Link each 入金 line to the matching Sunnybank 入金 already in the system
+// (same date + amount + 入金對象, one-to-one) so that 入金 is not offered for a
+// bonus again in 積欠 > Emma 總覽. `candidates` = bkData.loadEmmaCandidateEntries(),
+// `existing` = bkData.loadEmmaClaims(). Lines with no match stay unlinked
+// (entry_id null) — they are history only.
+export function linkEmmaDetailToEntries(claims, candidates, existing) {
+  const taken = new Set()
+  for (const c of existing) for (const r of c.rows ?? []) if (r.entry_id) taken.add(r.entry_id)
+  const pool = candidates.filter((e) => !taken.has(e.id))
+  return claims.map((c) => {
+    if (!c.detail) return c
+    const detail = c.detail.map((d) => {
+      const i = pool.findIndex(
+        (e) => e.entry_date === d.entry_date && Number(e.amount) === Number(d.amount) && (e.ruju_target ?? 'other') === d.target
+      )
+      if (i < 0) return { ...d, entry_id: null }
+      const [hit] = pool.splice(i, 1)
+      return { ...d, entry_id: hit.id }
+    })
+    return { ...c, detail }
+  })
 }
 
 // `existing` = bkData.loadEmmaClaims() rows.

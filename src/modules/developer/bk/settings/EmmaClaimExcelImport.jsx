@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
-import { markEmmaClaimDuplicates, parseEmmaClaimRows, readWorkbookRows } from '../bkImport'
-import { bulkImportEmmaClaimRows, loadEmmaClaims } from '../bkData'
+import { buildEmmaClaims, linkEmmaDetailToEntries, markEmmaClaimDuplicates, parseEmmaClaimRows, readWorkbookRows } from '../bkImport'
+import { bulkImportEmmaClaimRows, loadEmmaCandidateEntries, loadEmmaClaims, loadStores } from '../bkData'
 import { fmtMoney } from '../bkUtils'
 import { Notice } from '../bkUi'
 
@@ -11,6 +11,8 @@ import { Notice } from '../bkUi'
 // (submitted date + total amount); it carries no underlying 入金 rows since
 // those only exist for claims actually built in the system. Direct-to-DB,
 // dedupe-by-default (same 提交日期 + 金額 is skipped) like the other ledgers.
+const TARGET_LABELS = { jeff_bank: 'Jeff B', mao_safe: 'Mao保', other: '其他' }
+
 export default function EmmaClaimExcelImport({ file, onImported, onClose }) {
   const [state, setState] = useState({ loading: true })
   const [importing, setImporting] = useState(false)
@@ -26,9 +28,12 @@ export default function EmmaClaimExcelImport({ file, onImported, onClose }) {
           if (!cancelled) setState({ result: parsed, sheetName: sheet.name })
           return
         }
-        const existing = await loadEmmaClaims()
-        const rows = markEmmaClaimDuplicates(parsed.rows, existing)
-        if (!cancelled) setState({ result: { ...parsed, rows }, sheetName: sheet.name })
+        const [existing, stores] = await Promise.all([loadEmmaClaims(), loadStores()])
+        const sunnybank = stores.find((s) => s.name === 'Sunnybank')
+        const candidates = sunnybank && parsed.detailMode ? await loadEmmaCandidateEntries(sunnybank.id) : []
+        const problemRows = parsed.rows.filter((r) => r.problem)
+        const claims = markEmmaClaimDuplicates(linkEmmaDetailToEntries(buildEmmaClaims(parsed.rows), candidates, existing), existing)
+        if (!cancelled) setState({ result: { ...parsed, rows: [...claims, ...problemRows] }, sheetName: sheet.name })
       } catch (e) {
         if (!cancelled) setState({ failed: `無法讀取這個檔案（需要 .xlsx 格式）：${e.message}` })
       }
@@ -88,7 +93,7 @@ export default function EmmaClaimExcelImport({ file, onImported, onClose }) {
             {state.sheetName ? `（工作表：${state.sheetName}）` : ''}
           </div>
           <Notice kind="info">
-            需要 Date / Amount 欄。每一列會變成一筆歷史的 bonus 領取紀錄（不會對應到特定的入金明細）。已經在系統裡的紀錄（提交日期 + 金額都相同）會自動跳過，不會重複匯入。
+            入金明細：每一列是一筆入金（Date、入金日期、入金金額、入金對象），Date 相同的列會合成一筆 bonus 紀錄，Bonus = 入金總和的 10%。舊格式（Date / Amount）也還能用，但沒有入金明細。已經在系統裡的紀錄（提交日期 + Bonus 金額都相同）會自動跳過；跟系統裡既有入金對得上的明細會自動對應。
           </Notice>
 
           {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
@@ -109,15 +114,29 @@ export default function EmmaClaimExcelImport({ file, onImported, onClose }) {
                 <thead className="bg-brand-100 text-left text-xs text-gray-700">
                   <tr>
                     <th className="px-3 py-2">提交日期</th>
-                    <th className="px-3 py-2">備註</th>
-                    <th className="px-3 py-2 text-right">金額</th>
+                    <th className="px-3 py-2">入金明細</th>
+                    <th className="px-3 py-2 text-right">Bonus 金額</th>
                   </tr>
                 </thead>
                 <tbody>
                   {importable.map((r) => (
                     <tr key={r.rowNumber} className="border-t border-gray-100">
                       <td className="whitespace-nowrap px-3 py-2">{r.date}</td>
-                      <td className="px-3 py-2">{r.note || ''}</td>
+                      <td className="px-3 py-2">
+                        {r.detail ? (
+                          <ul className="space-y-0.5">
+                            {r.detail.map((d, i) => (
+                              <li key={i} className="whitespace-nowrap text-xs">
+                                {d.entry_date} · {fmtMoney(d.amount)} · {TARGET_LABELS[d.target] ?? d.target}
+                                {d.entry_id ? <span className="ml-1 text-green-700">（對應到系統入金）</span> : null}
+                                {d.note ? <span className="ml-1 text-gray-500">{d.note}</span> : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          r.note || ''
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.amount)}</td>
                     </tr>
                   ))}

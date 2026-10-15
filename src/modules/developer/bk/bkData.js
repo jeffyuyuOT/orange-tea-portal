@@ -457,7 +457,17 @@ export async function bulkImportEmmaClaimRows(importRows) {
       importRows.map((r) => ({
         submitted_at: r.date,
         total_amount: toNum(r.amount),
-        rows: [{ entry_id: null, entry_date: r.date, amount: toNum(r.amount), note: r.note || '（匯入的歷史紀錄）' }],
+        // 入金明細 layout: one detail row per 入金 (with where it went); the old
+        // Date/Amount layout keeps its single synthetic row.
+        rows: r.detail
+          ? r.detail.map((d) => ({
+              entry_id: d.entry_id ?? null,
+              entry_date: d.entry_date,
+              amount: toNum(d.amount),
+              target: d.target ?? null,
+              note: d.note || '（匯入的歷史紀錄）',
+            }))
+          : [{ entry_id: null, entry_date: r.date, amount: toNum(r.amount), note: r.note || '（匯入的歷史紀錄）' }],
       }))
     )
   )

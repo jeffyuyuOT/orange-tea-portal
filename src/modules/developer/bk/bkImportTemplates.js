@@ -23,13 +23,14 @@ function headerRow(ws, headers) {
   ws.columns.forEach((col, i) => {
     col.width = Math.max(14, (headers[i]?.length ?? 0) * 1.6)
   })
-  const dateCol = headers.findIndex((h) => h === 'Date' || h === '日期')
-  if (dateCol >= 0) ws.getColumn(dateCol + 1).numFmt = DATE_FORMAT
+  headers.forEach((h, i) => {
+    if (h === 'Date' || h === '日期' || h === '入金日期') ws.getColumn(i + 1).numFmt = DATE_FORMAT
+  })
 }
 
 async function buildTemplate(sheets) {
   const wb = await newWorkbook()
-  for (const { name, headers, example, note } of sheets) {
+  for (const { name, headers, example, examples, note } of sheets) {
     const ws = wb.addWorksheet(name)
     if (note) {
       ws.addRow([note]).font = { italic: true, color: { argb: 'FF888888' } }
@@ -37,6 +38,7 @@ async function buildTemplate(sheets) {
     }
     headerRow(ws, headers)
     if (example) ws.addRow(example.map(asDate))
+    for (const ex of examples ?? []) ws.addRow(ex.map(asDate))
   }
   return wb
 }
@@ -132,9 +134,13 @@ export async function downloadEmmaClaimTemplate() {
   const wb = await buildTemplate([
     {
       name: '積欠Emma',
-      note: `${DATE_NOTE}每一列是一筆歷史的 bonus 領取紀錄（提交日期 + 總金額），不會對應到特定的 U帳 入金明細 — 那些明細只有當時在系統裡建立的紀錄才有。`,
-      headers: ['Date', 'Amount', 'Note'],
-      example: ['01/09/26', 450, '9 月份 bonus'],
+      note: `${DATE_NOTE}每一列是一筆 Sunnybank 入金：Date = 這次 bonus 領取（提交）的日期，入金日期 / 入金金額 = 那筆入金，入金對象填 Jeff B / Mao保 / 其他（留白 = 其他）。Date 相同的列會合成一筆 bonus 紀錄，Bonus 金額 = 這些入金總和的 10%。系統裡已經有的同日期、同金額、同入金對象的入金會自動對應，不會再被重複領 bonus。`,
+      headers: ['Date', '入金日期', '入金金額', '入金對象', 'Note'],
+      examples: [
+        ['14/10/26', '01/10/26', 1200, 'Jeff B', ''],
+        ['14/10/26', '07/10/26', 800, 'Mao保', '現金入金'],
+        ['14/10/26', '09/10/26', 500, '其他', ''],
+      ],
     },
   ])
   await download(wb, 'BK匯入範本_積欠Emma.xlsx')
