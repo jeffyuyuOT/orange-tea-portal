@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import { loadStores } from './bkData'
 import { loadSalesStores } from './bkSalesData'
 import { Notice } from './bkUi'
-import SalesFigureTab from './sales/SalesFigureTab'
-import BizTab from './biz/BizTab'
-import UAccountTab from './ucash/UAccountTab'
-import BonusTab from './bonus/BonusTab'
-import OwedPage from './owed/OwedPage'
-import HistoryTab from './history/HistoryTab'
-import SettingsTab from './settings/SettingsTab'
+const SalesFigureTab = lazy(() => import('./sales/SalesFigureTab'))
+const BizTab = lazy(() => import('./biz/BizTab'))
+const UAccountTab = lazy(() => import('./ucash/UAccountTab'))
+const BonusTab = lazy(() => import('./bonus/BonusTab'))
+const OwedPage = lazy(() => import('./owed/OwedPage'))
+const HistoryTab = lazy(() => import('./history/HistoryTab'))
+const SettingsTab = lazy(() => import('./settings/SettingsTab'))
 import BackupGuard from './BackupGuard'
 
 // BK (記帳) — developer-only bookkeeping page. Gated by RequirePage on
@@ -188,6 +188,7 @@ export default function BkPage() {
         <>
           {visited.has('sf') && (
             <div className={tab === 'sf' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <SalesFigureTab
                 stores={stores}
                 salesStores={salesStores}
@@ -199,15 +200,19 @@ export default function BkPage() {
                 onTabDirty={onSfDirty}
                 registerSaver={registerSaver}
               />
+            </Suspense>
             </div>
           )}
           {visited.has('biz') && (
             <div className={tab === 'biz' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <BizTab stores={salesStores} topActive={tab === 'biz'} onTabDirty={onBizDirty} registerSaver={registerSaver} />
+            </Suspense>
             </div>
           )}
           {visited.has('u') && (
             <div className={tab === 'u' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <UAccountTab
                 stores={stores}
                 topActive={tab === 'u'}
@@ -216,20 +221,26 @@ export default function BkPage() {
                 onTabDirty={onUDirty}
                 registerSaver={registerSaver}
               />
+            </Suspense>
             </div>
           )}
           {visited.has('bonus') && (
             <div className={tab === 'bonus' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <BonusTab stores={stores} topActive={tab === 'bonus'} />
+            </Suspense>
             </div>
           )}
           {visited.has('owed') && (
             <div className={tab === 'owed' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <OwedPage stores={stores} topActive={tab === 'owed'} />
+            </Suspense>
             </div>
           )}
           {visited.has('history') && (
             <div className={tab === 'history' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <HistoryTab
                 stores={stores}
                 salesStores={salesStores}
@@ -237,10 +248,12 @@ export default function BkPage() {
                 onLoadSf={loadSf}
                 onLoadCash={loadCash}
               />
+            </Suspense>
             </div>
           )}
           {visited.has('settings') && (
             <div className={tab === 'settings' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
               <SettingsTab
                 stores={stores}
                 salesStores={salesStores}
@@ -248,6 +261,7 @@ export default function BkPage() {
                 onSalesStoresChanged={reloadSalesStores}
                 onPaymentTypesChanged={() => setTypesVersion((v) => v + 1)}
               />
+            </Suspense>
             </div>
           )}
         </>

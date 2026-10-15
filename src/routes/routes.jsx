@@ -1,3 +1,4 @@
+import { lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from '../components/layout/AppShell'
 import RequireAuth from './RequireAuth'
@@ -5,41 +6,45 @@ import RequirePage from './RequirePage'
 import { useAuth } from '../lib/AuthContext'
 import { firstAccessiblePagePath } from '../lib/sidebarOrder'
 
-import SetPasswordPage from '../modules/auth/SetPasswordPage'
+const SetPasswordPage = lazy(() => import('../modules/auth/SetPasswordPage'))
 
-import FormulaPage from '../modules/operations-training/formula/FormulaPage'
-import ShopTrainingPage from '../modules/operations-training/shop-training/ShopTrainingPage'
+const FormulaPage = lazy(() => import('../modules/operations-training/formula/FormulaPage'))
+const ShopTrainingPage = lazy(() => import('../modules/operations-training/shop-training/ShopTrainingPage'))
 
-import DashboardLayout from '../modules/dashboard/DashboardLayout'
-import BulletinPage from '../modules/dashboard/bulletin/BulletinPage'
-import MessagePage from '../modules/dashboard/message/MessagePage'
-import SupportPage from '../modules/support/SupportPage'
-import StudyLogPage from '../modules/dashboard/study-log/StudyLogPage'
-import TimeAttendancePage from '../modules/dashboard/time-attendance/TimeAttendancePage'
-import MyInformationPage from '../modules/dashboard/my-information/MyInformationPage'
+const DashboardLayout = lazy(() => import('../modules/dashboard/DashboardLayout'))
+const BulletinPage = lazy(() => import('../modules/dashboard/bulletin/BulletinPage'))
+const MessagePage = lazy(() => import('../modules/dashboard/message/MessagePage'))
+const SupportPage = lazy(() => import('../modules/support/SupportPage'))
+const StudyLogPage = lazy(() => import('../modules/dashboard/study-log/StudyLogPage'))
+const TimeAttendancePage = lazy(() => import('../modules/dashboard/time-attendance/TimeAttendancePage'))
+const MyInformationPage = lazy(() => import('../modules/dashboard/my-information/MyInformationPage'))
 
-import LearningTrackerPage from '../modules/shop-management/learning-tracker/LearningTrackerPage'
-import StaffListPage from '../modules/shop-management/staff-information/StaffListPage'
-import StaffTimeLogsPage from '../modules/shop-management/staff-time-logs/StaffTimeLogsPage'
-import QrCodeDisplayPage from '../modules/shop-management/qr-code-display/QrCodeDisplayPage'
+const LearningTrackerPage = lazy(() => import('../modules/shop-management/learning-tracker/LearningTrackerPage'))
+const StaffListPage = lazy(() => import('../modules/shop-management/staff-information/StaffListPage'))
+const StaffTimeLogsPage = lazy(() => import('../modules/shop-management/staff-time-logs/StaffTimeLogsPage'))
+const QrCodeDisplayPage = lazy(() => import('../modules/shop-management/qr-code-display/QrCodeDisplayPage'))
 
-import MyRosterPage from '../modules/roster-hub/my-roster/MyRosterPage'
-import MyAvailabilityPage from '../modules/roster-hub/my-availability/MyAvailabilityPage'
-import ManageRosterPage from '../modules/roster-hub/manage-roster/ManageRosterPage'
-import RosterHistoryPage from '../modules/roster-hub/history/RosterHistoryPage'
-import LeaveManagementPage from '../modules/roster-hub/leave-management/LeaveManagementPage'
-import RosterSettingsPage from '../modules/roster-hub/settings/RosterSettingsPage'
+const MyRosterPage = lazy(() => import('../modules/roster-hub/my-roster/MyRosterPage'))
+const MyAvailabilityPage = lazy(() => import('../modules/roster-hub/my-availability/MyAvailabilityPage'))
+const ManageRosterPage = lazy(() => import('../modules/roster-hub/manage-roster/ManageRosterPage'))
+const RosterHistoryPage = lazy(() => import('../modules/roster-hub/history/RosterHistoryPage'))
+const LeaveManagementPage = lazy(() => import('../modules/roster-hub/leave-management/LeaveManagementPage'))
+const RosterSettingsPage = lazy(() => import('../modules/roster-hub/settings/RosterSettingsPage'))
 
-import FormulaDatabasePage from '../modules/admin-center/formula-database/FormulaDatabasePage'
-import AdminQuizBankPage from '../modules/admin-center/quiz-bank/AdminQuizBankPage'
-import FileRepositoryPage from '../modules/admin-center/file-repository/FileRepositoryPage'
-import UserManagementPage from '../modules/admin-center/user-management/UserManagementPage'
-import StoreManagementPage from '../modules/admin-center/store-management/StoreManagementPage'
-import SystemSettingPage from '../modules/admin-center/system-setting/SystemSettingPage'
-import AdminTrainingJourneySettingPage from '../modules/admin-center/training-journey/AdminTrainingJourneySettingPage'
+const FormulaDatabasePage = lazy(() => import('../modules/admin-center/formula-database/FormulaDatabasePage'))
+const AdminQuizBankPage = lazy(() => import('../modules/admin-center/quiz-bank/AdminQuizBankPage'))
+const FileRepositoryPage = lazy(() => import('../modules/admin-center/file-repository/FileRepositoryPage'))
+const UserManagementPage = lazy(() => import('../modules/admin-center/user-management/UserManagementPage'))
+const StoreManagementPage = lazy(() => import('../modules/admin-center/store-management/StoreManagementPage'))
+const SystemSettingPage = lazy(() => import('../modules/admin-center/system-setting/SystemSettingPage'))
+const AdminTrainingJourneySettingPage = lazy(() => import('../modules/admin-center/training-journey/AdminTrainingJourneySettingPage'))
 
-import PayrollPage from '../modules/developer/payroll/PayrollPage'
-import BkPage from '../modules/developer/bk/BkPage'
+const PayrollPage = lazy(() => import('../modules/developer/payroll/PayrollPage'))
+const BkPage = lazy(() => import('../modules/developer/bk/BkPage'))
+
+// Pages are lazy-loaded (Jeff, 2026-10-15: first login was slow/hanging) so the
+// sign-in screen no longer downloads every page of the app up front. The
+// <Suspense> boundary lives in AppShell around the page Outlet.
 
 // Jeff, 2026-09: Quiz Bank + Shop Training Database merged into a "Training
 // Centre" tab bar (TrainingCentreLayout.jsx), which itself lives inside
@@ -50,10 +55,10 @@ import BkPage from '../modules/developer/bk/BkPage'
 // (import above, routed under /admin-center/quiz-bank below) is a
 // different page entirely, see permissions.js's admin_center.quiz_bank
 // comment for the fuller history.
-import TrainingCentreLayout from '../modules/shop-management/training-centre/TrainingCentreLayout'
-import TrainingCentreQuizBankPage from '../modules/shop-management/training-centre/quiz-bank/QuizBankPage'
-import TrainingCentreShopTrainingDatabasePage from '../modules/shop-management/training-centre/shop-training-database/ShopTrainingDatabasePage'
-import TrainingCentreTrainingJourneySettingPage from '../modules/shop-management/training-centre/training-journey-setting/TrainingJourneySettingPage'
+const TrainingCentreLayout = lazy(() => import('../modules/shop-management/training-centre/TrainingCentreLayout'))
+const TrainingCentreQuizBankPage = lazy(() => import('../modules/shop-management/training-centre/quiz-bank/QuizBankPage'))
+const TrainingCentreShopTrainingDatabasePage = lazy(() => import('../modules/shop-management/training-centre/shop-training-database/ShopTrainingDatabasePage'))
+const TrainingCentreTrainingJourneySettingPage = lazy(() => import('../modules/shop-management/training-centre/training-journey-setting/TrainingJourneySettingPage'))
 
 function guarded(pageKey, element) {
   return <RequirePage pageKey={pageKey}>{element}</RequirePage>

@@ -14,6 +14,11 @@ import {
 
 export const BACKUP_CHANGED_EVENT = 'bk-backup-changed'
 
+function nearBackupTime() {
+  const hour = Number(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Brisbane', hour: '2-digit', hour12: false }).format(new Date()))
+  return hour >= 22
+}
+
 // Lives inside BkPage (so it only works while the BK page is open and logged in).
 //  - On entering BK: reads the backup log; if today's 22:30 backup is due and
 //    still missing it is made right away (when the folder permission is still
@@ -59,7 +64,13 @@ export default function BackupGuard() {
 
   useEffect(() => {
     refresh()
-    const id = setInterval(refresh, 30000)
+    // The 30 s tick only has something to do around the 22:30 backup time, so
+    // outside 22:00–23:59 (Brisbane) — or while the tab is hidden — it skips the
+    // two Supabase reads. Opening BK and the change event still refresh at once.
+    const id = setInterval(() => {
+      if (document.hidden || !nearBackupTime()) return
+      refresh()
+    }, 30000)
     const onChange = () => refresh()
     window.addEventListener(BACKUP_CHANGED_EVENT, onChange)
     return () => {

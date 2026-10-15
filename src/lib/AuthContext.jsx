@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { addMonths } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { getEffectivePages, canAccessPage } from './permissions'
@@ -27,6 +27,7 @@ export function AuthProvider({ children }) {
     () => localStorage.getItem('ot_current_store_id') || null
   )
   const [loading, setLoading] = useState(true)
+  const loadedUserRef = useRef(null)
   // Jeff, 2026-10-07: "training staff現在不需要經過training code就可以登入"
   // — this used to also carry a `needsTrainingCode` flag (training-role
   // accounts had to additionally verify a weekly 4-digit code before the
@@ -143,32 +144,40 @@ export function AuthProvider({ children }) {
     refreshSidebarOrder()
   }, [session, refreshSidebarOrder])
 
+  // Loads profile + permission overrides + accessible stores. The slow part of
+  // sign-in used to be five queries run strictly one after another, and any one
+  // of them failing left `loading` stuck on forever — so: independent queries
+  // run together, one retry on a failed profile read, and errors are logged
+  // instead of thrown (callers always get to clear `loading`).
   const loadProfileData = useCallback(async (userId) => {
-    const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(profileRow ?? null)
+    try {
+      let { data: profileRow, error: profileErr } = await supabase.from('profiles').select('*').eq('id', userId).single()
+      if (profileErr) {
+        await new Promise((r) => setTimeout(r, 600))
+        ;({ data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single())
+      }
+      setProfile(profileRow ?? null)
+      if (!profileRow) return
+      loadedUserRef.current = userId
 
-    if (profileRow) {
-      const { data: overrideRows } = await supabase
-        .from('permission_overrides')
-        .select('page_key, allowed')
-        .eq('profile_id', userId)
-      setOverrides(overrideRows ?? [])
+      const isAllStores = profileRow.role === 'admin' || profileRow.role === 'developer'
+      const [overridesRes, storesRes] = await Promise.all([
+        supabase.from('permission_overrides').select('page_key, allowed').eq('profile_id', userId),
+        isAllStores
+          ? supabase.from('stores').select('id, name, code').eq('is_active', true)
+          : supabase.from('user_stores').select('store_id, stores ( id, name, code )').eq('profile_id', userId),
+      ])
+      setOverrides(overridesRes.data ?? [])
 
-      let storeIds = new Set()
-      if (profileRow.primary_store_id) storeIds.add(profileRow.primary_store_id)
-      // developer is admin's superset (see permissions.js / migration
-      // 0058_developer_is_admin_superset.sql) — same "sees every store"
-      // treatment, not scoped to whatever user_stores rows it happens to
-      // have (it may have none at all, same as a fresh admin account).
-      if (profileRow.role === 'admin' || profileRow.role === 'developer') {
-        const { data: allStores } = await supabase.from('stores').select('id, name, code').eq('is_active', true)
-        setAccessibleStores(allStores ?? [])
+      if (isAllStores) {
+        // developer is admin's superset (see permissions.js / migration
+        // 0058_developer_is_admin_superset.sql) — same "sees every store"
+        // treatment, not scoped to whatever user_stores rows it happens to have.
+        setAccessibleStores(storesRes.data ?? [])
       } else {
-        const { data: userStoreRows } = await supabase
-          .from('user_stores')
-          .select('store_id, stores ( id, name, code )')
-          .eq('profile_id', userId)
-        userStoreRows?.forEach((r) => r.store_id && storeIds.add(r.store_id))
+        const storeIds = new Set()
+        if (profileRow.primary_store_id) storeIds.add(profileRow.primary_store_id)
+        storesRes.data?.forEach((r) => r.store_id && storeIds.add(r.store_id))
         const ids = Array.from(storeIds)
         if (ids.length) {
           const { data: storeRows } = await supabase.from('stores').select('id, name, code').in('id', ids)
@@ -177,30 +186,54 @@ export function AuthProvider({ children }) {
           setAccessibleStores([])
         }
       }
+    } catch (e) {
+      console.error('loadProfileData failed', e)
     }
   }, [])
 
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return
-      setSession(data.session)
-      if (data.session?.user) await loadProfileData(data.session.user.id)
-      setLoading(false)
-    })
+    // Safety net: if the session/profile requests hang (bad network, slow
+    // cold start), stop showing "Loading your session…" after 12s and fall
+    // through to the sign-in page rather than spinning forever.
+    const watchdog = setTimeout(() => mounted && setLoading(false), 12000)
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!mounted) return
+        setSession(data.session)
+        if (data.session?.user) await loadProfileData(data.session.user.id)
+      })
+      .catch((e) => console.error('getSession failed', e))
+      .finally(() => {
+        clearTimeout(watchdog)
+        if (mounted) setLoading(false)
+      })
+
+    // NOTE: supabase-js holds an internal auth lock while it runs this
+    // callback, and any supabase call awaited INSIDE it waits on that same
+    // lock — a known cause of random hangs (esp. on token refresh / returning
+    // to the tab). So it stays synchronous and defers the profile load.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession)
-      if (newSession?.user) {
-        await loadProfileData(newSession.user.id)
-      } else {
+      if (!newSession?.user) {
+        loadedUserRef.current = null
         setProfile(null)
         setOverrides([])
         setAccessibleStores([])
+        return
       }
+      // The first load is handled by getSession() above; a token refresh
+      // doesn't change the profile; SIGNED_IN also re-fires when the tab
+      // regains focus — skip when this user is already loaded.
+      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return
+      if (event === 'SIGNED_IN' && loadedUserRef.current === newSession.user.id) return
+      setTimeout(() => loadProfileData(newSession.user.id), 0)
     })
     return () => {
       mounted = false
+      clearTimeout(watchdog)
       sub.subscription.unsubscribe()
     }
   }, [loadProfileData])

@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar, { SidebarBrand, SidebarNavLinks } from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
 import { useAuth } from '../../lib/AuthContext'
 import { ROLE_LABELS, canAccessPage } from '../../lib/permissions'
 import { useClockInOut } from '../../lib/useClockInOut'
-import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
-import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
 import Modal from '../ui/Modal'
+import LoadingSpinner from '../ui/LoadingSpinner'
+
+// Only needed once someone actually taps the clock-in camera / sees its result.
+const QrScannerModal = lazy(() => import('../../modules/dashboard/time-attendance/QrScannerModal'))
+const ClockFeedbackModal = lazy(() => import('../../modules/dashboard/time-attendance/ClockFeedbackModal'))
 import { supabase } from '../../lib/supabaseClient'
 
 export default function AppShell() {
@@ -209,13 +212,23 @@ export default function AppShell() {
               itself in its own overflow-x-auto container, so this doesn't
               affect those. */}
           <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
-            <Outlet />
+            <Suspense
+              fallback={
+                <div className="flex justify-center py-16">
+                  <LoadingSpinner label="Loading…" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </main>
         </div>
       </div>
 
       {canClockInOut && clockInOut.showScanner && (
-        <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
+        <Suspense fallback={null}>
+          <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
+        </Suspense>
       )}
       {/* The header button can be tapped from any page, so its result can't
           rely on a fixed spot in that page's own layout the way
@@ -225,7 +238,9 @@ export default function AppShell() {
           cleared itself after a few seconds didn't stop someone from
           tapping 📷 again before they'd even registered the first result. */}
       {canClockInOut && clockInOut.feedback && (
-        <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
+        <Suspense fallback={null}>
+          <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
+        </Suspense>
       )}
 
       {showQualifiedPopup && (
