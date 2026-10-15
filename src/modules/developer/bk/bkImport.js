@@ -109,6 +109,8 @@ export function parseDateCell(v, year, month) {
   if (m) return validDate(Number(m[1]), Number(m[2]), Number(m[3]))
   m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/) // day first (Australian)
   if (m) return validDate(Number(m[3]), Number(m[2]), Number(m[1]))
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})(?!\d)/) // DD/MM/YY (the import files' date format)
+  if (m) return validDate(2000 + Number(m[3]), Number(m[2]), Number(m[1]))
   m = s.match(/^(\d{1,2})(?:\D|$)/) // "5", "5 Mon", "5日"
   if (m) return validDate(year, month, Number(m[1]))
   return null
@@ -547,7 +549,7 @@ export function parseLedgerRows(rows, { stores, defaultStoreId }) {
     const rowNumber = r + 1
     const date = parseDateCell(row[col.date], 0, 0) // no implied month: bare day numbers are rejected
     if (!date) {
-      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，格式 DD/MM/YY，例如 05/10/26）' })
       continue
     }
     const kind = parseLedgerKindCell(row[col.kind])
@@ -710,7 +712,7 @@ export function parseDividendRows(rows, { stores, parties }) {
     const rowNumber = r + 1
     const date = parseDateCell(row[col.date], 0, 0)
     if (!date) {
-      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，格式 DD/MM/YY，例如 05/10/26）' })
       continue
     }
     const store = findStoreByName(stores, row[col.store])
@@ -862,7 +864,7 @@ export function parseJeffOwedRows(rows) {
     const rowNumber = r + 1
     const date = parseDateCell(row[col.date], 0, 0)
     if (!date) {
-      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，格式 DD/MM/YY，例如 05/10/26）' })
       continue
     }
     const kind = parseJeffOwedKindCell(row[col.kind])
@@ -926,7 +928,7 @@ export function parseEmmaClaimRows(rows) {
     const rowNumber = r + 1
     const date = parseDateCell(row[col.date], 0, 0)
     if (!date) {
-      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，例如 2026-10-05）' })
+      out.push({ rowNumber, problem: '日期看不懂（需要完整日期，格式 DD/MM/YY，例如 05/10/26）' })
       continue
     }
     const amtRes = cellNumber(row[col.amount])
