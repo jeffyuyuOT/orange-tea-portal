@@ -7,6 +7,9 @@ import { brisbaneTodayStr, fmtMoney, round2 } from '../bkUtils'
 import { Notice, SubTabs, inputCls } from '../bkUi'
 
 const BONUS_RATE = 0.1
+// Where each 入金 went (bk_cash_entries.ruju_target).
+const TARGET_LABELS = { jeff_bank: 'Jeff B', mao_safe: 'Mao保', other: '其他' }
+const targetLabel = (t) => TARGET_LABELS[t] ?? '—'
 const SUB_TABS = [
   ['overview', '總覽'],
   ['history', '歷史紀錄'],
@@ -31,7 +34,7 @@ export default function EmmaBonusTab({ stores, topActive = true }) {
       {sub === 'overview' ? (
         <EmmaOverview sunnybankId={sunnybank.id} active={topActive} />
       ) : (
-        <EmmaHistory active={topActive} />
+        <EmmaHistory sunnybankId={sunnybank.id} active={topActive} />
       )}
     </div>
   )
@@ -92,7 +95,7 @@ function EmmaOverview({ sunnybankId, active }) {
       await saveEmmaClaim({
         submittedAt: brisbaneTodayStr(),
         totalAmount: bonusTotal,
-        rows: checkedEntries.map((e) => ({ entry_id: e.id, entry_date: e.entry_date, amount: Number(e.amount), note: notes[e.id].trim() })),
+        rows: checkedEntries.map((e) => ({ entry_id: e.id, entry_date: e.entry_date, amount: Number(e.amount), target: e.ruju_target ?? null, note: notes[e.id].trim() })),
       })
       setSaved(true)
       await reload()
@@ -124,6 +127,7 @@ function EmmaOverview({ sunnybankId, active }) {
                 <th className="px-3 py-2">bonus 領取</th>
                 <th className="px-3 py-2">日期</th>
                 <th className="px-3 py-2 text-right">金額</th>
+                <th className="px-3 py-2">入金對象</th>
                 <th className="px-3 py-2">附註（勾選後必填）</th>
               </tr>
             </thead>
@@ -135,6 +139,7 @@ function EmmaOverview({ sunnybankId, active }) {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2">{e.entry_date}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(Number(e.amount))}</td>
+                  <td className="whitespace-nowrap px-3 py-2">{targetLabel(e.ruju_target)}</td>
                   <td className="px-3 py-2">
                     {checked[e.id] && (
                       <input
@@ -168,25 +173,30 @@ function EmmaOverview({ sunnybankId, active }) {
   )
 }
 
-function EmmaHistory({ active }) {
+function EmmaHistory({ sunnybankId, active }) {
   const [claims, setClaims] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [open, setOpen] = useState(null)
+  const [targets, setTargets] = useState({}) // { [entryId]: ruju_target } — for claims saved before the target was stored with them
 
   useEffect(() => {
     if (!active) return
     let cancelled = false
     setLoading(true)
     setError('')
-    loadEmmaClaims()
-      .then((r) => !cancelled && setClaims(r))
+    Promise.all([loadEmmaClaims(), loadEmmaCandidateEntries(sunnybankId)])
+      .then(([r, e]) => {
+        if (cancelled) return
+        setClaims(r)
+        setTargets(Object.fromEntries(e.map((x) => [x.id, x.ruju_target])))
+      })
       .catch((e) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [active])
+  }, [active, sunnybankId])
 
   if (loading) return <LoadingSpinner />
 
@@ -235,6 +245,7 @@ function EmmaHistory({ active }) {
                 <tr>
                   <th className="px-3 py-2">日期</th>
                   <th className="px-3 py-2 text-right">金額</th>
+                  <th className="px-3 py-2">入金對象</th>
                   <th className="px-3 py-2">附註</th>
                 </tr>
               </thead>
@@ -243,6 +254,7 @@ function EmmaHistory({ active }) {
                   <tr key={r.entry_id ?? i} className="border-t border-gray-100">
                     <td className="whitespace-nowrap px-3 py-2">{r.entry_date}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(Number(r.amount))}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{targetLabel(r.target ?? targets[r.entry_id])}</td>
                     <td className="px-3 py-2">{r.note}</td>
                   </tr>
                 ))}
