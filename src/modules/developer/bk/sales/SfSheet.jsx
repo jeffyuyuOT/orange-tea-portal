@@ -33,7 +33,6 @@ import { loadSalesMonth } from '../bkSalesData'
 import { selfOMapFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import ImportByImage from './ImportByImage'
-import SfExcelImport from './SfExcelImport'
 
 const emptyDay = () => ({ o_ca: '', o_post: '', total: '', amounts: {} })
 
@@ -61,9 +60,6 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
   const [problems, setProblems] = useState(null)
   const [mismatch, setMismatch] = useState(null) // { reference, counts: [{ id, name, days }] }
   const [copied, setCopied] = useState(null) // type id just copied
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [importFile, setImportFile] = useState(null)
-  const fileInputRef = useRef(null)
   // The saved month row of what is on screen (keyed, so a save can never use another store / month's row)
   const monthKey = `${store.id}|${year}|${month}`
   const sfMonthRef = useRef({ key: '', month: null })
@@ -310,7 +306,6 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
   }
 
   async function doExport() {
-    setMenuOpen(false)
     try {
       await exportSfXlsx({ storeName: store.name, year, month, columns, days, dMap, kioskMap: bizStoreId ? selfOMap : undefined })
     } catch (e) {
@@ -338,7 +333,6 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
       return next
     })
     setDirty(true)
-    setImportFile(null)
     setError('')
     setMsg(`已把 ${Object.keys(entries).length} 天的${source}資料填進表格，請檢查後按「提交」。`)
   }
@@ -392,60 +386,17 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
         <YearMonthPicker year={year} month={month} onChange={(v) => onNavigate(v)} />
         <Badge color={status.color}>{status.text}</Badge>
         <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
-            <Button variant="secondary" onClick={() => setMenuOpen((v) => !v)}>
-              Action ▾
-            </Button>
-            {menuOpen && (
-              <div className="absolute right-0 z-30 mt-1 w-48 overflow-hidden rounded-lg border border-brand-100 bg-white shadow-lg">
-                <button
-                  type="button"
-                  disabled={!canExport}
-                  onClick={doExport}
-                  title={canExport ? '' : '只有已提交且沒有未提交變更的 SF 才能匯出'}
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-white"
-                >
-                  匯出 Excel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    fileInputRef.current?.click()
-                  }}
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50"
-                >
-                  匯入 Excel
-                </button>
-              </div>
-            )}
-          </div>
+          <Button
+            variant="secondary"
+            disabled={!canExport}
+            onClick={doExport}
+            title={canExport ? '' : '只有已提交且沒有未提交變更的 SF 才能匯出'}
+          >
+            匯出 Excel
+          </Button>
         </div>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        className="hidden"
-        data-testid="sf-excel-input"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          e.target.value = '' // picking the same file again should still fire
-          if (f) setImportFile(f)
-        }}
-      />
-      {importFile && (
-        <SfExcelImport
-          file={importFile}
-          columns={columns}
-          year={year}
-          month={month}
-          days={days}
-          onApply={applyImport}
-          onClose={() => setImportFile(null)}
-        />
-      )}
 
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}

@@ -29,7 +29,6 @@ import { listCashDayRows, listEntries, loadCashMonth, loadOpeningBalance, saveCa
 import { exportCashXlsx } from '../bkExcel'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
-import CashDayExcelImport from './CashDayExcelImport'
 
 const emptyCashDay = () => ({ actual_ca: '', d_amount: '', d_stocked: false })
 
@@ -209,10 +208,9 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [noteText, setNoteText] = useState(null)
   const [balanceForm, setBalanceForm] = useState(null)
   const [dInfo, setDInfo] = useState(null) // date whose 可 D 金額 popup is open
-  const [importFile, setImportFile] = useState(null)
+  const [actionOpen, setActionOpen] = useState(false)
   const [fyOther, setFyOther] = useState(undefined) // P/L of the FY's other months (saved data)
   const [detail, setDetail] = useState(null) // { key, title, kinds } of the open side-list window
-  const fileInputRef = useRef(null)
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -376,21 +374,6 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     }
   }
 
-  // 匯入 Excel: the picked file is previewed in CashDayExcelImport; 套用 fills
-  // cashDays (never saves — 儲存 still needs pressing, same as Sales figure).
-  function applyImport(entries) {
-    setCashDays((prev) => {
-      const next = { ...prev }
-      for (const [date, entry] of Object.entries(entries)) {
-        next[date] = { ...emptyCashDay(), ...next[date], ...entry }
-      }
-      return next
-    })
-    setDirty(true)
-    setMsg('')
-    setImportFile(null)
-  }
-
   async function openBalance() {
     setError('')
     try {
@@ -428,38 +411,49 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         <YearMonthPicker year={year} month={month} onChange={(v) => onNavigate(v)} />
         {dirty && <span className="text-xs font-medium text-brand-600">有未儲存的變更</span>}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={openBalance}>
-            期初餘額
-          </Button>
-          <Button variant="secondary" onClick={doExport} disabled={dirty || loading} title={dirty ? '請先儲存再匯出' : ''}>
-            匯出
-          </Button>
-          <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={loading}>
-            匯入 Excel
-          </Button>
           <Button variant="secondary" onClick={() => setAddOpen(true)}>
             ＋ 新增收支
           </Button>
+          <div className="relative">
+            <Button variant="secondary" onClick={() => setActionOpen((v) => !v)}>
+              Action ▾
+            </Button>
+            {actionOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setActionOpen(false)} />
+                <div className="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-lg border border-brand-100 bg-white shadow-lg">
+                  <button
+                    type="button"
+                    disabled={dirty || loading}
+                    title={dirty ? '請先儲存再匯出' : ''}
+                    onClick={() => {
+                      setActionOpen(false)
+                      doExport()
+                    }}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-white"
+                  >
+                    匯出
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionOpen(false)
+                      openBalance()
+                    }}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50"
+                  >
+                    期初餘額
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <Button onClick={save} disabled={saving || loading || !dirty}>
             儲存
           </Button>
         </div>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          e.target.value = ''
-          if (f) setImportFile(f)
-        }}
-      />
-      {importFile && (
-        <CashDayExcelImport file={importFile} year={year} month={month} cashDays={cashDays} onApply={applyImport} onClose={() => setImportFile(null)} />
-      )}
 
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}
