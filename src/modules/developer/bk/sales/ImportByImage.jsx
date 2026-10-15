@@ -23,6 +23,7 @@ export default function ImportByImage({ columns, year, month, days, onApply }) {
   const [reading, setReading] = useState(null) // null | progress 0..1
   const [error, setError] = useState('')
   const [draft, setDraft] = useState(null) // review step is open while this is set
+  const [dragging, setDragging] = useState(false)
   const fileRef = useRef(null)
 
   useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview])
@@ -45,6 +46,15 @@ export default function ImportByImage({ columns, year, month, days, onApply }) {
     setName('')
     setError('')
     if (fileRef.current) fileRef.current.value = ''
+  }
+
+  // Drop a file onto the box = same as picking it.
+  function onDrop(e) {
+    e.preventDefault()
+    setDragging(false)
+    const f = [...(e.dataTransfer?.files ?? [])].find((x) => x.type.startsWith('image/'))
+    if (f) take(f)
+    else setError('只能上傳圖片檔（png、jpg 等）。')
   }
 
   function onPaste(e) {
@@ -94,13 +104,26 @@ export default function ImportByImage({ columns, year, month, days, onApply }) {
       {open && (
         <div className="space-y-3 border-t border-brand-100 px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <input ref={fileRef} type="file" accept="image/*" className="text-sm" onChange={(e) => take(e.target.files?.[0])} />
-            <span className="text-xs text-gray-400">或點下方方框後直接貼上（Ctrl+V）複製的圖片</span>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => take(e.target.files?.[0])} />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-medium text-brand-800 hover:bg-brand-50"
+            >
+              上傳圖片檔
+            </button>
+            <span className="text-xs text-gray-400">也可以把圖片拖進下方方框，或點方框後直接貼上（Ctrl+V）</span>
           </div>
           <div
             tabIndex={0}
             onPaste={onPaste}
-            className="flex min-h-24 items-center justify-center rounded-lg border-2 border-dashed border-brand-200 bg-brand-50/40 p-3 text-sm text-gray-500 focus:border-brand-400 focus:outline-none"
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragging(true)
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={`flex min-h-24 items-center justify-center rounded-lg border-2 border-dashed p-3 text-sm text-gray-500 focus:border-brand-400 focus:outline-none ${dragging ? 'border-brand-500 bg-brand-100' : 'border-brand-200 bg-brand-50/40'}`}
           >
             {preview ? (
               <div className="space-y-1 text-center">
@@ -117,7 +140,7 @@ export default function ImportByImage({ columns, year, month, days, onApply }) {
                 </div>
               </div>
             ) : (
-              '在這裡貼上圖片'
+              '在這裡貼上或拖進圖片'
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
