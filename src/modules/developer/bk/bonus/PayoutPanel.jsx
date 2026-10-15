@@ -97,10 +97,11 @@ export default function PayoutPanel({ view }) {
         return (
           <section key={p.key} className="space-y-2 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-base font-semibold text-brand-900">{p.name}</div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className={`grid gap-3 ${p.own ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
               <StatCard label="可領收成" value={p.claimable} />
               <StatCard label="已領取收成" value={p.paid} />
-              <StatCard label="總共收成" value={p.total} />
+              <StatCard label="總共收成" value={p.total} hint={p.own ? '已含 Party自身支出的調整' : undefined} />
+              {p.own ? <StatCard label="自身支出" value={p.own} tone="cost" /> : null}
             </div>
             <EventTable
               events={rows}

@@ -29,6 +29,7 @@ export default function VaultOverview({ view }) {
   const detailEvents = !detail
     ? []
     : c.windowEvents.filter((ev) => {
+        if (ev.type === 'selfcost') return false // Party自身支出 never touches the vault
         if (detail === 'total') return !(ev.type === 'cost' && ev.method === 'outside')
         if (detail === 'cost') return ev.type === 'cost'
         if (ev.type === 'income') return ev.bucket === detail
@@ -125,6 +126,7 @@ export default function VaultOverview({ view }) {
         <DividendEntryForm
           stores={stores}
           storeId={storeId}
+          parties={data.parties}
           onCancel={() => setAdding(false)}
           onSaved={async () => {
             setAdding(false)

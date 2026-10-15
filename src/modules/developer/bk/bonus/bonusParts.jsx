@@ -72,13 +72,16 @@ function StoreField({ stores, value, onChange, disabled }) {
 }
 
 // 新增紀錄 on 金庫概況: 入金 (counted as 其他) or cost.
-export function DividendEntryForm({ stores, storeId, initial = null, onSaved, onCancel, onDelete }) {
+export function DividendEntryForm({ stores, storeId, parties = [], initial = null, onSaved, onCancel, onDelete }) {
   const editing = !!initial?.id
   const [store, setStore] = useState(initial?.store ?? storeId ?? stores[0]?.id ?? '')
-  const [kind, setKind] = useState(initial ? (initial.type === 'cost' ? 'cost' : 'income') : 'income')
+  const [kind, setKind] = useState(initial ? (initial.type === 'cost' ? 'cost' : initial.type === 'selfcost' ? 'party_expense' : 'income') : 'income')
+  const [partyId, setPartyId] = useState(initial?.partyId ?? '')
+  const storeParties = parties.filter((p) => p.store_id === store)
+  const activeParty = storeParties.some((p) => p.id === partyId) ? partyId : storeParties[0]?.id ?? ''
   const [date, setDate] = useState(initial?.date ?? brisbaneTodayStr())
   const [amount, setAmount] = useState(initial ? numToInput(initial.amount) : '')
-  const [costMethod, setCostMethod] = useState(initial?.method ?? 'bank')
+  const [costMethod, setCostMethod] = useState(initial?.method ?? (initial?.type === 'income' ? 'other' : 'bank'))
   const [note, setNote] = useState(initial?.note ?? '')
   const [error, setError] = useState('')
 
@@ -88,8 +91,9 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
     if (!store) return setError('請選擇分店。')
     if (!date) return setError('請輸入日期。')
     if (n === null || n <= 0) return setError('金額必須是大於 0 的數字。')
+    if (kind === 'party_expense' && !activeParty) return setError('這間分店還沒有 party，請先到「設定」新增。')
     try {
-      await saveDividendEntry(store, { id: initial?.id, entry_date: date, kind, method: costMethod, amount: n, note })
+      await saveDividendEntry(store, { id: initial?.id, entry_date: date, kind, method: kind === 'party_expense' ? null : costMethod, party_id: activeParty, amount: n, note })
       onSaved?.()
     } catch (e) {
       setError(e.message)
@@ -101,10 +105,32 @@ export function DividendEntryForm({ stores, storeId, initial = null, onSaved, on
       {(!storeId || editing) && <StoreField stores={stores} value={store} onChange={setStore} disabled={editing} />}
       <Field label="類型">
         <select className={`${inputCls} w-full`} value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="income">入金（歸類為「其他」）</option>
+          <option value="income">入金</option>
           <option value="cost">Cost</option>
+          <option value="party_expense">Party自身支出</option>
         </select>
       </Field>
+      {kind === 'party_expense' && (
+        <Field label="Party" hint="不動金庫的錢。這個 party 的收成會扣掉這筆金額，同樣的金額會按加權加到其他 party 的可領取收成。">
+          <select className={`${inputCls} w-full`} value={activeParty} onChange={(e) => setPartyId(e.target.value)}>
+            {storeParties.length === 0 && <option value="">（這間分店還沒有 party）</option>}
+            {storeParties.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {kind === 'income' && (
+        <Field label="方式" hint="Bank 進 Jeff B，Cash 進 Mao保，其他 進「其他」">
+          <select className={`${inputCls} w-full`} value={costMethod} onChange={(e) => setCostMethod(e.target.value)}>
+            <option value="bank">Bank（進 Jeff B）</option>
+            <option value="cash">Cash（進 Mao保）</option>
+            <option value="other">其他（進「其他」）</option>
+          </select>
+        </Field>
+      )}
       {kind === 'cost' && (
         <Field label="方式" hint="Bank 從 Jeff B 扣，Cash 從 Mao保 扣，其他 從「其他」扣，金庫外 不動金庫、只在領取收成時扣">
           <select className={`${inputCls} w-full`} value={costMethod} onChange={(e) => setCostMethod(e.target.value)}>
@@ -240,6 +266,7 @@ export function EventTable({ events, storeNames, showStore, partyNames, fullKeys
   const describe = (ev) => {
     if (ev.type === 'income') return `入金 · ${BUCKET_LABELS[ev.bucket] ?? ev.bucket}${ev.source === 'ucash' ? '（U帳）' : ''}`
     if (ev.type === 'cost') return `Cost · ${COST_METHOD_LABELS[ev.method] ?? '（未選方式）'}`
+    if (ev.type === 'selfcost') return `Party自身支出 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'}`
     return `收成 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'} · ${METHOD_LABELS[ev.method] ?? ev.method}`
   }
   return (
@@ -304,7 +331,7 @@ export function EventEditor({ ev, stores, parties, onClose, onChanged, onDelete 
   const isPayout = ev.type === 'payout'
   return (
     <>
-      <Modal open={!confirming} onClose={onClose} title={isPayout ? '編輯收成記錄' : ev.type === 'cost' ? '編輯 Cost' : '編輯入金'}>
+      <Modal open={!confirming} onClose={onClose} title={isPayout ? '編輯收成記錄' : ev.type === 'cost' ? '編輯 Cost' : ev.type === 'selfcost' ? '編輯 Party自身支出' : '編輯入金'}>
         {isPayout ? (
           <PayoutForm
             stores={stores}
@@ -319,6 +346,7 @@ export function EventEditor({ ev, stores, parties, onClose, onChanged, onDelete 
           <DividendEntryForm
             stores={stores}
             storeId={ev.store}
+            parties={parties}
             initial={ev}
             onCancel={onClose}
             onSaved={onChanged}
@@ -328,7 +356,7 @@ export function EventEditor({ ev, stores, parties, onClose, onChanged, onDelete 
       </Modal>
       <ConfirmDelete
         open={confirming}
-        text={`${ev.date}　${isPayout ? '收成' : ev.type === 'cost' ? 'Cost' : '入金'}　${fmtMoney(ev.amount)}`}
+        text={`${ev.date}　${isPayout ? '收成' : ev.type === 'cost' ? 'Cost' : ev.type === 'selfcost' ? 'Party自身支出' : '入金'}　${fmtMoney(ev.amount)}`}
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           await onDelete(ev)

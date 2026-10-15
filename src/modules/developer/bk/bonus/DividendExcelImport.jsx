@@ -3,12 +3,12 @@ import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { markDividendDuplicates, parseDividendRows, readWorkbookRows } from '../bkImport'
-import { bulkImportDividendRows } from '../bkDividendData'
+import { bulkImportDividendRows, loadDividendData } from '../bkDividendData'
 import { fmtMoney } from '../bkUtils'
 import { Notice } from '../bkUi'
 
-const KIND_LABEL = { income: '入金', cost: 'Cost', payout: '收成' }
-const METHOD_LABEL = { bank: 'Bank', cash: 'Cash' }
+const KIND_LABEL = { income: '入金', cost: 'Cost', payout: '收成', party_expense: 'Party自身支出' }
+const METHOD_LABEL = { bank: 'Bank', cash: 'Cash', other: '其他' }
 
 // Point 5: backfill 收成's manual 入金/Cost 紀錄 (bk_dividend_entries) and
 // 收成紀錄/payouts (bk_payouts) from Excel. Writes straight to the database
@@ -16,6 +16,7 @@ const METHOD_LABEL = { bank: 'Bank', cash: 'Cash' }
 // party+method)/amount — are skipped automatically and can't be forced.
 export default function DividendExcelImport({ file, stores, data, onImported, onClose }) {
   const [state, setState] = useState({ loading: true })
+  const [parties, setParties] = useState(data.parties)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
 
@@ -24,9 +25,16 @@ export default function DividendExcelImport({ file, stores, data, onImported, on
     ;(async () => {
       try {
         const sheet = await readWorkbookRows(await file.arrayBuffer())
-        const parsed = parseDividendRows(sheet.rows, { stores, parties: data.parties })
-        const rows = parsed.error ? parsed.rows : markDividendDuplicates(parsed.rows, data.manual, data.payouts)
-        if (!cancelled) setState({ result: { ...parsed, rows }, sheetName: sheet.name })
+        // Always compare against what is in the database right now (not the
+        // copy the page loaded earlier): after an import that copy is stale, and
+        // importing again would add every row a second time.
+        const fresh = await loadDividendData()
+        const parsed = parseDividendRows(sheet.rows, { stores, parties: fresh.parties })
+        const rows = parsed.error ? parsed.rows : markDividendDuplicates(parsed.rows, fresh.manual, fresh.payouts)
+        if (!cancelled) {
+          setParties(fresh.parties)
+          setState({ result: { ...parsed, rows }, sheetName: sheet.name })
+        }
       } catch (e) {
         if (!cancelled) setState({ failed: `無法讀取這個檔案（需要 .xlsx 格式）：${e.message}` })
       }
@@ -34,7 +42,7 @@ export default function DividendExcelImport({ file, stores, data, onImported, on
     return () => {
       cancelled = true
     }
-  }, [file, stores, data])
+  }, [file, stores])
 
   const { result } = state
   const { importable, duplicates, problems } = useMemo(() => {
@@ -61,10 +69,14 @@ export default function DividendExcelImport({ file, stores, data, onImported, on
 
   const describe = (r) => {
     const storeName = stores.find((s) => s.id === r.storeId)?.name ?? ''
+    if (r.kind === 'party_expense') {
+      return `${stores.find((s) => s.id === r.storeId)?.name ?? ''} · ${parties.find((p) => p.id === r.partyId)?.name ?? ''}`
+    }
     if (r.kind === 'payout') {
-      const partyName = data.parties.find((p) => p.id === r.partyId)?.name ?? ''
+      const partyName = parties.find((p) => p.id === r.partyId)?.name ?? ''
       return `${storeName} · ${partyName} · ${METHOD_LABEL[r.method] ?? r.method}`
     }
+    if (r.kind === 'income') return `${storeName} · ${METHOD_LABEL[r.method] ?? '其他'}${r.updateId ? '（補上已有入金的方式）' : ''}`
     return storeName
   }
 
@@ -95,7 +107,7 @@ export default function DividendExcelImport({ file, stores, data, onImported, on
             {state.sheetName ? `（工作表：${state.sheetName}）` : ''}
           </div>
           <Notice kind="info">
-            需要 Date / Store / Type / Amount 欄（Type 填 income / cost / payout；payout 還需要 Party 跟 Method 欄（Bank / Cash）；cost 需要 Method 欄（Bank 從 Jeff B 扣 / Cash 從 Mao保 扣 / 其他 從「其他」扣 / 金庫外 不扣金庫、領取收成時才扣）。已經在系統裡的紀錄會自動跳過，不會重複匯入。
+            需要 Date / Store / Type / Amount 欄（Type 填 income（入金）/ cost / payout / party_expense（Party自身支出，只需要 Party 欄）；income 的 Method 填 Bank（進 Jeff B）/ Cash（進 Mao保）/ 其他（留白也是其他）；payout 還需要 Party 跟 Method 欄（Bank / Cash）；cost 需要 Method 欄（Bank 從 Jeff B 扣 / Cash 從 Mao保 扣 / 其他 從「其他」扣 / 金庫外 不扣金庫、領取收成時才扣）。已經在系統裡的紀錄會自動跳過，不會重複匯入。
           </Notice>
 
           {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}

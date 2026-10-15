@@ -49,7 +49,25 @@ export function buildEvents({ ruju = [], manual = [], payouts = [] }) {
     })
   }
   for (const e of manual) {
+    if (e.kind === 'party_expense') {
+      events.push({
+        key: `m-${e.id}`,
+        source: 'manual',
+        id: e.id,
+        store: e.store_id,
+        date: e.entry_date,
+        created: e.created_at ?? '',
+        type: 'selfcost',
+        partyId: e.party_id,
+        amount: toNum(e.amount) ?? 0,
+        note: e.note ?? null,
+      })
+      continue
+    }
     const cost = e.kind === 'cost'
+    // 入金 typed here goes into the pot of its method: Bank = Jeff B, Cash =
+    // Mao保, 其他 (or no method, older rows) = 其他.
+    const incomeBucket = e.method === 'bank' ? 'jeff_bank' : e.method === 'cash' ? 'mao_safe' : 'other'
     events.push({
       key: `m-${e.id}`,
       source: 'manual',
@@ -58,8 +76,8 @@ export function buildEvents({ ruju = [], manual = [], payouts = [] }) {
       date: e.entry_date,
       created: e.created_at ?? '',
       type: cost ? 'cost' : 'income',
-      bucket: cost ? 'cost' : 'other',
-      method: cost ? e.method ?? null : undefined,
+      bucket: cost ? 'cost' : incomeBucket,
+      method: e.method ?? null,
       amount: toNum(e.amount) ?? 0,
       note: e.note ?? null,
     })
@@ -83,7 +101,13 @@ export function buildEvents({ ruju = [], manual = [], payouts = [] }) {
   return events.sort(sortKey)
 }
 
-const signed = (ev) => (ev.type === 'income' ? ev.amount : -ev.amount)
+// What an event does to the vault. A Party自身支出 never touches it, and a
+// 金庫外 cost is not taken out of it either (same as summarize's vault).
+const signed = (ev) => {
+  if (ev.type === 'income') return ev.amount
+  if (ev.type === 'selfcost' || (ev.type === 'cost' && ev.method === 'outside')) return 0
+  return -ev.amount
+}
 
 // Totals of a list of events (one store's window, or everything).
 export function summarize(events) {
@@ -94,13 +118,15 @@ export function summarize(events) {
   let bankPaid = 0
   let cashPaid = 0
   const paidByParty = {}
+  const selfByParty = {}
   for (const ev of events) {
     if (ev.type === 'income') incomeBy[ev.bucket] = round2((incomeBy[ev.bucket] ?? 0) + ev.amount)
     else if (ev.type === 'cost') {
       cost = round2(cost + ev.amount)
       if (ev.method && ev.method in costBy) costBy[ev.method] = round2(costBy[ev.method] + ev.amount)
-    }
-    else {
+    } else if (ev.type === 'selfcost') {
+      selfByParty[ev.partyId] = round2((selfByParty[ev.partyId] ?? 0) + ev.amount)
+    } else {
       paid = round2(paid + ev.amount)
       if (ev.method === 'cash') cashPaid = round2(cashPaid + ev.amount)
       else bankPaid = round2(bankPaid + ev.amount)
@@ -116,7 +142,7 @@ export function summarize(events) {
     mao_safe: round2(incomeBy.mao_safe - cashPaid - costBy.cash),
     other: round2(incomeBy.other - costBy.other),
   }
-  return { incomeBy, assets, costBy, income, cost, paid, bankPaid, cashPaid, paidByParty, pool: round2(income - cost), vault: round2(income - (cost - costBy.outside) - paid) }
+  return { incomeBy, assets, costBy, income, cost, paid, bankPaid, cashPaid, paidByParty, selfByParty, pool: round2(income - cost), vault: round2(income - (cost - costBy.outside) - paid) }
 }
 
 // One store's events (time-ordered) -> where the current window starts.
@@ -142,11 +168,26 @@ export function computeLedger(events) {
 //   total     = pool × weight%
 //   paid      what was paid out to the party
 //   claimable = total − paid          (cost is only taken off once, in the pool)
-export function partyRows(parties, pool, paidByParty) {
+//
+// Party自身支出 (selfByParty): what a party spent on its own. It does not touch
+// the vault, but that party's total goes down by it and the same amount is
+// added to the other parties' totals in proportion to their weights, so the
+// totals of all parties still add up to the pool.
+export function partyRows(parties, pool, paidByParty, selfByParty = {}) {
   return parties.map((p) => {
-    const total = round2((pool * Number(p.weight)) / 100)
+    const w = Number(p.weight)
+    let total = (pool * w) / 100
+    const own = selfByParty[p.id] ?? 0
+    total -= own
+    for (const k of parties) {
+      const spent = selfByParty[k.id] ?? 0
+      if (k.id === p.id || !spent) continue
+      const othersWeight = parties.reduce((a, q) => (q.id === k.id ? a : a + Number(q.weight)), 0)
+      if (othersWeight > 0) total += (spent * w) / othersWeight
+    }
+    total = round2(total)
     const paid = round2(paidByParty[p.id] ?? 0)
-    return { party: p, total, paid, claimable: round2(total - paid) }
+    return { party: p, total, paid, own: round2(own), claimable: round2(total - paid) }
   })
 }
 
@@ -166,8 +207,8 @@ export function storeReport(storeId, raw, parties) {
     lastFullDate: ledger.lastFullDate,
     window: win,
     allTime: all,
-    windowParties: partyRows(parties, win.pool, win.paidByParty),
-    allTimeParties: partyRows(parties, all.pool, all.paidByParty),
+    windowParties: partyRows(parties, win.pool, win.paidByParty, win.selfByParty),
+    allTimeParties: partyRows(parties, all.pool, all.paidByParty, all.selfByParty),
   }
 }
 
@@ -179,11 +220,12 @@ export function mergePartyRows(rowLists) {
   for (const rows of rowLists) {
     for (const r of rows) {
       const key = nameKey(r.party.name)
-      const cur = map.get(key) ?? { key, name: r.party.name, partyIds: [], stores: [], total: 0, paid: 0, claimable: 0 }
+      const cur = map.get(key) ?? { key, name: r.party.name, partyIds: [], stores: [], total: 0, paid: 0, own: 0, claimable: 0 }
       cur.partyIds.push(r.party.id)
       cur.stores.push(r.party.store_id)
       cur.total = round2(cur.total + r.total)
       cur.paid = round2(cur.paid + r.paid)
+      cur.own = round2(cur.own + r.own)
       cur.claimable = round2(cur.claimable + r.claimable)
       map.set(key, cur)
     }

@@ -39,7 +39,7 @@ export default function PartySettings({ stores, data, reload, onDirtyChange }) {
   }
   const total = round2(draft.reduce((a, p) => a + (toNum(p.weight) ?? 0), 0))
   const problem = partySettingsProblem(draft)
-  const hasPayouts = (id) => data.payouts.some((p) => p.party_id === id)
+  const hasPayouts = (id) => data.payouts.some((p) => p.party_id === id) || data.manual.some((e) => e.party_id === id)
 
   function switchStore(id) {
     if (id === store.id) return

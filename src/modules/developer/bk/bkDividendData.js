@@ -39,7 +39,8 @@ export async function saveDividendEntry(storeId, form) {
   const payload = {
     entry_date: form.entry_date,
     kind: form.kind,
-    method: form.kind === 'cost' ? form.method : null,
+    method: form.kind === 'cost' || form.kind === 'income' ? form.method : null,
+    party_id: form.kind === 'party_expense' ? form.party_id : null,
     amount: toNum(form.amount),
     note: form.note?.trim() || null,
     updated_at: new Date().toISOString(),
@@ -77,14 +78,20 @@ export async function deletePayout(id) {
 export async function bulkImportDividendRows(rows) {
   const entryRows = rows.filter((r) => r.kind !== 'payout')
   const payoutRows = rows.filter((r) => r.kind === 'payout')
-  if (entryRows.length) {
+  // 入金 rows that already exist without a method get it filled in (r.updateId).
+  for (const r of entryRows.filter((r) => r.updateId)) {
+    unwrap(await supabase.from('bk_dividend_entries').update({ method: r.method, updated_at: new Date().toISOString() }).eq('id', r.updateId))
+  }
+  const fresh = entryRows.filter((r) => !r.updateId)
+  if (fresh.length) {
     unwrap(
       await supabase.from('bk_dividend_entries').insert(
-        entryRows.map((r) => ({
+        fresh.map((r) => ({
           store_id: r.storeId,
           entry_date: r.date,
           kind: r.kind,
-          method: r.kind === 'cost' ? r.method : null,
+          method: r.kind === 'cost' || r.kind === 'income' ? r.method : null,
+          party_id: r.kind === 'party_expense' ? r.partyId : null,
           amount: toNum(r.amount),
           note: r.note || null,
         }))
@@ -114,10 +121,14 @@ export async function savePartiesForStore(storeId, draft, existing) {
   const keep = new Set(draft.filter((d) => d.id).map((d) => d.id))
   const removed = existing.filter((p) => !keep.has(p.id))
   if (removed.length) {
-    const used = unwrap(await supabase.from('bk_payouts').select('party_id').in('party_id', removed.map((p) => p.id))) ?? []
+    const ids = removed.map((p) => p.id)
+    const used = [
+      ...(unwrap(await supabase.from('bk_payouts').select('party_id').in('party_id', ids)) ?? []),
+      ...(unwrap(await supabase.from('bk_dividend_entries').select('party_id').in('party_id', ids)) ?? []),
+    ]
     if (used.length) {
       const names = removed.filter((p) => used.some((u) => u.party_id === p.id)).map((p) => p.name)
-      throw new Error(`「${names.join('、')}」已有收成記錄，不能刪除。請先到收成記錄刪除那些紀錄。`)
+      throw new Error(`「${names.join('、')}」已有收成記錄或 Party自身支出，不能刪除。請先刪除那些紀錄。`)
     }
     unwrap(await supabase.from('bk_parties').delete().in('id', removed.map((p) => p.id)))
   }

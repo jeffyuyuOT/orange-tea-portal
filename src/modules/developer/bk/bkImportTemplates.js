@@ -96,7 +96,7 @@ export async function downloadDividendTemplate() {
   const wb = await buildTemplate([
     {
       name: '收成',
-      note: 'Type 填 income / cost / payout。payout 另外需要 Party（這個分店設定好的 party 名稱）跟 Method（Bank / Cash）。cost 一定要填 Method：Bank 從 Jeff B 扣、Cash 從 Mao保 扣、其他 從「其他」扣、金庫外 不動金庫（領取收成時才扣）。',
+      note: 'Type 填 income（入金）/ cost / payout。income 的 Method 填 Bank（進 Jeff B）/ Cash（進 Mao保）/ 其他（進「其他」，留白也是其他）。party_expense（Party自身支出）只需要 Party，不用 Method，不動金庫。payout 另外需要 Party（這個分店設定好的 party 名稱）跟 Method（Bank / Cash）。cost 一定要填 Method：Bank 從 Jeff B 扣、Cash 從 Mao保 扣、其他 從「其他」扣、金庫外 不動金庫（領取收成時才扣）。',
       headers: ['Date', 'Store', 'Type', 'Party', 'Method', 'Amount', 'Note'],
       example: ['2026-10-05', 'Sunnybank', 'cost', '', 'Bank', 300, '維修費'],
     },

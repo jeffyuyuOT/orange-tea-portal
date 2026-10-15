@@ -180,6 +180,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
   }
 
   function imported(count, label) {
+    if (label === '收成') reloadDividendData()
     setImportedMsg(`已匯入 ${count} 筆（${label}）。`)
     reset()
   }

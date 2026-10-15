@@ -637,10 +637,18 @@ const DIVIDEND_KIND_ALIASES = [
   ['income', ['income', '入金', 'ruju']],
   ['cost', ['cost']],
   ['payout', ['payout', '收成', '收成紀錄']],
+  ['party_expense', ['party_expense', 'party expense', 'party自身支出', 'party 自身支出', '自身支出']],
 ]
 function parseDividendKindCell(v) {
+  // Also accepts the English word with its Chinese in brackets, e.g.
+  // "income (入金)" or "income（入金）": tries the whole text, the part before
+  // the brackets and the part inside them.
   const n = norm(v)
-  for (const [kind, aliases] of DIVIDEND_KIND_ALIASES) if (aliases.includes(n)) return kind
+  const m = n.match(/^(.*?)\s*[(（]\s*(.*?)\s*[)）]\s*$/)
+  const tries = m ? [n, m[1], m[2]] : [n]
+  for (const t of tries) {
+    for (const [kind, aliases] of DIVIDEND_KIND_ALIASES) if (aliases.includes(t)) return kind
+  }
   return null
 }
 // A cost says where it is paid from: Bank (Jeff B) / Cash (Mao保) / 其他.
@@ -712,7 +720,7 @@ export function parseDividendRows(rows, { stores, parties }) {
     }
     const kind = parseDividendKindCell(row[col.kind])
     if (!kind) {
-      out.push({ rowNumber, date, problem: `看不懂的種類：「${row[col.kind] ?? ''}」（需要 income / cost / payout）` })
+      out.push({ rowNumber, date, problem: `看不懂的種類：「${row[col.kind] ?? ''}」（需要 income / cost / payout / party_expense）` })
       continue
     }
     const amtRes = cellNumber(row[col.amount])
@@ -737,6 +745,15 @@ export function parseDividendRows(rows, { stores, parties }) {
       out.push({ rowNumber, date, kind, amount, note, storeId: store.id, partyId: party.id, method })
       continue
     }
+    if (kind === 'party_expense') {
+      const party = col.party !== undefined ? findPartyByName(parties, store.id, row[col.party]) : null
+      if (!party) {
+        out.push({ rowNumber, date, kind, problem: `找不到這個分店的 party：「${col.party !== undefined ? row[col.party] ?? '' : ''}」` })
+        continue
+      }
+      out.push({ rowNumber, date, kind, amount, note, storeId: store.id, partyId: party.id })
+      continue
+    }
     if (kind === 'cost') {
       const method = col.method !== undefined ? parseCostMethodCell(row[col.method]) : null
       if (!method) {
@@ -746,8 +763,14 @@ export function parseDividendRows(rows, { stores, parties }) {
       out.push({ rowNumber, date, kind, amount, note, storeId: store.id, method })
       continue
     }
-    // income -> bk_dividend_entries
-    out.push({ rowNumber, date, kind, amount, note, storeId: store.id })
+    // income (= 入金) -> bk_dividend_entries. Method (Bank -> Jeff B, Cash ->
+    // Mao保, 其他 or blank -> 其他) says which vault pot it goes into.
+    const method = col.method !== undefined ? parseCostMethodCell(row[col.method]) : null
+    if (method === 'outside') {
+      out.push({ rowNumber, date, kind, problem: '入金的方式只能是 Bank / Cash / 其他' })
+      continue
+    }
+    out.push({ rowNumber, date, kind, amount, note, storeId: store.id, method: method ?? 'other' })
   }
   return { rows: out, mapped, ignored }
 }
@@ -755,15 +778,38 @@ export function parseDividendRows(rows, { stores, parties }) {
 // `existingEntries` = loadDividendData().manual (bk_dividend_entries rows),
 // `existingPayouts` = .payouts (bk_payouts rows).
 export function markDividendDuplicates(rows, existingEntries, existingPayouts) {
-  const entryKeys = new Set(existingEntries.map((e) => `${e.store_id}|${e.entry_date}|${e.kind}|${Number(e.amount)}`))
+  const entryKeys = new Set(
+    existingEntries.filter((e) => e.kind !== 'income').map((e) => `${e.store_id}|${e.entry_date}|${e.kind}|${e.party_id ?? ''}|${Number(e.amount)}`)
+  )
   const payoutKeys = new Set(existingPayouts.map((p) => `${p.store_id}|${p.entry_date}|${p.party_id}|${p.method}|${Number(p.amount)}`))
+  // 入金: matched one-to-one on store/date/amount. A match with the same method
+  // is a duplicate. A match with no method yet (imported before 入金 had one)
+  // is not skipped: it gets the file's method (r.updateId) so it lands in the
+  // right pot.
+  const incomePool = new Map()
+  for (const e of existingEntries.filter((e) => e.kind === 'income')) {
+    const k = `${e.store_id}|${e.entry_date}|${Number(e.amount)}`
+    if (!incomePool.has(k)) incomePool.set(k, [])
+    incomePool.get(k).push({ id: e.id, method: e.method ?? null })
+  }
   return rows.map((r) => {
     if (r.problem) return r
-    const duplicate =
-      r.kind === 'payout'
-        ? payoutKeys.has(`${r.storeId}|${r.date}|${r.partyId}|${r.method}|${r.amount}`)
-        : entryKeys.has(`${r.storeId}|${r.date}|${r.kind}|${r.amount}`)
-    return { ...r, duplicate }
+    if (r.kind === 'payout') return { ...r, duplicate: payoutKeys.has(`${r.storeId}|${r.date}|${r.partyId}|${r.method}|${r.amount}`) }
+    if (r.kind === 'income') {
+      const list = incomePool.get(`${r.storeId}|${r.date}|${r.amount}`) ?? []
+      const same = list.findIndex((x) => (x.method ?? 'other') === r.method)
+      if (same >= 0) {
+        list.splice(same, 1)
+        return { ...r, duplicate: true }
+      }
+      const blank = list.findIndex((x) => x.method === null)
+      if (blank >= 0) {
+        const [hit] = list.splice(blank, 1)
+        return { ...r, updateId: hit.id }
+      }
+      return { ...r, duplicate: false }
+    }
+    return { ...r, duplicate: entryKeys.has(`${r.storeId}|${r.date}|${r.kind}|${r.partyId ?? ''}|${r.amount}`) }
   })
 }
 

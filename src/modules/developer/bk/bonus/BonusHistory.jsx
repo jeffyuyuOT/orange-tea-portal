@@ -10,6 +10,7 @@ const KINDS = [
   ['income', '入金紀錄'],
   ['payout', '收成紀錄'],
   ['cost', 'Cost 紀錄'],
+  ['selfcost', 'Party自身支出紀錄'],
   ['settlement', '收成結算紀錄'],
 ]
 
@@ -42,7 +43,8 @@ export default function BonusHistory({ view }) {
       .filter((ev) => ev.type === kind)
       .filter((ev) => (!from || ev.date >= from) && (!to || ev.date <= to))
       .filter((ev) => kind !== 'income' || !bucket || ev.bucket === bucket)
-      .filter((ev) => kind !== 'payout' || ((!party || party.partyIds.includes(ev.partyId)) && (!method || ev.method === method)))
+      .filter((ev) => (kind !== 'payout' && kind !== 'selfcost') || !party || party.partyIds.includes(ev.partyId))
+      .filter((ev) => kind !== 'payout' || !method || ev.method === method)
       .reverse()
   }, [c.events, kind, from, to, bucket, partyKey, method, partyOptions])
 
@@ -91,7 +93,7 @@ export default function BonusHistory({ view }) {
             ))}
           </select>
         )}
-        {kind === 'payout' && (
+        {(kind === 'payout' || kind === 'selfcost') && (
           <>
             <select className={inputCls} value={partyKey} onChange={(e) => setPartyKey(e.target.value)} aria-label="Party">
               <option value="">全部 party</option>
@@ -101,11 +103,13 @@ export default function BonusHistory({ view }) {
                 </option>
               ))}
             </select>
-            <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value)} aria-label="方式">
-              <option value="">全部方式</option>
-              <option value="bank">Bank</option>
-              <option value="cash">Cash</option>
-            </select>
+            {kind === 'payout' && (
+              <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value)} aria-label="方式">
+                <option value="">全部方式</option>
+                <option value="bank">Bank</option>
+                <option value="cash">Cash</option>
+              </select>
+            )}
           </>
         )}
       </div>
