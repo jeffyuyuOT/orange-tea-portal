@@ -6,6 +6,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { getWorkedMinutesByProfile } from '../../../lib/attendance'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
+import { trainingHoursBandInfo, trainingHoursReminderTitle } from '../../../lib/trainingHoursReminder'
 import Button from '../../../components/ui/Button'
 import Badge from '../../../components/ui/Badge'
 import Modal from '../../../components/ui/Modal'
@@ -14,10 +15,11 @@ import AnnouncementDetailModal from './AnnouncementDetailModal'
 import ImportantAnnouncementsModal from './ImportantAnnouncementsModal'
 import RosterWeekTable from '../../roster-hub/shared/RosterWeekTable'
 
-// Toggle filters shown to the user. There's no button for quiz reminders or
-// training-hours reminders — those only ever appear in the unfiltered "all"
-// view, same as any future message type that isn't roster/announcement/
-// customer complaint.
+// Toggle filters shown to the user. There's no button for quiz reminders —
+// those only ever appear in the unfiltered "all" view, same as any future
+// message type that isn't roster/announcement/customer complaint. (The old
+// training-hours reminder used to live here too — moved out entirely, see
+// notifyManagersOfTrainingHours below.)
 const FILTERS = [
   { key: 'roster', label: 'Roster' },
   { key: 'announcement', label: 'Store Announcement' },
@@ -28,17 +30,63 @@ const TYPE_BADGE = {
   announcement: { label: 'Announcement', color: 'brand' },
   roster: { label: 'Roster', color: 'green' },
   quiz_reminder: { label: 'Quiz Reminder', color: 'red' },
-  training_hours: { label: 'Training Hours', color: 'red' },
   customer_complaint: { label: 'Customer Complaint', color: 'red' },
 }
 
-// Jeff's 100-hour standard training target — same number the Progress
-// Chart's average learning curve and Learning Tracker's 70h warning are
-// both built around (see ProgressChartModal.jsx / LearningTrackerPage.jsx).
-const TRAINING_TARGET_HOURS = 100
-// The reminder only starts appearing once someone's crossed this many
-// hours — well before the 100h target, per Jeff's spec.
-const TRAINING_REMINDER_START_HOURS = 50
+// Jeff, 2026-10-16: the manager-facing half of the training-hours reminder
+// (used to be a 'training_hours' Bulletin card below — see
+// trainingHoursReminder.js's top comment for the full before/after). One
+// system Message per newly-crossed 10-hour band, to every admin/
+// shop_manager/developer who'd actually see it: shop_manager/developer
+// scoped to THIS store (user_stores), admin company-wide — admins have NO
+// user_stores rows at all in this schema (confirmed live: 0 rows across 2
+// admin profiles), same as every other admin-bypass-store-scoping spot in
+// this app — and every candidate still individually gated on their OWN
+// join_store_activity checkbox, exactly as Jeff asked ("要勾選join store
+// activity才會收到"). `sender` is whichever manager/admin/developer
+// happened to have Bulletin open when a band was first crossed —
+// messages_insert_policy's RLS requires sender_id = auth.uid(), so there's
+// no truly sender-less system message; sender_name is hardcoded to
+// 'System' instead, the same cosmetic trick ComposeMessageModal's
+// developer-only "All" broadcast already uses (and MessagePage.jsx's
+// existing `sender_name === 'System'` check already collapses the "To:"
+// line for it). Dedup is per STAFF member, via
+// profiles.training_hours_notified_band (migration
+// 0109_training_hours_reminder_bands.sql) — band math itself lives in
+// trainingHoursReminder.js, shared with AppShell.jsx's login popup so the
+// two can't drift apart.
+async function notifyManagersOfTrainingHours(newlyCrossed, storeId, sender) {
+  const [{ data: storeRows }, { data: adminRows }] = await Promise.all([
+    supabase.from('user_stores').select('profiles(id, role, is_active, join_store_activity)').eq('store_id', storeId),
+    supabase.from('profiles').select('id, role, is_active, join_store_activity').eq('role', 'admin'),
+  ])
+  const recipients = new Map()
+  ;(storeRows ?? []).forEach((r) => {
+    const p = r.profiles
+    if (p && p.is_active && ['shop_manager', 'developer'].includes(p.role) && p.join_store_activity !== false) {
+      recipients.set(p.id, p)
+    }
+  })
+  ;(adminRows ?? []).forEach((p) => {
+    if (p.is_active && p.join_store_activity !== false) recipients.set(p.id, p)
+  })
+  if (!recipients.size) return
+
+  for (const { staff, info } of newlyCrossed) {
+    const name = `${staff.first_name ?? ''} ${staff.last_name ?? ''}`.trim() || 'This staff member'
+    const title = trainingHoursReminderTitle(info, { isSelf: false, name })
+    const { data: msg, error } = await supabase
+      .from('messages')
+      .insert({ store_id: storeId, sender_id: sender.id, sender_name: 'System', subject: title, content_html: `<p>${title}</p>` })
+      .select()
+      .single()
+    if (error || !msg) continue
+    await supabase
+      .from('message_recipients')
+      .insert(Array.from(recipients.keys()).map((id) => ({ message_id: msg.id, profile_id: id })))
+    await supabase.from('profiles').update({ training_hours_notified_band: info.band }).eq('id', staff.id)
+  }
+}
 
 // Unified Bulletin Board feed: merges store announcements, newly-submitted
 // rosters, and (computed, not stored) quiz-attendance reminders into one
@@ -193,21 +241,24 @@ export default function BulletinPage() {
         .filter(Boolean)
     }
 
-    // Jeff, 2026-09: "未qualified的員工在工作超過50個小時後会開始在bulletin
-    // 裡跳出提示...每增加10小時会跳出一個提示,超過100小時候每超過10小時也
-    // 會有提示" — same computed-not-stored approach as the quiz reminders
-    // above: recomputed fresh from current hours worked every time this
-    // loads, so it naturally "updates" itself every time a new 10-hour band
-    // is crossed without needing to track which bands were already shown.
-    // Population mirrors Learning Tracker's own staff list (LearningTrackerPage.jsx) rather
-    // than the narrower role==='staff' scope quiz reminders use above —
-    // this is specifically about Learning Tracker's qualified tracking, so
-    // it should cover exactly who Learning Tracker itself tracks.
-    let trainingHourStaff = []
+    // Jeff, 2026-10-16: "現在不要放在announcement裡面，改發到所屬店面的
+    // manager,admin或developer...的訊息裡" — this used to compute a
+    // 'training_hours' Bulletin card for BOTH the staff member and their
+    // manager (see notifyManagersOfTrainingHours above for the full
+    // before/after). The staff member's own half moved to a login popup
+    // (AppShell.jsx) — nothing left to compute for a plain staff viewer
+    // here. This block is purely a manager/admin/developer-viewer side
+    // effect now: it sends Messages, it doesn't add anything to `items`.
+    // Population still mirrors Learning Tracker's own staff list
+    // (LearningTrackerPage.jsx) — this is specifically about Learning
+    // Tracker's qualified tracking, so it should cover exactly who Learning
+    // Tracker itself tracks.
     if (isManagerOrAdmin) {
       const { data } = await supabase
         .from('user_stores')
-        .select('profiles(id, first_name, last_name, role, qualified, is_active, primary_store_id, join_store_activity)')
+        .select(
+          'profiles(id, first_name, last_name, role, qualified, is_active, primary_store_id, join_store_activity, training_hours_notified_band)'
+        )
         .eq('store_id', currentStoreId)
       const byId = new Map()
       ;(data ?? []).forEach((m) => {
@@ -219,51 +270,23 @@ export default function BulletinPage() {
           byId.set(p.id, p)
         }
       })
-      trainingHourStaff = Array.from(byId.values())
-    } else if (profile && !profile.qualified && !NON_PICKABLE_STAFF_ROLES.includes(profile.role)) {
-      trainingHourStaff = [profile]
-    }
-
-    let trainingHourReminders = []
-    if (trainingHourStaff.length) {
-      const minutesByProfile = await getWorkedMinutesByProfile(trainingHourStaff.map((s) => s.id))
-      trainingHourReminders = trainingHourStaff
-        .map((s) => {
-          const hours = (minutesByProfile[s.id] ?? 0) / 60
-          const band = Math.floor(hours / 10) * 10
-          if (band < TRAINING_REMINDER_START_HOURS) return null
-          const isSelf = profile.id === s.id
-          const name = `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim() || 'This staff member'
-          const overHours = band - TRAINING_TARGET_HOURS
-          let title
-          if (band < TRAINING_TARGET_HOURS) {
-            const remaining = TRAINING_TARGET_HOURS - band
-            title = isSelf
-              ? `${remaining} hours left until your Formal Quiz`
-              : `${name}: ${remaining} hours left until Formal Quiz`
-          } else if (overHours <= 0) {
-            title = isSelf
-              ? 'Reached 100 hours of training — take the Formal Quiz as soon as possible'
-              : `${name} reached 100 hours of training — Formal Quiz due`
-          } else {
-            title = isSelf
-              ? `${overHours} hours over standard training — take the Formal Quiz as soon as possible`
-              : `${name} is ${overHours} hours over standard training — Formal Quiz overdue`
-          }
-          return {
-            id: `training-hours-${s.id}`,
-            type: 'training_hours',
-            // Always "now", not a fixed date — like the quiz reminders
-            // above, this describes CURRENT status rather than a one-off
-            // posting, so it should always sort to the top of the feed as
-            // long as it's still relevant, not fade backward over time.
-            date: new Date(),
-            title,
-            subtitle: `${hours.toFixed(1)}h worked so far`,
-            raw: s,
-          }
-        })
-        .filter(Boolean)
+      const trainingHourStaff = Array.from(byId.values())
+      if (trainingHourStaff.length) {
+        const minutesByProfile = await getWorkedMinutesByProfile(trainingHourStaff.map((s) => s.id))
+        const newlyCrossed = trainingHourStaff
+          .map((s) => {
+            const info = trainingHoursBandInfo((minutesByProfile[s.id] ?? 0) / 60)
+            // Only a band HIGHER than the one already sent counts as "new"
+            // — this is what stops the same crossing being re-sent every
+            // time a manager happens to reopen Bulletin.
+            if (!info || info.band <= (s.training_hours_notified_band ?? 0)) return null
+            return { staff: s, info }
+          })
+          .filter(Boolean)
+        if (newlyCrossed.length) {
+          await notifyManagersOfTrainingHours(newlyCrossed, currentStoreId, profile)
+        }
+      }
     }
 
     // This person's own "last opened THIS announcement" timestamp
@@ -375,9 +398,7 @@ export default function BulletinPage() {
       }
     })
 
-    const merged = [...announcementItems, ...complaintItems, ...rosterItems, ...quizReminders, ...trainingHourReminders].sort(
-      (a, b) => b.date - a.date
-    )
+    const merged = [...announcementItems, ...complaintItems, ...rosterItems, ...quizReminders].sort((a, b) => b.date - a.date)
     setItems(merged)
     setLoading(false)
   }
@@ -484,7 +505,7 @@ export default function BulletinPage() {
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {visible.map((item) => {
             const badge = TYPE_BADGE[item.type]
-            const clickable = item.type !== 'quiz_reminder' && item.type !== 'training_hours'
+            const clickable = item.type !== 'quiz_reminder'
             const Wrapper = clickable ? 'button' : 'div'
             return (
               <Wrapper
@@ -515,7 +536,7 @@ export default function BulletinPage() {
                   {item.type === 'customer_complaint' &&
                     (item.solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
                   <span className="shrink-0 text-xs text-gray-400">{item.subtitle}</span>
-                  {(item.type === 'quiz_reminder' || item.type === 'training_hours') && (
+                  {item.type === 'quiz_reminder' && (
                     <Link
                       to="/dashboard/study-log"
                       className="shrink-0 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600"

@@ -1,16 +1,15 @@
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar, { SidebarBrand, SidebarNavLinks } from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
 import { useAuth } from '../../lib/AuthContext'
-import { ROLE_LABELS, canAccessPage } from '../../lib/permissions'
+import { ROLE_LABELS, NON_PICKABLE_STAFF_ROLES, canAccessPage } from '../../lib/permissions'
 import { useClockInOut } from '../../lib/useClockInOut'
+import { getWorkedMinutesByProfile } from '../../lib/attendance'
+import { trainingHoursBandInfo, trainingHoursReminderTitle } from '../../lib/trainingHoursReminder'
+import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
+import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
 import Modal from '../ui/Modal'
-import LoadingSpinner from '../ui/LoadingSpinner'
-
-// Only needed once someone actually taps the clock-in camera / sees its result.
-const QrScannerModal = lazy(() => import('../../modules/dashboard/time-attendance/QrScannerModal'))
-const ClockFeedbackModal = lazy(() => import('../../modules/dashboard/time-attendance/ClockFeedbackModal'))
 import { supabase } from '../../lib/supabaseClient'
 
 export default function AppShell() {
@@ -116,6 +115,44 @@ export default function AppShell() {
     refreshProfile?.()
   }
 
+  // Jeff, 2026-10-16: "保留，但在登入時跳出視窗顯示提醒" — the staff member's
+  // own half of the training-hours reminder (used to be a 'training_hours'
+  // Bulletin card everyone saw; the manager-facing half is now a system
+  // Message instead — see BulletinPage.jsx's notifyManagersOfTrainingHours)
+  // becomes a one-time-per-band login popup here, same shape as
+  // showQualifiedPopup above. Only ever relevant for someone who isn't
+  // qualified yet and isn't one of the non-trainee accounts
+  // (NON_PICKABLE_STAFF_ROLES) — mirrors exactly who Bulletin's old
+  // self-view branch used to cover. Needs its own hours fetch since
+  // AppShell doesn't otherwise touch attendance data.
+  const tracksTrainingHours = !!profile?.id && !profile.qualified && !NON_PICKABLE_STAFF_ROLES.includes(profile.role)
+  const [workedHours, setWorkedHours] = useState(null)
+  useEffect(() => {
+    if (!tracksTrainingHours) {
+      setWorkedHours(null)
+      return
+    }
+    let cancelled = false
+    getWorkedMinutesByProfile([profile.id]).then((byProfile) => {
+      if (!cancelled) setWorkedHours((byProfile[profile.id] ?? 0) / 60)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [tracksTrainingHours, profile?.id])
+  const trainingHoursInfo = tracksTrainingHours && workedHours != null ? trainingHoursBandInfo(workedHours) : null
+  const showTrainingHoursPopup =
+    !!trainingHoursInfo && trainingHoursInfo.band > (profile?.training_hours_popup_seen_band ?? 0)
+  const dismissTrainingHoursPopup = async () => {
+    if (profile?.id && trainingHoursInfo) {
+      await supabase
+        .from('profiles')
+        .update({ training_hours_popup_seen_band: trainingHoursInfo.band })
+        .eq('id', profile.id)
+    }
+    refreshProfile?.()
+  }
+
   return (
     <div className="flex h-screen w-full flex-col bg-white">
       {/* Jeff, 2026-10-02: "有的apple手機左上角的三條線會在太邊邊按不到，感
@@ -212,23 +249,13 @@ export default function AppShell() {
               itself in its own overflow-x-auto container, so this doesn't
               affect those. */}
           <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
-            <Suspense
-              fallback={
-                <div className="flex justify-center py-16">
-                  <LoadingSpinner label="Loading…" />
-                </div>
-              }
-            >
-              <Outlet />
-            </Suspense>
+            <Outlet />
           </main>
         </div>
       </div>
 
       {canClockInOut && clockInOut.showScanner && (
-        <Suspense fallback={null}>
-          <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
-        </Suspense>
+        <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
       )}
       {/* The header button can be tapped from any page, so its result can't
           rely on a fixed spot in that page's own layout the way
@@ -238,9 +265,7 @@ export default function AppShell() {
           cleared itself after a few seconds didn't stop someone from
           tapping 📷 again before they'd even registered the first result. */}
       {canClockInOut && clockInOut.feedback && (
-        <Suspense fallback={null}>
-          <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
-        </Suspense>
+        <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
       )}
 
       {showQualifiedPopup && (
@@ -249,6 +274,22 @@ export default function AppShell() {
           <div className="mt-4 flex justify-end">
             <button
               onClick={dismissQualifiedPopup}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              OK
+            </button>
+          </div>
+        </Modal>
+      )}
+      {/* Shown only once showQualifiedPopup has nothing to say — the rarer,
+          more celebratory popup takes priority on the (rare) login where
+          both would otherwise fire at once. */}
+      {!showQualifiedPopup && showTrainingHoursPopup && (
+        <Modal open onClose={dismissTrainingHoursPopup} title="⏱️ Training Hours">
+          <p className="text-sm text-gray-700">{trainingHoursReminderTitle(trainingHoursInfo, { isSelf: true })}</p>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={dismissTrainingHoursPopup}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
               OK
