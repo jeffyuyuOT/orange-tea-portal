@@ -8,6 +8,7 @@ import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { getWorkedMinutesByProfile } from '../../../lib/attendance'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import { currentTitle } from '../../../lib/trainingJourney'
+import { trainingHoursBandInfo, trainingHoursReminderTitle } from '../../../lib/trainingHoursReminder'
 import StaffStudyDetail from './StaffStudyDetail'
 
 // Jeff, 2026-09: past this many hours worked, still unqualified, the hours
@@ -135,6 +136,14 @@ export default function LearningTrackerPage() {
             // tier no longer exists as a separate color/icon).
             const titlePhaseNumber = s.has_master_title ? 4 : s.training_journey_phase ?? 0
             const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
+            // Jeff, 2026-10-16: "員工training journey如果Phase超過工作時數，
+            // 在learning tracker的員工清單title後面會加一個警示圖案" — same
+            // 50h-band crossing the login popup/manager Message already fire
+            // on (trainingHoursReminder.js), surfaced here too as a quick
+            // visual flag right on the staff list, not just in those two
+            // other places. Same !qualified gate as the hours badge above —
+            // once qualified there's no more "behind schedule" to warn about.
+            const hoursInfo = !s.qualified ? trainingHoursBandInfo(hours) : null
             return (
               <button
                 key={s.id}
@@ -156,6 +165,9 @@ export default function LearningTrackerPage() {
                       {s.has_master_title ? '👑 ' : ''}
                       {title}
                     </span>
+                  )}
+                  {hoursInfo && (
+                    <span title={trainingHoursReminderTitle(hoursInfo, { isSelf: false, name: rosterDisplayName(s) })}>⚠️</span>
                   )}
                 </span>
                 <span className="text-gray-300">›</span>
