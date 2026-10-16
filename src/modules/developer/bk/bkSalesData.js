@@ -187,6 +187,22 @@ export async function saveSalesNote(storeId, day, text) {
   unwrap(await supabase.from('bk_sales_notes').upsert({ store_id: storeId, day, note, updated_at: new Date().toISOString() }, { onConflict: 'store_id,day' }))
 }
 
+// The same note on one day for several stores at once (empty text removes them all).
+export async function saveSalesNoteForStores(storeIds, day, text) {
+  const note = (text ?? '').trim()
+  if (storeIds.length === 0) return
+  if (!note) {
+    unwrap(await supabase.from('bk_sales_notes').delete().in('store_id', storeIds).eq('day', day))
+    return
+  }
+  const now = new Date().toISOString()
+  unwrap(
+    await supabase
+      .from('bk_sales_notes')
+      .upsert(storeIds.map((store_id) => ({ store_id, day, note, updated_at: now })), { onConflict: 'store_id,day' })
+  )
+}
+
 // { [date]: name } — the payroll app keeps a public-holiday list per payroll
 // store (payroll_stores.data.publicHolidays = [{ date, name }]); merged here by
 // date (different names for one date are joined).

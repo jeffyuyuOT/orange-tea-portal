@@ -4,7 +4,7 @@ import Badge from '../../../../components/ui/Badge'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadPublicHolidays, loadSalesMonth, loadSalesNotesMonth, loadSfPostMonth, saveSalesFields, saveSalesNote } from '../bkSalesData'
+import { loadPublicHolidays, loadSalesMonth, loadSalesNotesMonth, loadSfPostMonth, saveSalesFields, saveSalesNoteForStores } from '../bkSalesData'
 import { BIZ_INPUTS, bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
 import { Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import BizExportModal from './BizExportModal'
@@ -49,6 +49,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   const [noteDate, setNoteDate] = useState(null) // the date whose note box is open
   const [noteDraft, setNoteDraft] = useState('')
   const [noteError, setNoteError] = useState('')
+  const [noteAll, setNoteAll] = useState(false) // 套用到全部分店
 
   const store = stores.find((s) => s.id === storeId) ?? stores[0] ?? null
   const linked = !!store?.sf_store_id
@@ -100,11 +101,12 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   function openNote(date) {
     setNoteDate(date)
     setNoteDraft(notes[date] ?? '')
+    setNoteAll(false)
     setNoteError('')
   }
   async function saveNote(text) {
     try {
-      await saveSalesNote(store.id, noteDate, text)
+      await saveSalesNoteForStores(noteAll ? stores.map((s) => s.id) : [store.id], noteDate, text)
       const t = text.trim()
       setNotes((prev) => {
         const next = { ...prev }
@@ -416,7 +418,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
             <div>
               {noteDate && notes[noteDate] && (
                 <Button variant="secondary" onClick={() => saveNote('')}>
-                  刪除附註
+                  {noteAll ? '刪除全部分店的附註' : '刪除附註'}
                 </Button>
               )}
             </div>
@@ -441,6 +443,10 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
             placeholder="這一天的附註（例如活動、天氣、特別事件）"
             autoFocus
           />
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={noteAll} onChange={(e) => setNoteAll(e.target.checked)} />
+            套用到全部分店（所有分店的 {noteDate} 都會是這則附註{notes[noteDate] ? '；刪除也會一併刪除' : ''}）
+          </label>
           <p className="text-xs text-gray-400">相同文字的附註，會在 歷史紀錄 › 營業 › Event 裡跨年份對照。</p>
           {noteError && <Notice kind="error" onClose={() => setNoteError('')}>{noteError}</Notice>}
         </div>
