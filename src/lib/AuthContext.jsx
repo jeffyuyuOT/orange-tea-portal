@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { addMonths } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { getEffectivePages, canAccessPage } from './permissions'
@@ -7,6 +7,16 @@ import { getStaffTimeDiscrepancies, isUnreadDiscrepancy, hasVisibleDiscrepancy }
 import { DEFAULT_SIDEBAR_ORDER, fetchSidebarOrder } from './sidebarOrder'
 
 const AuthContext = createContext(null)
+
+// A true network-layer failure (the browser's fetch() never got a response
+// at all) rather than a normal auth rejection — see signIn's retry below
+// for why this distinction matters. supabase-js names it
+// AuthRetryableFetchError; the underlying browser error is just a plain
+// "Failed to fetch" TypeError, which is all that's left once supabase-js
+// has already unwrapped it into error.message.
+function isNetworkError(error) {
+  return error?.name === 'AuthRetryableFetchError' || /failed to fetch/i.test(error?.message ?? '')
+}
 
 // Monday-start week key, e.g. "2026-09-14"
 function currentWeekStart(date = new Date()) {
@@ -27,7 +37,6 @@ export function AuthProvider({ children }) {
     () => localStorage.getItem('ot_current_store_id') || null
   )
   const [loading, setLoading] = useState(true)
-  const loadedUserRef = useRef(null)
   // Jeff, 2026-10-07: "training staff現在不需要經過training code就可以登入"
   // — this used to also carry a `needsTrainingCode` flag (training-role
   // accounts had to additionally verify a weekly 4-digit code before the
@@ -144,40 +153,32 @@ export function AuthProvider({ children }) {
     refreshSidebarOrder()
   }, [session, refreshSidebarOrder])
 
-  // Loads profile + permission overrides + accessible stores. The slow part of
-  // sign-in used to be five queries run strictly one after another, and any one
-  // of them failing left `loading` stuck on forever — so: independent queries
-  // run together, one retry on a failed profile read, and errors are logged
-  // instead of thrown (callers always get to clear `loading`).
   const loadProfileData = useCallback(async (userId) => {
-    try {
-      let { data: profileRow, error: profileErr } = await supabase.from('profiles').select('*').eq('id', userId).single()
-      if (profileErr) {
-        await new Promise((r) => setTimeout(r, 600))
-        ;({ data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single())
-      }
-      setProfile(profileRow ?? null)
-      if (!profileRow) return
-      loadedUserRef.current = userId
+    const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
+    setProfile(profileRow ?? null)
 
-      const isAllStores = profileRow.role === 'admin' || profileRow.role === 'developer'
-      const [overridesRes, storesRes] = await Promise.all([
-        supabase.from('permission_overrides').select('page_key, allowed').eq('profile_id', userId),
-        isAllStores
-          ? supabase.from('stores').select('id, name, code').eq('is_active', true)
-          : supabase.from('user_stores').select('store_id, stores ( id, name, code )').eq('profile_id', userId),
-      ])
-      setOverrides(overridesRes.data ?? [])
+    if (profileRow) {
+      const { data: overrideRows } = await supabase
+        .from('permission_overrides')
+        .select('page_key, allowed')
+        .eq('profile_id', userId)
+      setOverrides(overrideRows ?? [])
 
-      if (isAllStores) {
-        // developer is admin's superset (see permissions.js / migration
-        // 0058_developer_is_admin_superset.sql) — same "sees every store"
-        // treatment, not scoped to whatever user_stores rows it happens to have.
-        setAccessibleStores(storesRes.data ?? [])
+      let storeIds = new Set()
+      if (profileRow.primary_store_id) storeIds.add(profileRow.primary_store_id)
+      // developer is admin's superset (see permissions.js / migration
+      // 0058_developer_is_admin_superset.sql) — same "sees every store"
+      // treatment, not scoped to whatever user_stores rows it happens to
+      // have (it may have none at all, same as a fresh admin account).
+      if (profileRow.role === 'admin' || profileRow.role === 'developer') {
+        const { data: allStores } = await supabase.from('stores').select('id, name, code').eq('is_active', true)
+        setAccessibleStores(allStores ?? [])
       } else {
-        const storeIds = new Set()
-        if (profileRow.primary_store_id) storeIds.add(profileRow.primary_store_id)
-        storesRes.data?.forEach((r) => r.store_id && storeIds.add(r.store_id))
+        const { data: userStoreRows } = await supabase
+          .from('user_stores')
+          .select('store_id, stores ( id, name, code )')
+          .eq('profile_id', userId)
+        userStoreRows?.forEach((r) => r.store_id && storeIds.add(r.store_id))
         const ids = Array.from(storeIds)
         if (ids.length) {
           const { data: storeRows } = await supabase.from('stores').select('id, name, code').in('id', ids)
@@ -186,54 +187,30 @@ export function AuthProvider({ children }) {
           setAccessibleStores([])
         }
       }
-    } catch (e) {
-      console.error('loadProfileData failed', e)
     }
   }, [])
 
   useEffect(() => {
     let mounted = true
-    // Safety net: if the session/profile requests hang (bad network, slow
-    // cold start), stop showing "Loading your session…" after 12s and fall
-    // through to the sign-in page rather than spinning forever.
-    const watchdog = setTimeout(() => mounted && setLoading(false), 12000)
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!mounted) return
+      setSession(data.session)
+      if (data.session?.user) await loadProfileData(data.session.user.id)
+      setLoading(false)
+    })
 
-    supabase.auth
-      .getSession()
-      .then(async ({ data }) => {
-        if (!mounted) return
-        setSession(data.session)
-        if (data.session?.user) await loadProfileData(data.session.user.id)
-      })
-      .catch((e) => console.error('getSession failed', e))
-      .finally(() => {
-        clearTimeout(watchdog)
-        if (mounted) setLoading(false)
-      })
-
-    // NOTE: supabase-js holds an internal auth lock while it runs this
-    // callback, and any supabase call awaited INSIDE it waits on that same
-    // lock — a known cause of random hangs (esp. on token refresh / returning
-    // to the tab). So it stays synchronous and defers the profile load.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession)
-      if (!newSession?.user) {
-        loadedUserRef.current = null
+      if (newSession?.user) {
+        await loadProfileData(newSession.user.id)
+      } else {
         setProfile(null)
         setOverrides([])
         setAccessibleStores([])
-        return
       }
-      // The first load is handled by getSession() above; a token refresh
-      // doesn't change the profile; SIGNED_IN also re-fires when the tab
-      // regains focus — skip when this user is already loaded.
-      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return
-      if (event === 'SIGNED_IN' && loadedUserRef.current === newSession.user.id) return
-      setTimeout(() => loadProfileData(newSession.user.id), 0)
     })
     return () => {
       mounted = false
-      clearTimeout(watchdog)
       sub.subscription.unsubscribe()
     }
   }, [loadProfileData])
@@ -473,9 +450,31 @@ export function AuthProvider({ children }) {
     refreshTimeDiscrepancies()
   }, [refreshTimeDiscrepancies])
 
+  // Jeff, 2026-10-16: two different people (both on mobile data, different
+  // carriers/devices, same day) hit a raw "Failed to fetch" on the sign-in
+  // screen. Checked this project's own edge logs for both incidents —
+  // neither attempt ever reached Supabase at all, and there's no reported
+  // Supabase-side incident for either window — so this is a true
+  // network-layer failure (the browser's fetch() itself couldn't open a
+  // connection), most likely a momentary mobile-data blip, not a
+  // credentials or server problem. supabase-js surfaces that as an
+  // AuthRetryableFetchError (its name literally says "retryable") rather
+  // than a normal auth rejection. One silent retry after a short pause
+  // absorbs a one-off blip before bothering anyone with an error at all;
+  // if it fails twice in a row, the message at least tells them what
+  // actually happened instead of surfacing the raw "Failed to fetch" text.
   const signIn = useCallback(async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+    let { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error && isNetworkError(error)) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      ;({ error } = await supabase.auth.signInWithPassword({ email, password }))
+    }
+    if (error) {
+      if (isNetworkError(error)) {
+        throw new Error('Could not reach the server. Please check your internet connection and try again.')
+      }
+      throw error
+    }
   }, [])
 
   const signOut = useCallback(async () => {

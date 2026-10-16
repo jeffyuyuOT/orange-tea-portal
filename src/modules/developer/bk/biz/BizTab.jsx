@@ -8,8 +8,10 @@ import { BIZ_INPUTS, bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } fr
 import { Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import BizExportModal from './BizExportModal'
 import BizOverview from './BizOverview'
+import BizSummary from './BizSummary'
 
 const OVERVIEW_ID = '__overview'
+const SUMMARY_ID = '__summary'
 
 const fmtCount = (n) => (n === null || n === undefined ? '' : round2(n).toLocaleString('en-AU', { maximumFractionDigits: 2 }))
 const fmtAvgCount = (n) =>
@@ -28,6 +30,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
   const [overview, setOverview] = useState(true) // 手動輸入總頁 is the first tab
+  const [summary, setSummary] = useState(false) // 總覽 (read-only totals of every store)
   const [ovDirty, setOvDirty] = useState(false)
   const [year, setYear] = useState(today.year)
   const [month, setMonth] = useState(today.month)
@@ -48,7 +51,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   // The month's saved data. Changing store / month replaces whatever is on
   // screen (the change handlers below already asked about unsaved edits).
   useEffect(() => {
-    if (!store || overview) return
+    if (!store || overview || summary) return
     let cancelled = false
     ;(async () => {
       setLoading(true)
@@ -72,11 +75,11 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
     return () => {
       cancelled = true
     }
-  }, [store?.id, sfStoreId, year, month, overview]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [store?.id, sfStoreId, year, month, overview, summary]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // SF's O.POST can change while this tab is hidden — re-read it when coming back.
   useEffect(() => {
-    if (!topActive || !sfStoreId || overview) return
+    if (!topActive || !sfStoreId || overview || summary) return
     let cancelled = false
     loadSfPostMonth(sfStoreId, year, month)
       .then((rows) => !cancelled && setPostMap(postMapFromRows(rows)))
@@ -84,7 +87,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
     return () => {
       cancelled = true
     }
-  }, [topActive, sfStoreId, year, month, overview])
+  }, [topActive, sfStoreId, year, month, overview, summary])
 
 
   const dates = useMemo(() => monthDates(year, month), [year, month])
@@ -148,14 +151,26 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
     <div className="space-y-3">
       <StoreTabs
         stores={stores}
-        storeId={overview ? OVERVIEW_ID : store.id}
-        lead={[OVERVIEW_ID, '手動輸入總頁']}
+        storeId={overview ? OVERVIEW_ID : summary ? SUMMARY_ID : store.id}
+        lead={[
+          [OVERVIEW_ID, '手動輸入總頁'],
+          [SUMMARY_ID, '總覽'],
+        ]}
         onChange={async (id) => {
           if (id === OVERVIEW_ID) {
-            if (!overview && (await saveAllHere())) setOverview(true)
-          } else if ((overview || id !== store.id) && (await saveAllHere())) {
+            if (!overview && (await saveAllHere())) {
+              setOverview(true)
+              setSummary(false)
+            }
+          } else if (id === SUMMARY_ID) {
+            if (!summary && (await saveAllHere())) {
+              setSummary(true)
+              setOverview(false)
+            }
+          } else if ((overview || summary || id !== store.id) && (await saveAllHere())) {
             setStoreId(id)
             setOverview(false)
+            setSummary(false)
           }
         }}
       />
@@ -176,7 +191,19 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
         />
       )}
 
-      {!overview && (<>
+      {summary && (
+        <BizSummary
+          stores={stores}
+          year={year}
+          month={month}
+          onYearMonth={(v) => {
+            setYear(v.year)
+            setMonth(v.month)
+          }}
+        />
+      )}
+
+      {!overview && !summary && (<>
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-semibold text-brand-900">{store.name}</span>
         <YearMonthPicker

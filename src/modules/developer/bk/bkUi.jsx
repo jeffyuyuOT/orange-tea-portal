@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { brisbaneToday } from './bkUtils'
 
-// `lead` = [id, label]: an extra tab shown before the stores (e.g. 營業's 手動輸入總頁).
+// `lead` = [id, label] (or a list of them): extra tabs shown before the stores (e.g. 營業's 手動輸入總頁, 總覽).
 export function StoreTabs({ stores, storeId, onChange, allowAll = false, lead = null, className = '' }) {
   const tab = (id, label) => (
     <button
@@ -18,7 +18,7 @@ export function StoreTabs({ stores, storeId, onChange, allowAll = false, lead = 
   )
   return (
     <div className={`flex gap-2 overflow-x-auto pb-1 ${className}`}>
-      {lead && tab(lead[0], lead[1])}
+      {lead && (Array.isArray(lead[0]) ? lead : [lead]).map(([id, label]) => tab(id, label))}
       {allowAll && tab(null, '全部分店')}
       {stores.map((s) => tab(s.id, s.name))}
     </div>
