@@ -20,7 +20,7 @@ async function fetchAll(makeQuery) {
   }
 }
 
-const COLUMNS = 'store_id, day, hour, pos_sales, pos_count, self_sales, self_count'
+const COLUMNS = 'store_id, day, hour, pos_sales, pos_count, self_sales, self_count, combined_sales'
 
 export async function loadHourSettings() {
   return unwrap(await supabase.from('bk_hour_settings').select('store_id, start_hour, end_hour')) ?? []
@@ -92,5 +92,42 @@ export async function saveHourDay(storeId, day, source, hours) {
       .is('pos_count', null)
       .is('self_sales', null)
       .is('self_count', null)
+      .is('combined_sales', null)
   )
+}
+
+// 系統設置 › 匯入 › 小時統計: already-summed figures for one store. `days` =
+// { [date]: { [hour]: dollars } }. For each date in the file the old imported
+// figures are replaced (hours the file leaves blank are cleared); POS / self-order
+// figures are never touched. Done in chunks of days so a year is a handful of requests.
+export async function saveCombinedHours(storeId, days) {
+  const dates = Object.keys(days).sort()
+  const now = new Date().toISOString()
+  for (let i = 0; i < dates.length; i += 100) {
+    const chunk = dates.slice(i, i + 100)
+    unwrap(
+      await supabase
+        .from('bk_hour_sales')
+        .update({ combined_sales: null, updated_at: now })
+        .eq('store_id', storeId)
+        .in('day', chunk)
+        .not('combined_sales', 'is', null)
+    )
+    const rows = chunk.flatMap((day) => Object.entries(days[day]).map(([hour, v]) => ({ store_id: storeId, day, hour: Number(hour), combined_sales: v, updated_at: now })))
+    for (let j = 0; j < rows.length; j += 1000) {
+      unwrap(await supabase.from('bk_hour_sales').upsert(rows.slice(j, j + 1000), { onConflict: 'store_id,day,hour' }))
+    }
+    unwrap(
+      await supabase
+        .from('bk_hour_sales')
+        .delete()
+        .eq('store_id', storeId)
+        .in('day', chunk)
+        .is('pos_sales', null)
+        .is('pos_count', null)
+        .is('self_sales', null)
+        .is('self_count', null)
+        .is('combined_sales', null)
+    )
+  }
 }

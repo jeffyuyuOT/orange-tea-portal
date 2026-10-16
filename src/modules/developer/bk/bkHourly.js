@@ -2,6 +2,7 @@
 // shown per store, and the per-hour maths. No Supabase / React here so it can be
 // tested on its own.
 import { round2, sumOrNull, toNum } from './bkUtils'
+import { cellNumber, findHeaderRow, parseDateCell } from './bkImport'
 
 export const DEFAULT_HOURS = { start: 9, end: 21 }
 export const hourLabel = (h) => `${h}:00`
@@ -136,6 +137,64 @@ export function selfJobs(rows) {
 export const sumHours = (hours) => round2(hours.reduce((s, h) => s + (h.sales ?? 0), 0))
 
 // ---------------------------------------------------------------------------
+// The 系統設置 › 匯入 sheet: one tab per store, rows = dates, columns = hours
+// (already-summed 營業額). -> { days:{ [date]:{ [hour]: dollars } }, hours:[…],
+// ignored:[…], unreadable, badCells } | { error }
+// ---------------------------------------------------------------------------
+
+// "9", 9, "9:00", "09:00", "9點", "9時" -> 9 ; anything else -> null
+export function hourFromHeader(h) {
+  if (typeof h === 'number') return Number.isInteger(h) && h >= 0 && h <= 23 ? h : null
+  if (h instanceof Date) return null
+  const m = String(h ?? '').trim().match(/^(\d{1,2})(?::00)?\s*(?:點|时|時|h|hr)?$/i)
+  if (!m) return null
+  const n = Number(m[1])
+  return n >= 0 && n <= 23 ? n : null
+}
+
+const SUMMARY_ROW = /^(total|sum|合計|總計|總和|平均|average|avg)/i
+
+export function parseHourGridRows(rows) {
+  const headerIdx = findHeaderRow(rows)
+  if (headerIdx < 0) return { error: '找不到標題列：表頭需要有「日期」或「Date」欄。' }
+  const headers = rows[headerIdx]
+  const dateCol = headers.findIndex((h) => typeof h === 'string' && /^(date|日期|日)$/i.test(h.trim()))
+  const hourCols = [] // [colIndex, hour]
+  const ignored = []
+  headers.forEach((h, i) => {
+    if (i === dateCol || h === null || h === undefined || String(h).trim() === '') return
+    const hour = hourFromHeader(h)
+    if (hour === null) ignored.push(String(h).trim())
+    else hourCols.push([i, hour])
+  })
+  if (hourCols.length === 0) return { error: '表頭裡找不到小時欄（例如 9:00、10:00）。' }
+  const days = {}
+  let unreadable = 0
+  let badCells = 0
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    if (!row.some((c) => c !== null && c !== undefined && String(c).trim() !== '')) continue
+    const dateCell = row[dateCol]
+    if (typeof dateCell === 'string' && SUMMARY_ROW.test(dateCell.trim())) continue
+    // a full date is required here (a bare day number can't say which month)
+    const parsed = parseDateCell(dateCell, 1900, 1)
+    if (!parsed || parsed.startsWith('1900-')) {
+      unreadable++
+      continue
+    }
+    const entry = {}
+    for (const [i, hour] of hourCols) {
+      const res = cellNumber(row[i])
+      if (res.bad) badCells++
+      if (res.value !== undefined) entry[hour] = round2(res.value)
+    }
+    if (Object.keys(entry).length > 0) days[parsed] = entry
+  }
+  const hours = [...new Set(hourCols.map(([, h]) => h))].sort((a, b) => a - b)
+  return { days, hours, ignored, unreadable, badCells }
+}
+
+// ---------------------------------------------------------------------------
 // Hours shown & per-hour maths
 // ---------------------------------------------------------------------------
 
@@ -159,8 +218,12 @@ export function hoursFor(settings, storeIds) {
   return Array.from({ length: end - start + 1 }, (_, i) => start + i)
 }
 
-// One row's dollars = POS + self-order.
-export const rowSales = (r) => sumOrNull([toNum(r.pos_sales), toNum(r.self_sales)])
+// One row's dollars = POS + self-order; a row that only has an imported
+// already-summed figure (combined_sales, migration 0121) uses that instead.
+export function rowSales(r) {
+  const split = sumOrNull([toNum(r.pos_sales), toNum(r.self_sales)])
+  return split !== null ? split : toNum(r.combined_sales)
+}
 
 // { [day]: { [hour]: dollars } } summed over the given stores.
 export function hourlyByDay(rows, storeIds) {

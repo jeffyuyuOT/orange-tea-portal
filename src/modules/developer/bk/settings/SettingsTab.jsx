@@ -10,6 +10,7 @@ import {
   downloadBizTemplate,
   downloadDividendTemplate,
   downloadEmmaClaimTemplate,
+  downloadHourTemplate,
   downloadJeffOwedTemplate,
   downloadSfTemplate,
   downloadUAccountTemplate,
@@ -17,6 +18,7 @@ import {
 } from '../bkImportTemplates'
 import BackfillGridImport from './BackfillGridImport'
 import BizGridImport from './BizGridImport'
+import HourGridImport from './HourGridImport'
 import EntriesExcelImport from '../ucash/EntriesExcelImport'
 import DividendExcelImport from '../bonus/DividendExcelImport'
 import JeffOwedExcelImport from './JeffOwedExcelImport'
@@ -40,6 +42,7 @@ const SUBTABS = [
 const TEMPLATES = [
   ['SF', (stores) => downloadSfTemplate(stores)],
   ['營業', (stores, salesStores) => downloadBizTemplate(salesStores)],
+  ['小時統計', (stores) => downloadHourTemplate(stores)],
   ['U帳', () => downloadUAccountTemplate()],
   ['收成', () => downloadDividendTemplate()],
   ['積欠 Jeff', () => downloadJeffOwedTemplate()],
@@ -51,6 +54,7 @@ const TEMPLATES = [
 const ROUTES = [
   ['jeff', /jeff/i, '積欠 Jeff'],
   ['emma', /emma/i, '積欠 Emma'],
+  ['hours', /小時|hour/i, '小時統計'],
   ['biz', /營業|biz/i, '營業'],
   ['bonus', /收成|dividend|bonus/i, '收成'],
   ['u', /u\s*帳|u\s*account|ucash|分店現金|收支/i, 'U帳'],
@@ -229,7 +233,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
               </select>
               <Button
                 variant="secondary"
-                disabled={(templateChoice === 'SF' && stores.length === 0) || (templateChoice === '營業' && salesStores.length === 0)}
+                disabled={((templateChoice === 'SF' || templateChoice === '小時統計') && stores.length === 0) || (templateChoice === '營業' && salesStores.length === 0)}
                 onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores, salesStores)}
               >
                 下載範本
@@ -238,6 +242,13 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
             {templateChoice === '營業' && (
               <div className="text-xs text-gray-500">
                 {salesStores.length === 0 ? '還沒有任何營業分店，無法產生營業範本。' : '營業範本每個營業分店各自一個分頁，欄位：日期、P杯數、POS、CV、Self O、SO杯數。'}
+              </div>
+            )}
+            {templateChoice === '小時統計' && (
+              <div className="text-xs text-gray-500">
+                {stores.length === 0
+                  ? '還沒有任何分店，無法產生小時統計範本。'
+                  : '小時統計範本每個分店（SF / U帳 的分店）各自一個分頁，列是日期、欄是小時（用 系統設置 › 小時統計 設定的時段），數字填 POS 和自動點單已加總的營業額。'}
               </div>
             )}
             {templateChoice === 'SF' && (
@@ -250,7 +261,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
           <div className="space-y-3 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-sm font-semibold text-brand-900">上傳檔案</div>
             <div className="text-xs text-gray-500">
-              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「營業」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
+              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「營業」「小時統計」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
             </div>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
               選擇 Excel 檔案
@@ -316,6 +327,13 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
                       onClose={reset}
                       onImported={(count) => imported(count, '營業')}
                     />
+                  ))}
+
+                {kind === 'hours' &&
+                  (stores.length === 0 ? (
+                    <Notice kind="info">還沒有任何分店，無法匯入小時統計。</Notice>
+                  ) : (
+                    <HourGridImport file={file} stores={stores} onClose={reset} onImported={(count) => imported(count, '小時統計')} />
                   ))}
 
                 {kind === 'u' &&
