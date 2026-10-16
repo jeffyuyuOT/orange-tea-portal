@@ -4,6 +4,9 @@ import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, fmtMoney, monthDates, round2, weekdayOf } from '../bkUtils'
 import { loadPublicHolidays, loadSalesAll, loadSalesNotesAll, loadSfPostAll } from '../bkSalesData'
+import { loadHourSalesRange, loadHourSettings } from '../bkHourData'
+import { averageByHour, hourlyByDay, hoursFor, settingsMap } from '../bkHourly'
+import HourBreakdown from '../hours/HourBreakdown'
 import {
   QUARTER_MONTHS,
   aggregateDays,
@@ -17,8 +20,10 @@ import {
   monthAcrossYears,
   monthsOfYear,
   quarterAcrossYears,
+  matchesPeriod,
   quartersOfYear,
   recordYears,
+  weekdayIndex,
   weekdayAcrossYears,
   weekdayStats,
   withSales,
@@ -78,7 +83,7 @@ const th = 'border-b border-brand-100 bg-brand-50 px-3 py-2 text-left text-xs fo
 const td = 'border-b border-gray-100 px-3 py-2 text-sm'
 
 // The popup of a clicked block: the same period in every year.
-function DetailModal({ detail, onClose }) {
+function DetailModal({ detail, onClose, onHours }) {
   return (
     <Modal open={!!detail} onClose={onClose} title={detail?.title ?? ''} footer={<Button onClick={onClose}>關閉</Button>}>
       {detail && (
@@ -89,12 +94,13 @@ function DetailModal({ detail, onClose }) {
                 <th className={th}>{detail.firstCol}</th>
                 <th className={`${th} text-right`}>總營業額</th>
                 <th className={`${th} text-right`}>總杯數</th>
+                {detail.rows.some((r) => r.hour) && <th className={th} />}
               </tr>
             </thead>
             <tbody>
               {detail.rows.length === 0 && (
                 <tr>
-                  <td className={`${td} text-gray-400`} colSpan={3}>
+                  <td className={`${td} text-gray-400`} colSpan={4}>
                     沒有紀錄
                   </td>
                 </tr>
@@ -104,6 +110,19 @@ function DetailModal({ detail, onClose }) {
                   <td className={td}>{r.label}</td>
                   <td className={`${td} text-right tabular-nums`}>{money(r.total)}</td>
                   <td className={`${td} text-right tabular-nums`}>{count(r.cups)}</td>
+                  {detail.rows.some((x) => x.hour) && (
+                    <td className={`${td} text-right`}>
+                      {r.hour && (
+                        <button
+                          type="button"
+                          onClick={() => onHours(r.hour, `${detail.title} · ${r.label}`)}
+                          className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
+                        >
+                          小時統計
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -116,7 +135,7 @@ function DetailModal({ detail, onClose }) {
 
 // 歷史紀錄 › 營業. Only 總營業額 and 總杯數; every block opens the same period in
 // earlier (and later) years.
-export default function HistoryBiz({ salesStores, active }) {
+export default function HistoryBiz({ salesStores, stores = [], active }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(null) // null = 全部分店
   const [kind, setKind] = useState('quarter')
@@ -127,6 +146,7 @@ export default function HistoryBiz({ salesStores, active }) {
   const [dayYM, setDayYM] = useState({ year: today.year, month: today.month })
   const [wQuarter, setWQuarter] = useState('')
   const [wMonth, setWMonth] = useState('')
+  const [hourView, setHourView] = useState(null)
 
   const storeKey = salesStores.map((s) => `${s.id}:${s.sf_store_id ?? ''}`).join(',')
   const reload = useCallback(async () => {
@@ -167,6 +187,38 @@ export default function HistoryBiz({ salesStores, active }) {
 
   function showAcross(title, firstCol, rows) {
     setDetail({ title, firstCol, rows })
+  }
+
+  // 小時統計 button of a detail row. spec = { type:'day', date } | { type:'weekday', index, year, filter }.
+  // Hour data is keyed by the SF / U帳 stores, so the chosen 營業 stores are mapped through their SF link.
+  async function openHours(spec, title) {
+    const ids = scopeIds.map((id) => salesStores.find((s) => s.id === id)?.sf_store_id).filter(Boolean)
+    if (ids.length === 0) {
+      setHourView({ title, message: '這家店沒有連到 SF / U帳 的分店，所以沒有小時營業額資料。' })
+      return
+    }
+    setHourView({ title, loading: true })
+    try {
+      const from = spec.type === 'day' ? spec.date : `${spec.year}-01-01`
+      const to = spec.type === 'day' ? spec.date : `${spec.year}-12-31`
+      const [rows, setRows] = await Promise.all([loadHourSalesRange(ids, from, to), loadHourSettings()])
+      const byDay = hourlyByDay(rows, ids)
+      const days =
+        spec.type === 'day'
+          ? [spec.date]
+          : Object.keys(byDay).filter((d) => weekdayIndex(d) === spec.index && matchesPeriod(d, { ...spec.filter, year: spec.year }))
+      const { values, days: n } = averageByHour(byDay, days)
+      const shown = new Set([...hoursFor(settingsMap(setRows), ids), ...Object.keys(values).map(Number)])
+      setHourView({
+        title,
+        values,
+        days: n,
+        hours: [...shown].sort((a, b) => a - b),
+        note: spec.type === 'day' ? '營業額 = POS + 自動點單' : `平均（${n} 天）· 營業額 = POS + 自動點單`,
+      })
+    } catch (e) {
+      setHourView({ title, message: e.message })
+    }
   }
 
   let body = null
@@ -253,6 +305,7 @@ export default function HistoryBiz({ salesStores, active }) {
                           total: x.total,
                           cups: x.cups,
                           highlight: x.date === date,
+                          hour: { type: 'day', date: x.date },
                         }))
                       )
                     }
@@ -309,6 +362,7 @@ export default function HistoryBiz({ salesStores, active }) {
                         total: x.total,
                         cups: x.cups,
                         highlight: x.date === e.date,
+                        hour: { type: 'day', date: x.date },
                       }))
                     )
                   }
@@ -365,7 +419,13 @@ export default function HistoryBiz({ salesStores, active }) {
                 showAcross(
                   `歷年 ${s.label} 平均（${periodLabel}）`,
                   '年份',
-                  weekdayAcrossYears(records, s.key, wFilter).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups }))
+                  weekdayAcrossYears(records, s.key, wFilter).map((r) => ({
+                    key: r.year,
+                    label: `${r.year} 年`,
+                    total: r.total,
+                    cups: r.cups,
+                    hour: { type: 'weekday', index: s.key, year: r.year, filter: wFilter },
+                  }))
                 )
               }
             />
@@ -381,7 +441,8 @@ export default function HistoryBiz({ salesStores, active }) {
       <StoreTabs stores={salesStores} storeId={storeId} onChange={setStoreId} allowAll />
       <SubTabs tabs={KINDS} value={kind} onChange={setKind} />
       {body}
-      <DetailModal detail={detail} onClose={() => setDetail(null)} />
+      <DetailModal detail={detail} onClose={() => setDetail(null)} onHours={openHours} />
+      <HourBreakdown view={hourView} onClose={() => setHourView(null)} />
     </div>
   )
 }

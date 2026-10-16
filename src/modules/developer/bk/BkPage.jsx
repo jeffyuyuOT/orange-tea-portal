@@ -6,6 +6,7 @@ import { loadSalesStores } from './bkSalesData'
 import { Notice } from './bkUi'
 const SalesFigureTab = lazy(() => import('./sales/SalesFigureTab'))
 const BizTab = lazy(() => import('./biz/BizTab'))
+const HoursTab = lazy(() => import('./hours/HoursTab'))
 const UAccountTab = lazy(() => import('./ucash/UAccountTab'))
 const BonusTab = lazy(() => import('./bonus/BonusTab'))
 const OwedPage = lazy(() => import('./owed/OwedPage'))
@@ -41,6 +42,7 @@ import BackupGuard from './BackupGuard'
 const TABS = [
   ['sf', 'Sales figure'],
   ['biz', '營業'],
+  ['hours', '小時統計'],
   ['u', 'U帳'],
   ['bonus', '收成'],
   ['owed', '積欠'],
@@ -208,6 +210,13 @@ export default function BkPage() {
               <Suspense fallback={<LoadingSpinner />}>
               <BizTab stores={salesStores} topActive={tab === 'biz'} onTabDirty={onBizDirty} registerSaver={registerSaver} />
             </Suspense>
+            </div>
+          )}
+          {visited.has('hours') && (
+            <div className={tab === 'hours' ? '' : 'hidden'}>
+              <Suspense fallback={<LoadingSpinner />}>
+                <HoursTab stores={stores} topActive={tab === 'hours'} />
+              </Suspense>
             </div>
           )}
           {visited.has('u') && (

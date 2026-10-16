@@ -23,6 +23,7 @@ import JeffOwedExcelImport from './JeffOwedExcelImport'
 import EmmaClaimExcelImport from './EmmaClaimExcelImport'
 import SfMaintenance from '../sales/SfMaintenance'
 import BizStoreManager from './BizStoreManager'
+import HourSettings from './HourSettings'
 import PartySettings from '../bonus/PartySettings'
 
 const SUBTABS = [
@@ -30,6 +31,7 @@ const SUBTABS = [
   ['backup', '備份'],
   ['sf', 'SF'],
   ['biz', '營業'],
+  ['hours', '小時統計'],
   ['bonus', '收成'],
 ]
 
@@ -444,6 +446,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
         />
       </div>
 
+      {sub === 'hours' && <HourSettings stores={stores} />}
       {sub === 'biz' && <BizStoreManager salesStores={salesStores} sfStores={stores} onChanged={onSalesStoresChanged} />}
 
       <div className={sub === 'bonus' ? '' : 'hidden'}>

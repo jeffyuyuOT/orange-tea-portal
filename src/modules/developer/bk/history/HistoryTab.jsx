@@ -32,7 +32,7 @@ export default function HistoryTab({ stores, salesStores, topActive = true, onLo
         <SfHistory stores={stores} salesStores={salesStores} sfStoreId={stores[0]?.id ?? null} active={topActive && sub === 'sf'} onLoad={onLoadSf} />
       </div>
       <div className={sub === 'biz' ? '' : 'hidden'}>
-        <HistoryBiz salesStores={salesStores} active={topActive && sub === 'biz'} />
+        <HistoryBiz salesStores={salesStores} stores={stores} active={topActive && sub === 'biz'} />
       </div>
       <div className={sub === 'u' ? '' : 'hidden'}>
         <UHistory stores={stores} storeId={stores[0]?.id ?? null} active={topActive && sub === 'u'} onLoad={onLoadCash} />
