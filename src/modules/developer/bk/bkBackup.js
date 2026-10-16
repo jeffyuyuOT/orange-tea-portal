@@ -29,6 +29,7 @@ const BK_BACKUP_TABLES = [
   'bk_owed_emma_claims',
   'bk_sales_stores',
   'bk_sales_days',
+  'bk_sales_notes',
 ]
 
 // Primary key of each table (upsert conflict target + stable paging order).
@@ -37,6 +38,7 @@ const PRIMARY_KEYS = {
   bk_sf_days: 'sf_month_id,day',
   bk_cash_days: 'store_id,day',
   bk_sales_days: 'store_id,day',
+  bk_sales_notes: 'store_id,day',
 }
 const pkOf = (table) => PRIMARY_KEYS[table] ?? 'id'
 

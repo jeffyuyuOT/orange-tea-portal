@@ -135,6 +135,76 @@ export async function loadSfPostRange(sfStoreIds, from, to) {
   return rows.map((r) => ({ day: r.day, o_post: r.o_post, sf_store_id: r.bk_sf_months.store_id }))
 }
 
+// Every stored day of the given stores (all years) — 歷史紀錄 › 營業.
+export async function loadSalesAll(storeIds) {
+  if (storeIds.length === 0) return []
+  return fetchAll(() => supabase.from('bk_sales_days').select(`store_id, ${DAY_COLUMNS}`).in('store_id', storeIds).order('store_id').order('day'))
+}
+
+// SF's O.POST for several SF stores over all time (rows carry `sf_store_id`).
+export async function loadSfPostAll(sfStoreIds) {
+  if (sfStoreIds.length === 0) return []
+  const rows = await fetchAll(() =>
+    supabase
+      .from('bk_sf_days')
+      .select('day, o_post, bk_sf_months!inner(store_id)')
+      .in('bk_sf_months.store_id', sfStoreIds)
+      .order('sf_month_id')
+      .order('day')
+  )
+  return rows.map((r) => ({ day: r.day, o_post: r.o_post, sf_store_id: r.bk_sf_months.store_id }))
+}
+
+// ---------------------------------------------------------------------------
+// Date notes (migration 0119) and public holidays (read from the payroll app)
+// ---------------------------------------------------------------------------
+
+export async function loadSalesNotesMonth(storeId, year, month) {
+  return (
+    unwrap(
+      await supabase
+        .from('bk_sales_notes')
+        .select('store_id, day, note')
+        .eq('store_id', storeId)
+        .gte('day', monthStart(year, month))
+        .lt('day', nextMonthStart(year, month))
+    ) ?? []
+  )
+}
+
+export async function loadSalesNotesAll(storeIds) {
+  if (storeIds.length === 0) return []
+  return fetchAll(() => supabase.from('bk_sales_notes').select('store_id, day, note').in('store_id', storeIds).order('store_id').order('day'))
+}
+
+// Empty text removes the note.
+export async function saveSalesNote(storeId, day, text) {
+  const note = (text ?? '').trim()
+  if (!note) {
+    unwrap(await supabase.from('bk_sales_notes').delete().eq('store_id', storeId).eq('day', day))
+    return
+  }
+  unwrap(await supabase.from('bk_sales_notes').upsert({ store_id: storeId, day, note, updated_at: new Date().toISOString() }, { onConflict: 'store_id,day' }))
+}
+
+// { [date]: name } — the payroll app keeps a public-holiday list per payroll
+// store (payroll_stores.data.publicHolidays = [{ date, name }]); merged here by
+// date (different names for one date are joined).
+export async function loadPublicHolidays() {
+  const rows = unwrap(await supabase.from('payroll_stores').select('data')) ?? []
+  const map = {}
+  for (const r of rows) {
+    for (const h of r.data?.publicHolidays ?? []) {
+      if (!h?.date) continue
+      const name = (h.name ?? '').trim() || 'Public holiday'
+      const cur = map[h.date]
+      if (!cur) map[h.date] = name
+      else if (!cur.split(' / ').includes(name)) map[h.date] = `${cur} / ${name}`
+    }
+  }
+  return map
+}
+
 // `days` is { [date]: { pos, self_o, cv, p_cups, so_cups } } (form strings).
 // A linked store's POS comes from SF, so `pos` is left out of the write (any
 // value typed earlier, before it was linked, stays as it was). Days with

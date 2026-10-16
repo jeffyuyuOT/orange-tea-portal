@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Badge from '../../../../components/ui/Badge'
+import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadSalesMonth, loadSfPostMonth, saveSalesFields } from '../bkSalesData'
+import { loadPublicHolidays, loadSalesMonth, loadSalesNotesMonth, loadSfPostMonth, saveSalesFields, saveSalesNote } from '../bkSalesData'
 import { BIZ_INPUTS, bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
-import { Notice, StoreTabs, YearMonthPicker } from '../bkUi'
+import { Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import BizExportModal from './BizExportModal'
 import BizOverview from './BizOverview'
 import BizSummary from './BizSummary'
@@ -43,6 +44,11 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   const [msg, setMsg] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [exportMode, setExportMode] = useState(null) // 'excel' | 'week' | null
+  const [notes, setNotes] = useState({}) // { [date]: note text } for the store + month on screen
+  const [holidays, setHolidays] = useState({}) // { [date]: public holiday name } from the payroll app
+  const [noteDate, setNoteDate] = useState(null) // the date whose note box is open
+  const [noteDraft, setNoteDraft] = useState('')
+  const [noteError, setNoteError] = useState('')
 
   const store = stores.find((s) => s.id === storeId) ?? stores[0] ?? null
   const linked = !!store?.sf_store_id
@@ -58,11 +64,13 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
       setError('')
       setMsg('')
       try {
-        const [rows, posts] = await Promise.all([
+        const [rows, posts, noteRows] = await Promise.all([
           loadSalesMonth(store.id, year, month),
           sfStoreId ? loadSfPostMonth(sfStoreId, year, month) : Promise.resolve([]),
+          loadSalesNotesMonth(store.id, year, month).catch(() => []), // notes are optional: never block the sheet
         ])
         if (cancelled) return
+        setNotes(Object.fromEntries(noteRows.map((n) => [n.day, n.note])))
         setDays(bizDaysFromRows(rows))
         setPostMap(postMapFromRows(posts))
         setDirty(false)
@@ -76,6 +84,39 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
       cancelled = true
     }
   }, [store?.id, sfStoreId, year, month, overview, summary]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Public holidays come from the payroll app's stores; read once (and again when coming back to this tab).
+  useEffect(() => {
+    if (!topActive) return
+    let cancelled = false
+    loadPublicHolidays()
+      .then((m) => !cancelled && setHolidays(m))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [topActive])
+
+  function openNote(date) {
+    setNoteDate(date)
+    setNoteDraft(notes[date] ?? '')
+    setNoteError('')
+  }
+  async function saveNote(text) {
+    try {
+      await saveSalesNote(store.id, noteDate, text)
+      const t = text.trim()
+      setNotes((prev) => {
+        const next = { ...prev }
+        if (t) next[noteDate] = t
+        else delete next[noteDate]
+        return next
+      })
+      setNoteDate(null)
+    } catch (e) {
+      setNoteError(e.message)
+    }
+  }
 
   // SF's O.POST can change while this tab is hidden — re-read it when coming back.
   useEffect(() => {
@@ -194,6 +235,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
       {summary && (
         <BizSummary
           stores={stores}
+          holidays={holidays}
           year={year}
           month={month}
           onYearMonth={(v) => {
@@ -263,9 +305,9 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
         <LoadingSpinner />
       ) : (
         <div className="max-h-[70vh] overflow-auto rounded-xl border border-brand-100">
-          <table className="w-full table-fixed border-collapse text-[13px]" style={{ minWidth: 720 }}>
+          <table className="w-full table-fixed border-collapse text-[13px]" style={{ minWidth: 740 }}>
             <colgroup>
-              <col style={{ width: 70 }} />
+              <col style={{ width: 90 }} />
               <col />
               <col />
               <col />
@@ -297,12 +339,22 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
               {dates.map((date, i) => {
                 const r = rows[i]
                 const day = days[date] ?? {}
-                const weekendBg = isWeekend(date) ? 'bg-gray-50' : 'bg-white'
+                const holiday = holidays[date]
+                const weekendBg = holiday ? 'bg-rose-50' : isWeekend(date) ? 'bg-gray-50' : 'bg-white'
                 return (
                   <tr key={date} className={weekendBg}>
-                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`}>
-                      <span className="font-medium">{Number(date.slice(8))}</span>{' '}
-                      <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
+                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap ${weekendBg}`}>
+                      <button
+                        type="button"
+                        onClick={() => openNote(date)}
+                        className="flex w-full items-center gap-1 px-1.5 py-1 text-left hover:bg-brand-50"
+                        title={[holiday && `Public holiday：${holiday}`, notes[date]].filter(Boolean).join('\n') || '點擊新增附註'}
+                      >
+                        <span className="font-medium">{Number(date.slice(8))}</span>
+                        <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
+                        {holiday && <span className="text-[12px]">🎉</span>}
+                        {notes[date] && <span className="text-[12px]">📝</span>}
+                      </button>
                     </td>
                     <td className={td}>
                       <div className="px-1 py-1 text-right font-medium tabular-nums text-gray-700" title="POS + Self O + CV × 4">
@@ -354,6 +406,45 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
       )}
 
       </>)}
+
+      <Modal
+        open={!!noteDate}
+        onClose={() => setNoteDate(null)}
+        title={noteDate ? `${store.name} · ${noteDate} ${weekdayOf(noteDate)} 附註` : ''}
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <div>
+              {noteDate && notes[noteDate] && (
+                <Button variant="secondary" onClick={() => saveNote('')}>
+                  刪除附註
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setNoteDate(null)}>
+                取消
+              </Button>
+              <Button onClick={() => saveNote(noteDraft)}>儲存</Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {noteDate && holidays[noteDate] && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">🎉 Public holiday：{holidays[noteDate]}</div>
+          )}
+          <textarea
+            className={`${inputCls} w-full`}
+            rows={4}
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            placeholder="這一天的附註（例如活動、天氣、特別事件）"
+            autoFocus
+          />
+          <p className="text-xs text-gray-400">相同文字的附註，會在 歷史紀錄 › 營業 › Event 裡跨年份對照。</p>
+          {noteError && <Notice kind="error" onClose={() => setNoteError('')}>{noteError}</Notice>}
+        </div>
+      </Modal>
 
       <BizExportModal open={!!exportMode} mode={exportMode ?? 'excel'} stores={stores} year={year} month={month} onClose={() => setExportMode(null)} />
     </div>

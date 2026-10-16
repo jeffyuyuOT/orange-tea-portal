@@ -43,7 +43,7 @@ export function summarizeStores(stores, dates, salesRows, postRows) {
 
 // 總覽: every store's 總營業額 and 總杯數 for each day of the month, one colour
 // block per store, with Total and 平均 at the top.
-export default function BizSummary({ stores, year, month, onYearMonth }) {
+export default function BizSummary({ stores, year, month, onYearMonth, holidays = {} }) {
   const [sales, setSales] = useState([])
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -108,9 +108,9 @@ export default function BizSummary({ stores, year, month, onYearMonth }) {
         <LoadingSpinner />
       ) : (
         <div className="max-h-[75vh] overflow-auto rounded-xl border border-brand-100">
-          <table className="w-full table-fixed border-collapse text-[13px]" style={{ minWidth: 70 + stores.length * 200 }}>
+          <table className="w-full table-fixed border-collapse text-[13px]" style={{ minWidth: 84 + stores.length * 200 }}>
             <colgroup>
-              <col style={{ width: 70 }} />
+              <col style={{ width: 84 }} />
               {stores.map((s) => [<col key={`${s.id}t`} />, <col key={`${s.id}c`} />])}
             </colgroup>
             <thead className="sticky top-0 z-20">
@@ -133,12 +133,14 @@ export default function BizSummary({ stores, year, month, onYearMonth }) {
             </thead>
             <tbody>
               {dates.map((date, di) => {
-                const weekendBg = isWeekend(date) ? 'bg-gray-50' : 'bg-white'
+                const holiday = holidays[date]
+                const weekendBg = holiday ? 'bg-rose-50' : isWeekend(date) ? 'bg-gray-50' : 'bg-white'
                 return (
                   <tr key={date} className={weekendBg}>
-                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`}>
+                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`} title={holiday ? `Public holiday：${holiday}` : undefined}>
                       <span className="font-medium">{Number(date.slice(8))}</span>{' '}
                       <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
+                      {holiday && <span className="ml-1 text-[12px]">🎉</span>}
                     </td>
                     {stores.map((s, i) => {
                       const r = sums[s.id]?.rows[di] ?? {}

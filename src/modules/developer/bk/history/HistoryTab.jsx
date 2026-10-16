@@ -3,9 +3,11 @@ import { Notice, SubTabs } from '../bkUi'
 import SfHistory from '../sales/SfHistory'
 import UHistory from '../ucash/UHistory'
 import HistoryBonusView from './HistoryBonusView'
+import HistoryBiz from './HistoryBiz'
 
 const SUBTABS = [
   ['sf', 'SF'],
+  ['biz', '營業'],
   ['u', 'U帳'],
   ['bonus', '收成'],
 ]
@@ -28,6 +30,9 @@ export default function HistoryTab({ stores, salesStores, topActive = true, onLo
       <SubTabs tabs={SUBTABS} value={sub} onChange={setSub} />
       <div className={sub === 'sf' ? '' : 'hidden'}>
         <SfHistory stores={stores} salesStores={salesStores} sfStoreId={stores[0]?.id ?? null} active={topActive && sub === 'sf'} onLoad={onLoadSf} />
+      </div>
+      <div className={sub === 'biz' ? '' : 'hidden'}>
+        <HistoryBiz salesStores={salesStores} active={topActive && sub === 'biz'} />
       </div>
       <div className={sub === 'u' ? '' : 'hidden'}>
         <UHistory stores={stores} storeId={stores[0]?.id ?? null} active={topActive && sub === 'u'} onLoad={onLoadCash} />
