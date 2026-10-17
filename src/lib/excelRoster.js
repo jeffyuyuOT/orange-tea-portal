@@ -742,6 +742,42 @@ function findFirstDataRow(aoa, mondayCol, headerRows = 8) {
   return null
 }
 
+// Jeff, 2026-10-18: "為什麼這一次匯入又有Sunnypark的名字出現" — a leftover
+// title row sitting directly above a second, duplicated copy of this same
+// table (Jeff's own file had one reading "Sunnypark", which isn't even an
+// active store any more) slipped through the Name-column boundary check
+// (TABLE_BOUNDARY_NAMES below) because that check only recognizes "Name"
+// itself or a known store's name — not an arbitrary leftover label. Rather
+// than trying to enumerate every label Jeff might ever leave in a file,
+// this recognizes the duplicated block's own SHAPE instead: every real
+// employee row in this file/app's own template is immediately followed by
+// either that person's Break row or another employee's row — never by a
+// repeat of the week's own date header, which is what row 1 of every
+// genuine table here starts with (same check findDayColumns uses to locate
+// it in the first place). A "name" whose very next row is that same date
+// header again can only be a stray title sitting just above a second copy
+// of the table, whatever it happens to say.
+function isWeekDateHeaderRow(row, weekDates) {
+  if (!row) return false
+  let hits = 0
+  weekDates.forEach((iso, i) => {
+    const serial = excelSerialFromISODate(iso)
+    const label = DAY_LABELS[i].toLowerCase()
+    for (let c = 1; c < row.length; c++) {
+      const v = row[c]
+      const text = typeof v === 'string' ? v.trim().toLowerCase() : ''
+      if ((typeof v === 'number' && Math.round(v) === serial) || text === label || text.startsWith(`${label} `)) {
+        hits += 1
+        break
+      }
+    }
+  })
+  // Requires matching at least 2 of the 7 days — a single coincidental hit
+  // (e.g. a cell that happens to equal one day's date) shouldn't be enough
+  // to discard what might still be a real employee row.
+  return hits >= 2
+}
+
 // ---- upload / parse -------------------------------------------------------
 // Parses a workbook built in this same grid shape back into flat shift
 // records: { profileId, staffName, date, startTime, endTime, breakHours }.
@@ -751,8 +787,12 @@ function findFirstDataRow(aoa, mondayCol, headerRows = 8) {
 // Staff Information) rather than being silently dropped — ManageRosterPage
 // runs those through buildReconcilePlan afterwards to catch typos and
 // confirm genuinely new names. `storeName` decides WHICH sheet gets read
-// when the file has more than one — see findStoreSheet above.
-export function parseRosterGrid(file, staff, weekDates, storeName) {
+// when the file has more than one — see findStoreSheet above. `allStoreNames`
+// (every active store's name, company-wide — not just ones this manager
+// happens to belong to) feeds the table-boundary check below; optional and
+// defaults to none so existing callers that don't pass it keep working
+// exactly as before (falling back to just this store's own name).
+export function parseRosterGrid(file, staff, weekDates, storeName, allStoreNames = []) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
@@ -858,7 +898,20 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
         // last row. The de-dup pass stays in place too, as a safety net for
         // any OTHER accidental duplicate shape this doesn't specifically
         // recognize.
-        const TABLE_BOUNDARY_NAMES = new Set(['name', (storeName || '').trim().toLowerCase()].filter(Boolean))
+        // Jeff, 2026-10-18: "之前不是有做過匯入班表的時候只看上面表格框框內
+        // 的嗎? 為什麼這一次匯入又有Sunnypark的名字出現" — this originally only
+        // recognized the CURRENT store's own name as a second-table title,
+        // on the assumption a duplicated block always repeats the same
+        // store. His Sunnybank file's leftover second block is titled
+        // "Sunnypark" instead — a different store entirely (looks like a
+        // copy-pasted template from another store's sheet) — so it slipped
+        // straight past this check and got read as if it were a real,
+        // hour-less employee named "Sunnypark". No store's name can ever be
+        // a real staff member's name either, so every active store's name
+        // now stops the read here, not just this one.
+        const TABLE_BOUNDARY_NAMES = new Set(
+          ['name', storeName, ...allStoreNames].filter(Boolean).map((n) => n.trim().toLowerCase())
+        )
 
         const entries = []
         let i = firstDataRow
@@ -875,8 +928,14 @@ export function parseRosterGrid(file, staff, weekDates, storeName) {
             i += 1
             continue
           }
-          let breakRow = null
           const next = aoa[i + 1]
+          // This row's name isn't "Name" or a known store, but if the row
+          // right after it is a repeat of the week's own date header, this
+          // row can only be a leftover title sitting above a duplicated
+          // second copy of the table (see isWeekDateHeaderRow's comment) —
+          // stop here rather than reading it as a real, data-less employee.
+          if (isWeekDateHeaderRow(next, weekDates)) break
+          let breakRow = null
           // The "Break" label isn't always in the Name column itself —
           // Jeff's own master file puts it one column over instead (see
           // findDayColumns' comment) — so this checks every column before
