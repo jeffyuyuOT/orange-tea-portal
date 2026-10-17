@@ -325,6 +325,28 @@ const QLD_EKKA_BRISBANE = {
   2028: {date:"2028-08-16", name:"Royal Queensland Show (Ekka) - Brisbane"},
   2029: {date:"2029-08-15", name:"Royal Queensland Show (Ekka) - Brisbane"},
 };
+// 「已更新到幾年」 shown next to the update button. Remembered per browser in
+// localStorage (written after each press); if nothing is remembered yet, falls
+// back to the latest year found in any store's holiday list.
+const QLD_STATUS_KEY = "payrollQldHolidayStatus";
+function readQldStatus(){
+  try{ const v = JSON.parse(localStorage.getItem(QLD_STATUS_KEY)||"null"); if(v && v.latestYear) return v; }catch(e){}
+  return null;
+}
+function writeQldStatus(v){
+  try{ localStorage.setItem(QLD_STATUS_KEY, JSON.stringify(v)); }catch(e){}
+}
+function qldStatusHtml(){
+  const st = readQldStatus();
+  if(st){
+    const when = st.at ? new Date(st.at).toLocaleString("zh-TW",{timeZone:"Australia/Brisbane",hour12:false}) : "";
+    if(st.live) return `<span class="muted">已更新至 <b>${st.latestYear}</b> 年（來自 qld.gov.au，${escapeHtml(when)}）</span>`;
+    return `<span style="color:#b45309;">⚠️ 無法連線 qld.gov.au（${escapeHtml(st.failReason||"未知原因")}），上次改用內建清單，只到 ${st.latestYear} 年，請稍後再按一次（${escapeHtml(when)}）</span>`;
+  }
+  let maxY = 0;
+  currentStores.forEach(s=>(s.publicHolidays||[]).forEach(h=>{ const y = Number(String(h.date).slice(0,4)); if(y>maxY) maxY = y; }));
+  return maxY ? `<span class="muted">分店目前的公眾假期到 ${maxY} 年</span>` : `<span class="muted">尚未匯入公眾假期</span>`;
+}
 // Reads the latest published QLD public holidays (every fully published year,
 // plus the Brisbane Ekka day) through the `qld-public-holidays` edge function,
 // which reads qld.gov.au server-side (the browser can't: no CORS). Never throws:
@@ -3982,8 +4004,7 @@ function renderBranchMgmt(container){
     <div class="row" style="gap:12px;flex-wrap:wrap;">
       ${currentStores.map(s=>`<label class="chk"><input type="checkbox" data-qldstore="${s.id}" checked> ${escapeHtml(s.name)}</label>`).join("") || '<span class="muted small">尚無分店，請先新增分店</span>'}
     </div>
-    <div class="toolbar"><button class="primary" id="qldImportBtn" ${!currentStores.length?'disabled':''}>更新並匯入公眾假期</button></div>
-    <div id="qldImportResult"></div>
+    <div class="toolbar" style="align-items:center;gap:12px;flex-wrap:wrap;"><button class="primary" id="qldImportBtn" ${!currentStores.length?'disabled':''}>更新並匯入公眾假期</button><span id="qldStatus" class="small">${qldStatusHtml()}</span></div>
   </div>`;
   $("#addstore").onclick = ()=>openStoreModal(null);
   $all("[data-storeup]",container).forEach(b=>b.onclick=()=>reorderStore(b.dataset.storeup,-1,container));
@@ -4005,29 +4026,15 @@ function renderBranchMgmt(container){
     qldBtn.textContent = "更新中…";
     try{
       const data = await fetchQldHolidays();
-      const summary = [];
       for(const sid of storeIds){
         const store = currentStores.find(s=>s.id===sid);
         if(!store) continue;
-        const added = applyQldHolidaysToStore(store, data, includeEkka);
+        applyQldHolidaysToStore(store, data, includeEkka);
         await saveStore(store);
-        summary.push(`${store.name}：新增 ${added} 筆`);
       }
-      const yrs = Object.keys(data.years).sort();
-      let head;
-      if(data.live){
-        const when = data.fetchedAt ? new Date(data.fetchedAt).toLocaleString("zh-TW",{timeZone:"Australia/Brisbane",hour12:false}) : "";
-        head = `✅ 已更新至 ${data.latestYear} 年（資料來源 qld.gov.au，${when}）。本次涵蓋年度：${yrs.join("、")}${includeEkka?"，含 Ekka":""}。`;
-        if(data.skipped && data.skipped.length){
-          head += `<br>尚未公布或無法讀取、未匯入的年度：${data.skipped.map(k=>escapeHtml(String(k.year))).join("、")}。`;
-        }
-      }else{
-        head = `⚠️ 無法連線到 qld.gov.au（${escapeHtml(data.failReason||"未知原因")}），改用系統內建清單匯入，僅到 ${data.latestYear} 年，可能不是最新公布的資料，請稍後再按一次。`;
-      }
-      toast(data.live ? "公眾假期已更新並匯入" : "無法取得最新資料，已改用內建清單匯入");
+      writeQldStatus({live:data.live, latestYear:data.latestYear, at:data.live?data.fetchedAt:new Date().toISOString(), failReason:data.failReason||""});
+      toast(data.live ? `公眾假期已更新至 ${data.latestYear} 年` : "無法取得最新資料，已改用內建清單匯入");
       renderBranchMgmt(container);
-      const resultBox = document.getElementById("qldImportResult");
-      if(resultBox) resultBox.innerHTML = `<div class="helpbox">${head}<br>${summary.map(s=>escapeHtml(s)).join("<br>")}</div>`;
     }catch(e){
       qldBtn.disabled = false;
       qldBtn.textContent = "更新並匯入公眾假期";
