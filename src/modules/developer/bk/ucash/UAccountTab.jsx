@@ -23,17 +23,20 @@ export default function UAccountTab({ stores, topActive = true, jumpTarget, onJu
   // Bumped whenever a 收支 entry is added / edited / deleted anywhere, so
   // 分店現金 re-reads its lists.
   const [entriesVersion, setEntriesVersion] = useState(0)
-  const dirtyRef = useRef(false)
+  // Typed-in 實 CA / D values of every store + month that has unsaved changes,
+  // { "storeId|year|month": { cashDays } }. Switching store / month never asks and
+  // never writes to the database (Jeff, 2026-10-17): the typing stays here as a
+  // draft, comes back when that store / month is opened again, and is written
+  // only when 儲存 is pressed (which saves every draft).
+  const draftsRef = useRef({})
   const tabDirtyRef = useRef(onTabDirty)
   tabDirtyRef.current = onTabDirty
   const onDirtyChange = useCallback((d) => {
-    dirtyRef.current = d
     tabDirtyRef.current?.(d)
   }, [])
   const onSaveReady = useCallback((fn) => registerSaver?.('u', fn), [registerSaver])
 
   const navigate = useCallback((next) => {
-    if (dirtyRef.current && !window.confirm('分店現金有未儲存的變更，確定要離開並捨棄嗎？')) return false
     if (next.storeId) setStoreId(next.storeId)
     if (next.year) setYear(next.year)
     if (next.month) setMonth(next.month)
@@ -64,6 +67,7 @@ export default function UAccountTab({ stores, topActive = true, jumpTarget, onJu
           month={month}
           active={topActive && sub === 'cash'}
           entriesVersion={entriesVersion}
+          drafts={draftsRef}
           onNavigate={navigate}
           onDirtyChange={onDirtyChange}
           onSaveReady={onSaveReady}

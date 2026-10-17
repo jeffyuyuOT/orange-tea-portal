@@ -193,7 +193,7 @@ const SIDE_LISTS = [
 
 // 分店現金: COH / UCOH / D / P/L for one store+month, the day-by-day table you
 // type 實 CA and D into, and the month's 收支 lists beside it.
-export default function StoreCashPanel({ stores, store, year, month, active, entriesVersion, onNavigate, onDirtyChange, onSaveReady, onEntriesChanged }) {
+export default function StoreCashPanel({ stores, store, year, month, active, entriesVersion, drafts, onNavigate, onDirtyChange, onSaveReady, onEntriesChanged }) {
   const [open, setOpen] = useState({ coh: 0, ucoh: 0 })
   const [sfMap, setSfMap] = useState({})
   const [cashDays, setCashDays] = useState({})
@@ -212,9 +212,9 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [fyOther, setFyOther] = useState(undefined) // P/L of the FY's other months (saved data)
   const [detail, setDetail] = useState(null) // { key, title, kinds } of the open side-list window
 
-  useEffect(() => {
-    onDirtyChange?.(dirty)
-  }, [dirty, onDirtyChange])
+  const [otherDrafts, setOtherDrafts] = useState(0) // other store / month sheets with unsaved typing
+  const draftKey = `${store.id}|${year}|${month}`
+  const loadedKeyRef = useRef(null) // the sheet whose data is on screen (null while loading another one)
 
   // Hand the parent this sheet's save (→ true / false) for BK's 儲存 button.
   const saveRef = useRef(null)
@@ -229,6 +229,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     let cancelled = false
     ;(async () => {
       setLoading(true)
+      loadedKeyRef.current = null
       setError('')
       setMsg('')
       try {
@@ -236,9 +237,17 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         if (cancelled) return
         setOpen(data.open)
         setSfMap(sfOcaMapFromRows(data.sfDays))
-        setCashDays(cashDaysFromRows(data.cashDays))
         setEntries(data.entries)
-        setDirty(false)
+        // Typing left here earlier (switched away without saving) comes back.
+        const draft = drafts?.current?.[`${store.id}|${year}|${month}`]
+        if (draft) {
+          setCashDays(draft.cashDays)
+          setDirty(true)
+        } else {
+          setCashDays(cashDaysFromRows(data.cashDays))
+          setDirty(false)
+        }
+        loadedKeyRef.current = `${store.id}|${year}|${month}`
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -248,7 +257,25 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     return () => {
       cancelled = true
     }
-  }, [store.id, year, month, reloadKey])
+  }, [store.id, year, month, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep this sheet's unsaved typing as a draft (and report "unsaved" upward, which
+  // lights BK's 儲存 button) — only once its own data is on screen, so a sheet that is
+  // still loading never writes the previous sheet's numbers under its key.
+  useEffect(() => {
+    const store = drafts?.current
+    if (!store) {
+      onDirtyChange?.(dirty)
+      return
+    }
+    if (loadedKeyRef.current === draftKey) {
+      if (dirty) store[draftKey] = { cashDays }
+      else delete store[draftKey]
+    }
+    const total = Object.keys(store).length
+    setOtherDrafts(total - (store[draftKey] ? 1 : 0))
+    onDirtyChange?.(total > 0)
+  }, [cashDays, dirty, draftKey, drafts, onDirtyChange])
 
   // Coming back to the tab / entries edited elsewhere: refresh the parts that
   // live outside this table (O.CA, opening balance, 收支) but keep what's typed.
@@ -339,8 +366,9 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     setMsg('')
   }
 
+  // 儲存: writes the sheet on screen AND every draft left on other stores / months.
   async function save() {
-    const over = dLimitProblems(dayRows)
+    const over = dirty ? dLimitProblems(dayRows) : []
     if (over.length > 0) {
       setMsg('')
       setError(
@@ -354,9 +382,47 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     setError('')
     setMsg('')
     try {
-      await saveCashDays(store.id, cashDays)
-      setDirty(false)
-      setMsg('已儲存。')
+      let saved = 0
+      if (dirty) {
+        await saveCashDays(store.id, cashDays)
+        setDirty(false)
+        saved += 1
+      }
+      const failures = []
+      for (const [key, draft] of Object.entries(drafts?.current ?? {})) {
+        if (key === draftKey) continue
+        const [sid, y, m] = key.split('|')
+        const label = `${stores.find((s) => s.id === sid)?.name ?? ''} ${y}年${Number(m)}月`
+        try {
+          // Same D-limit check as the sheet on screen, against that month's saved O.CA / 其他收入.
+          const data = await loadCashMonth(sid, Number(y), Number(m))
+          const sf = sfOcaMapFromRows(data.sfDays)
+          const inc = otherIncomeByDate(data.entries)
+          const rows = monthDates(Number(y), Number(m)).map((date) => ({
+            date,
+            ...computeCashDay(sf[date], draft.cashDays[date], inc[date] ?? 0),
+            maxD: dMaxAmount(sf[date], inc[date]),
+          }))
+          const bad = dLimitProblems(rows)
+          if (bad.length > 0) {
+            failures.push(`${label}（D 超過可 D 的最大金額：${bad.map((r) => r.date.slice(5)).join('、')}）`)
+            continue
+          }
+          await saveCashDays(sid, draft.cashDays)
+          delete drafts.current[key]
+          saved += 1
+        } catch (e) {
+          failures.push(`${label}（${e.message}）`)
+        }
+      }
+      const left = Object.keys(drafts?.current ?? {}).length
+      setOtherDrafts(left - (drafts?.current?.[draftKey] ? 1 : 0))
+      onDirtyChange?.(left > 0)
+      if (failures.length > 0) {
+        setError(`這些草稿沒有儲存成功，仍保留在原處：${failures.join('；')}`)
+        return false
+      }
+      setMsg(saved > 1 ? `已儲存（共 ${saved} 個分店月份）。` : '已儲存。')
       return true
     } catch (e) {
       setError(e.message)
@@ -410,6 +476,11 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         <span className="text-sm font-semibold text-brand-900">{store.name}</span>
         <YearMonthPicker year={year} month={month} onChange={(v) => onNavigate(v)} />
         {dirty && <span className="text-xs font-medium text-brand-600">有未儲存的變更</span>}
+        {otherDrafts > 0 && (
+          <span className="text-xs font-medium text-brand-600" title="切換分店／月份時沒有儲存的內容會先保留，按儲存才會一起寫入">
+            另有 {otherDrafts} 個分店／月份的草稿未儲存
+          </span>
+        )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={() => setAddOpen(true)}>
             ＋ 新增收支
@@ -448,7 +519,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
               </>
             )}
           </div>
-          <Button onClick={save} disabled={saving || loading || !dirty}>
+          <Button onClick={save} disabled={saving || loading || (!dirty && otherDrafts === 0)}>
             儲存
           </Button>
         </div>
