@@ -96,7 +96,9 @@ export function dayAcrossYears(records, mmdd) {
 // Events = notes + public holidays. `notes` = [{ store_id, day, note }],
 // `holidays` = { [date]: name }. Only the stores in `storeIds` contribute notes.
 // → [{ date, label, kind: 'note'|'holiday' }] sorted by date.
-export const eventKey = (label) => label.trim().replace(/\s+/g, ' ').toLowerCase()
+// "Queen's Birthday" (until 2022) and "King's Birthday" are the same holiday, so they share a key.
+export const eventKey = (label) =>
+  label.trim().replace(/\s+/g, ' ').toLowerCase().replace(/queen['’]?s birthday/g, "king's birthday")
 export function buildEvents(notes, holidays, storeIds) {
   const ids = new Set(storeIds)
   const seen = new Set()

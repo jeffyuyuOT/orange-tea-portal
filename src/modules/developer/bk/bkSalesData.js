@@ -3,6 +3,7 @@
 // is_developer() like every bk_* table. Functions throw an Error on failure.
 import { supabase } from '../../../lib/supabaseClient'
 import { monthStart, nextMonthStart, toNum } from './bkUtils'
+import { STATIC_PUBLIC_HOLIDAYS } from './bkPublicHolidays'
 import { BIZ_INPUTS, isEmptyBizDay } from './bkSalesUtils'
 
 function unwrap({ data, error }) {
@@ -206,18 +207,24 @@ export async function saveSalesNoteForStores(storeIds, day, text) {
 // { [date]: name } — the payroll app keeps a public-holiday list per payroll
 // store (payroll_stores.data.publicHolidays = [{ date, name }]); merged here by
 // date (different names for one date are joined).
+//
+// Jeff, 2026-10-17: the payroll list only goes back so far, so the Queensland
+// government's dates for 2017–2026 (bkPublicHolidays.js) are the base; any date
+// the payroll app also lists takes the payroll name instead.
 export async function loadPublicHolidays() {
   const rows = unwrap(await supabase.from('payroll_stores').select('data')) ?? []
   const map = {}
+  const fromPayroll = {}
   for (const r of rows) {
     for (const h of r.data?.publicHolidays ?? []) {
       if (!h?.date) continue
       const name = (h.name ?? '').trim() || 'Public holiday'
-      const cur = map[h.date]
-      if (!cur) map[h.date] = name
-      else if (!cur.split(' / ').includes(name)) map[h.date] = `${cur} / ${name}`
+      const cur = fromPayroll[h.date]
+      if (!cur) fromPayroll[h.date] = name
+      else if (!cur.split(' / ').includes(name)) fromPayroll[h.date] = `${cur} / ${name}`
     }
   }
+  Object.assign(map, STATIC_PUBLIC_HOLIDAYS, fromPayroll)
   return map
 }
 
