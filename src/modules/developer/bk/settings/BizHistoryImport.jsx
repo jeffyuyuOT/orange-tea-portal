@@ -3,8 +3,8 @@ import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { loadWorkbookSheets } from '../bkImport'
-import { loadSalesRange, saveSalesDays } from '../bkSalesData'
-import { bizDaysFromRows } from '../bkSalesUtils'
+import { loadSalesRange, loadSfPostRange, saveSalesDays } from '../bkSalesData'
+import { bizDaysFromRows, postMapFromRows } from '../bkSalesUtils'
 import { filterKeepExistingBiz } from '../bkSalesImport'
 import { parseBizHistorySheets } from '../bkSalesHistoryImport'
 import { Notice } from '../bkUi'
@@ -42,7 +42,9 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
             continue
           }
           const rows = await loadSalesRange([store.id], dates[0], dates[dates.length - 1])
-          jobs.push({ key: store.id, fileName, store, linked: !!store.sf_store_id, s, dates, days: bizDaysFromRows(rows) })
+          // a linked store shows SF's O.POST — so POS from the file is only wanted on days SF has no figure for
+          const sfPosts = store.sf_store_id ? postMapFromRows(await loadSfPostRange([store.sf_store_id], dates[0], dates[dates.length - 1])) : {}
+          jobs.push({ key: store.id, fileName, store, linked: !!store.sf_store_id, s, dates, days: bizDaysFromRows(rows), sfPosts })
         }
         if (!cancelled) setState({ jobs, unmatched, parsed })
       } catch (e) {
@@ -57,13 +59,22 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
   const jobs = useMemo(
     () =>
       (state.jobs ?? []).map((j) => {
+        let posDropped = 0 // linked store: SF already has that day's O.POST
+        let posKept = 0 // linked store: SF has nothing that day, so the file's POS is imported
         const entries = Object.fromEntries(
           Object.entries(j.s.entries)
-            .map(([d, e]) => [d, j.linked ? Object.fromEntries(Object.entries(e).filter(([f]) => f !== 'pos')) : e])
+            .map(([d, e]) => {
+              if (!j.linked || e.pos === undefined) return [d, e]
+              if (j.sfPosts[d] !== undefined && j.sfPosts[d] !== null) {
+                posDropped++
+                return [d, Object.fromEntries(Object.entries(e).filter(([f]) => f !== 'pos'))]
+              }
+              posKept++
+              return [d, e]
+            })
             .filter(([, e]) => Object.keys(e).length > 0)
         )
-        const posDropped = j.linked ? Object.values(j.s.entries).filter((e) => e.pos !== undefined).length : 0
-        return { ...j, entries, posDropped, kept: filterKeepExistingBiz(entries, j.days) }
+        return { ...j, entries, posDropped, posKept, kept: filterKeepExistingBiz(entries, j.days) }
       }),
     [state.jobs]
   )
@@ -86,7 +97,16 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
             for (const [f, v] of Object.entries(entries[d])) cur[f] = String(v)
             part[d] = cur
           }
-          await saveSalesDays(j.store.id, part, { linked: j.linked })
+          if (j.linked) {
+            // days that carry a POS (SF has none there) are written with it; the rest as before
+            const withPos = {}
+            const rest = {}
+            for (const d of Object.keys(part)) (entries[d].pos !== undefined ? withPos : rest)[d] = part[d]
+            if (Object.keys(withPos).length) await saveSalesDays(j.store.id, withPos, { linked: true, includePos: true })
+            if (Object.keys(rest).length) await saveSalesDays(j.store.id, rest, { linked: true })
+          } else {
+            await saveSalesDays(j.store.id, part, { linked: false })
+          }
         }
         count += dates.length
       }
@@ -117,7 +137,7 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
     >
       <div className="space-y-3 text-sm">
         <Notice kind="info">
-          這是歷史年度檔（分頁名稱像 202401，每個分頁把各分店並排）。直接寫入資料庫。檔案裡的 Sunnypark 會當作 Sunnybank。總營業額、總杯數由系統計算（POS + Self O + CV×4；P杯數 + SO杯數）。只有「營業額／杯數」合計的舊資料，營業額會記在 POS、杯數記在 P杯數，這樣合計才會一樣。一次匯入一個檔案。
+          這是歷史年度檔（分頁名稱像 202401，每個分頁把各分店並排）。直接寫入資料庫。檔案裡的 Sunnypark 會當作 Sunnybank。總營業額、總杯數由系統計算（POS + Self O + CV×4；P杯數 + SO杯數）。連結 SF 的分店，POS 以 SF 的 O.POST 為準，只有 SF 沒有資料的日期才會匯入檔案裡的 POS。只有「營業額／杯數」合計的舊資料，營業額會記在 POS、杯數記在 P杯數，這樣合計才會一樣。一次匯入一個檔案。
         </Notice>
         {state.loading && <LoadingSpinner label="讀取檔案…" />}
         {state.failed && <Notice kind="error">{state.failed}</Notice>}
@@ -155,7 +175,11 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
                           <td className="px-3 py-2">{j.fileName}</td>
                           <td className="px-3 py-2">
                             {j.store.name}
-                            {j.linked && <div className="text-[11px] text-amber-600">連結 SF：POS 不匯入（{j.posDropped} 天）</div>}
+                            {j.linked && (
+                              <div className="text-[11px] text-amber-600">
+                                連結 SF：SF 沒有資料的 {j.posKept} 天會匯入 POS；SF 已有資料的 {j.posDropped} 天略過 POS
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">{j.dates[0]} ~ {j.dates[j.dates.length - 1]}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{Object.keys(pick(j)).length} 天</td>

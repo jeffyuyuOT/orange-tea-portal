@@ -60,12 +60,16 @@ export function dmy(dateStr) {
 
 // One day's figures. `day` is the stored row ({ pos, self_o, cv, p_cups,
 // so_cups }, numbers or strings). `sfPost`: for a store linked to SF, that
-// day's O.POST from SF (number or null) — it REPLACES the typed POS; pass
-// undefined for a store whose POS is typed by hand.
+// day's O.POST from SF (number or null) — it REPLACES the stored POS when SF has
+// a figure, otherwise the stored POS is used; pass undefined for a store whose
+// POS is typed by hand.
 //   總營業額 = POS + Self O + CV × 4
 //   總杯數   = P杯數 + SO杯數
 export function bizDayRow(day, sfPost) {
-  const pos = sfPost !== undefined ? toNum(sfPost) : toNum(day?.pos)
+  // A linked store reads SF's O.POST; on a day SF has no figure for (e.g. history
+  // from before SF was used), the POS stored on the day itself is shown instead.
+  const sf = sfPost === undefined ? null : toNum(sfPost)
+  const pos = sf !== null ? sf : toNum(day?.pos)
   const selfO = toNum(day?.self_o)
   const cv = toNum(day?.cv)
   const pCups = toNum(day?.p_cups)

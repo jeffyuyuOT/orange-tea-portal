@@ -312,7 +312,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
 
       {linked && (
         <Notice kind="info">
-          這間分店的 POS 直接讀 Sales figure 的 O.POST（不能在這裡改）。Self O 是 Sales figure 的 Self order kiosk 的預設值；SF 那邊可以手動改，兩邊不一致時 SF 會顯示警示。
+          這間分店的 POS 直接讀 Sales figure 的 O.POST（不能在這裡改）；Sales figure 沒有那一天的數字時，會顯示匯入的歷史 POS。Self O 是 Sales figure 的 Self order kiosk 的預設值；SF 那邊可以手動改，兩邊不一致時 SF 會顯示警示。
         </Notice>
       )}
       <Notice kind="info">

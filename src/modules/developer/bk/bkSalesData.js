@@ -225,25 +225,27 @@ export async function loadPublicHolidays() {
 // A linked store's POS comes from SF, so `pos` is left out of the write (any
 // value typed earlier, before it was linked, stays as it was). Days with
 // nothing typed are removed so the table doesn't fill up with blank rows.
-export async function saveSalesDays(storeId, days, { linked }) {
+export async function saveSalesDays(storeId, days, { linked, includePos = false }) {
+  // includePos: the history import also stores POS for a linked store on days SF has no figure for.
+  const skipPos = linked && !includePos
   const now = new Date().toISOString()
   const upserts = []
   const removals = []
   for (const [date, day] of Object.entries(days)) {
-    if (isEmptyBizDay(day, linked)) {
+    if (isEmptyBizDay(day, skipPos)) {
       removals.push(date)
       continue
     }
     const row = { store_id: storeId, day: date, updated_at: now }
     for (const { field } of BIZ_INPUTS) {
-      if (linked && field === 'pos') continue
+      if (skipPos && field === 'pos') continue
       row[field] = toNum(day[field])
     }
     upserts.push(row)
   }
   if (upserts.length) unwrap(await supabase.from('bk_sales_days').upsert(upserts, { onConflict: 'store_id,day' }))
   if (removals.length) {
-    if (linked) {
+    if (skipPos) {
       // Keep a row that still holds a (hidden) manual POS: only blank the fields shown here.
       const blank = { updated_at: now }
       for (const { field } of BIZ_INPUTS) if (field !== 'pos') blank[field] = null
