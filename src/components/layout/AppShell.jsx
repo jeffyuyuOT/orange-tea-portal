@@ -133,11 +133,19 @@ export default function AppShell() {
       return
     }
     let cancelled = false
-    getWorkedMinutesByProfile([profile.id]).then((byProfile) => {
-      if (!cancelled) setWorkedHours((byProfile[profile.id] ?? 0) / 60)
-    })
+    // Jeff, 2026-10-17: waits a few seconds after login (this reads every one of
+    // the person's attendance events) so it doesn't compete with what the first
+    // screen needs; a failed read just means no popup this time.
+    const timer = setTimeout(() => {
+      getWorkedMinutesByProfile([profile.id])
+        .then((byProfile) => {
+          if (!cancelled) setWorkedHours((byProfile[profile.id] ?? 0) / 60)
+        })
+        .catch(() => {})
+    }, 4000)
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
   }, [tracksTrainingHours, profile?.id])
   const trainingHoursInfo = tracksTrainingHours && workedHours != null ? trainingHoursBandInfo(workedHours) : null

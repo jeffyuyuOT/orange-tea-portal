@@ -1,9 +1,10 @@
+import { useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import LoginPage from '../modules/auth/LoginPage'
 
 export default function RequireAuth({ children }) {
-  const { user, profile, loading, signOut } = useAuth()
+  const { user, profile, loading, signOut, profileError, refreshProfile } = useAuth()
 
   if (loading) {
     return (
@@ -12,7 +13,18 @@ export default function RequireAuth({ children }) {
       </div>
     )
   }
-  if (!user || !profile) return <LoginPage />
+  if (!user) return <LoginPage />
+  // Signed in, but the profile isn't here yet. Not a sign-in problem — never
+  // show the sign-in page for it (Jeff, 2026-10-17): wait while it loads, and
+  // if it could not be read (weak network) offer Retry instead.
+  if (!profile) {
+    if (profileError) return <ProfileLoadFailed onRetry={refreshProfile} onSignOut={signOut} />
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <LoadingSpinner label="Loading your account…" />
+      </div>
+    )
+  }
 
   // A freshly invited account already has a real login (and, since
   // SetPasswordPage, a password) the moment they accept — but the
@@ -31,6 +43,39 @@ export default function RequireAuth({ children }) {
   }
 
   return children
+}
+
+function ProfileLoadFailed({ onRetry, onSignOut }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-brand-50/60 px-4 text-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500 text-lg font-bold text-white">
+        OT
+      </div>
+      <h1 className="text-lg font-semibold text-brand-900">Couldn't load your account</h1>
+      <p className="max-w-sm text-sm text-gray-600">
+        You're signed in, but the connection was too slow or dropped before your account finished loading. Check your
+        internet connection and try again.
+      </p>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          try {
+            await onRetry()
+          } finally {
+            setBusy(false)
+          }
+        }}
+        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+      >
+        {busy ? 'Retrying…' : 'Try again'}
+      </button>
+      <button onClick={onSignOut} className="text-sm text-brand-600 hover:underline">
+        Sign out
+      </button>
+    </div>
+  )
 }
 
 function PendingStoreAssignment({ onSignOut }) {

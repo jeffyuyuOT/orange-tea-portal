@@ -72,7 +72,13 @@ function guarded(pageKey, element) {
 // in, so landing here after login always matches whatever's first in the
 // Sidebar, not a separate hardcoded order that could drift from it.
 function RootRedirect() {
-  const { effectivePages, sidebarOrder } = useAuth()
+  const { effectivePages, sidebarOrder, profile } = useAuth()
+  // Jeff, 2026-10-17: front-line staff mostly open the app just to clock in/out,
+  // so they land on Time & Attendance instead of the first Sidebar page (usually
+  // Bulletin, which loads a lot more). Every other role keeps the old behaviour.
+  if (profile?.role === 'staff' && effectivePages.has('dashboard.time_attendance')) {
+    return <Navigate to="/dashboard/time-attendance" replace />
+  }
   // No accessible page at all (e.g. a brand-new account with no role wired
   // up yet) — send them somewhere that at least renders instead of looping.
   return <Navigate to={firstAccessiblePagePath(effectivePages, sidebarOrder) ?? '/dashboard'} replace />

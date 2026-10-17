@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { addMonths } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { getEffectivePages, canAccessPage } from './permissions'
@@ -37,6 +37,15 @@ export function AuthProvider({ children }) {
     () => localStorage.getItem('ot_current_store_id') || null
   )
   const [loading, setLoading] = useState(true)
+  // Jeff, 2026-10-17: true when the signed-in person's profile could not be read
+  // (weak network). RequireAuth shows a "retry" screen for this instead of the
+  // sign-in page — the session is fine, only the profile fetch failed.
+  const [profileError, setProfileError] = useState(false)
+  // Who the profile on screen belongs to, and the load currently in flight — so
+  // the same load never runs twice at once and a repeated SIGNED_IN event (the
+  // browser re-fires it whenever the tab regains focus) doesn't reload everything.
+  const profileIdRef = useRef(null)
+  const inflightRef = useRef(null) // { userId, promise }
   // Jeff, 2026-10-07: "training staff現在不需要經過training code就可以登入"
   // — this used to also carry a `needsTrainingCode` flag (training-role
   // accounts had to additionally verify a weekly 4-digit code before the
@@ -153,42 +162,73 @@ export function AuthProvider({ children }) {
     refreshSidebarOrder()
   }, [session, refreshSidebarOrder])
 
-  const loadProfileData = useCallback(async (userId) => {
-    const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(profileRow ?? null)
-
-    if (profileRow) {
-      const { data: overrideRows } = await supabase
-        .from('permission_overrides')
-        .select('page_key, allowed')
-        .eq('profile_id', userId)
-      setOverrides(overrideRows ?? [])
-
-      let storeIds = new Set()
-      if (profileRow.primary_store_id) storeIds.add(profileRow.primary_store_id)
-      // developer is admin's superset (see permissions.js / migration
-      // 0058_developer_is_admin_superset.sql) — same "sees every store"
-      // treatment, not scoped to whatever user_stores rows it happens to
-      // have (it may have none at all, same as a fresh admin account).
-      if (profileRow.role === 'admin' || profileRow.role === 'developer') {
-        const { data: allStores } = await supabase.from('stores').select('id, name, code').eq('is_active', true)
-        setAccessibleStores(allStores ?? [])
-      } else {
-        const { data: userStoreRows } = await supabase
-          .from('user_stores')
-          .select('store_id, stores ( id, name, code )')
-          .eq('profile_id', userId)
-        userStoreRows?.forEach((r) => r.store_id && storeIds.add(r.store_id))
-        const ids = Array.from(storeIds)
-        if (ids.length) {
-          const { data: storeRows } = await supabase.from('stores').select('id, name, code').in('id', ids)
-          setAccessibleStores(storeRows ?? [])
-        } else {
-          setAccessibleStores([])
-        }
-      }
+  // Jeff, 2026-10-17: reads the person's profile, permission overrides and stores.
+  //  - overrides + stores are fetched together (they only need the user id /
+  //    the profile's role), not one after another;
+  //  - every query's error is checked: a failed read used to come back as
+  //    "no profile" and bounced a signed-in person to the sign-in page, or
+  //    silently dropped their permission overrides. It is retried instead
+  //    (up to 3 tries), and if it still fails the previous data is kept and
+  //    profileError is set so RequireAuth can offer a Retry button;
+  //  - a load already running for this user is reused, never started twice.
+  const fetchProfileBundle = useCallback(async (userId) => {
+    const must = ({ data, error }) => {
+      if (error) throw error
+      return data
     }
+    const profileRow = must(await supabase.from('profiles').select('*').eq('id', userId).single())
+    const isWide = profileRow.role === 'admin' || profileRow.role === 'developer'
+    const [overrideRows, storeRows] = await Promise.all([
+      supabase.from('permission_overrides').select('page_key, allowed').eq('profile_id', userId).then(must),
+      (async () => {
+        // developer is admin's superset (see permissions.js / migration
+        // 0058_developer_is_admin_superset.sql) — sees every store.
+        if (isWide) return must(await supabase.from('stores').select('id, name, code').eq('is_active', true))
+        const [userStoreRows, primaryRow] = await Promise.all([
+          supabase.from('user_stores').select('store_id, stores ( id, name, code )').eq('profile_id', userId).then(must),
+          profileRow.primary_store_id
+            ? supabase.from('stores').select('id, name, code').eq('id', profileRow.primary_store_id).then(must)
+            : Promise.resolve([]),
+        ])
+        const byId = new Map()
+        ;(primaryRow ?? []).forEach((s) => byId.set(s.id, s))
+        ;(userStoreRows ?? []).forEach((r) => r.stores && byId.set(r.stores.id, r.stores))
+        return Array.from(byId.values())
+      })(),
+    ])
+    return { profileRow, overrideRows: overrideRows ?? [], storeRows: storeRows ?? [] }
   }, [])
+
+  const loadProfileData = useCallback(
+    (userId) => {
+      if (inflightRef.current?.userId === userId) return inflightRef.current.promise
+      const promise = (async () => {
+        let lastErr = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt))
+          try {
+            const { profileRow, overrideRows, storeRows } = await fetchProfileBundle(userId)
+            setProfile(profileRow)
+            setOverrides(overrideRows)
+            setAccessibleStores(storeRows)
+            profileIdRef.current = userId
+            setProfileError(false)
+            return true
+          } catch (err) {
+            lastErr = err
+          }
+        }
+        console.error('Could not load the profile after 3 tries:', lastErr)
+        setProfileError(true)
+        return false
+      })().finally(() => {
+        if (inflightRef.current?.userId === userId) inflightRef.current = null
+      })
+      inflightRef.current = { userId, promise }
+      return promise
+    },
+    [fetchProfileBundle]
+  )
 
   useEffect(() => {
     let mounted = true
@@ -196,17 +236,37 @@ export function AuthProvider({ children }) {
       if (!mounted) return
       setSession(data.session)
       if (data.session?.user) await loadProfileData(data.session.user.id)
-      setLoading(false)
+      if (mounted) setLoading(false)
     })
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    // Jeff, 2026-10-17: this callback used to `await loadProfileData(...)` for
+    // EVERY auth event. supabase-js holds its internal auth lock while it runs
+    // these callbacks, and a Supabase query needs that same lock to read the
+    // access token — Supabase's own docs warn against calling other Supabase
+    // functions inside this callback because it can deadlock, which would leave
+    // the sign-in button stuck on "Signing in…" (signIn waits for the callbacks).
+    // Now: the callback only records the session synchronously and hands the
+    // profile load to a timer so it runs after the lock is released. INITIAL_SESSION
+    // is already handled by getSession() above, TOKEN_REFRESHED only changes the
+    // session (no reload — the profile didn't change), and SIGNED_IN is ignored
+    // when this person's profile is already on screen (the browser re-fires it
+    // when the tab regains focus).
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession)
-      if (newSession?.user) {
-        await loadProfileData(newSession.user.id)
-      } else {
+      if (event === 'INITIAL_SESSION') return
+      if (!newSession?.user) {
+        profileIdRef.current = null
         setProfile(null)
         setOverrides([])
         setAccessibleStores([])
+        setProfileError(false)
+        return
+      }
+      if (event === 'SIGNED_IN' && profileIdRef.current !== newSession.user.id) {
+        setProfileError(false)
+        setTimeout(() => {
+          if (mounted) loadProfileData(newSession.user.id)
+        }, 0)
       }
     })
     return () => {
@@ -282,10 +342,6 @@ export function AuthProvider({ children }) {
     })
   }, [profile, overrides, currentStoreId])
 
-  useEffect(() => {
-    refreshRosterUpdates()
-  }, [refreshRosterUpdates])
-
   // Recomputes the Formula "Update" badge for the current person + store.
   // Called on login/store-switch, and again by FormulaItemDetail right
   // after someone opens an item (which marks it seen), so the badge clears
@@ -300,10 +356,6 @@ export function AuthProvider({ children }) {
     const unseen = await getUnseenFormulaItems(profile.id, currentStoreId)
     setHasFormulaUpdates(unseen.length > 0)
   }, [profile, overrides, currentStoreId])
-
-  useEffect(() => {
-    refreshFormulaUpdates()
-  }, [refreshFormulaUpdates])
 
   // Recomputes the Bulletin "Update" dot for the current person + store.
   // Called on login/store-switch, and again by BulletinPage right after it
@@ -385,10 +437,6 @@ export function AuthProvider({ children }) {
     setHasBulletinUpdates(hasUnviewedAnnouncement || hasUnviewedComplaint || hasUnviewedRoster)
   }, [profile, overrides, currentStoreId])
 
-  useEffect(() => {
-    refreshBulletinUpdates()
-  }, [refreshBulletinUpdates])
-
   // Recomputes the Message unread badge for the current person — called on
   // login, and again by MessagePage right after it marks something read (or
   // sends/receives), so the badge updates without a full page reload. Not
@@ -414,10 +462,6 @@ export function AuthProvider({ children }) {
       .is('read_at', null)
     setUnreadMessageCount(count ?? 0)
   }, [profile, overrides])
-
-  useEffect(() => {
-    refreshUnreadMessages()
-  }, [refreshUnreadMessages])
 
   // Recomputes the Staff Time Logs red dot for the current person + store.
   // Called on login/store-switch, and again by StaffTimeLogsPage right
@@ -446,9 +490,45 @@ export function AuthProvider({ children }) {
     setHasTimeDiscrepancies(hasUnread)
   }, [profile, overrides, currentStoreId])
 
+  // Jeff, 2026-10-17: these five "something new" badges used to all fire the
+  // moment the profile arrived — about a dozen queries at once, competing with
+  // the requests the first screen actually needs (and with the clock-in button's
+  // own lookup), which is what makes a slow connection time out. They now wait
+  // ~2.5s after the profile is on screen and then run one after another, most
+  // important first. The dots/number just appear a moment later; nothing else
+  // depends on them. Pages still call the refresh* functions themselves right
+  // after marking something read, exactly as before.
+  const [badgesReady, setBadgesReady] = useState(false)
   useEffect(() => {
-    refreshTimeDiscrepancies()
-  }, [refreshTimeDiscrepancies])
+    setBadgesReady(false)
+    if (!profile?.id) return
+    const t = setTimeout(() => setBadgesReady(true), 2500)
+    return () => clearTimeout(t)
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (!badgesReady) return
+    let cancelled = false
+    ;(async () => {
+      for (const refresh of [
+        refreshUnreadMessages,
+        refreshBulletinUpdates,
+        refreshRosterUpdates,
+        refreshFormulaUpdates,
+        refreshTimeDiscrepancies,
+      ]) {
+        if (cancelled) return
+        try {
+          await refresh()
+        } catch (err) {
+          console.error('Badge refresh failed:', err)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [badgesReady, refreshUnreadMessages, refreshBulletinUpdates, refreshRosterUpdates, refreshFormulaUpdates, refreshTimeDiscrepancies])
 
   // Jeff, 2026-10-16: two different people (both on mobile data, different
   // carriers/devices, same day) hit a raw "Failed to fetch" on the sign-in
@@ -494,6 +574,7 @@ export function AuthProvider({ children }) {
     accessibleStores,
     currentStoreId,
     setCurrentStoreId,
+    profileError,
     refreshProfile: () => session?.user && loadProfileData(session.user.id),
     rosterUpdates,
     refreshRosterUpdates,
