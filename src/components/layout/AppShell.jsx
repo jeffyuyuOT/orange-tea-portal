@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar, { SidebarBrand, SidebarNavLinks } from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
 import { useAuth } from '../../lib/AuthContext'
@@ -25,7 +25,25 @@ export default function AppShell() {
     refreshProfile,
   } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // Jeff, 2026-10-17: right after a real password sign-in, front-line staff land on
+  // Time & Attendance wherever the address bar happened to be (RootRedirect only
+  // covers "/"). Once per sign-in; refreshes and later navigation are untouched,
+  // and every other role keeps its normal landing page.
+  useEffect(() => {
+    if (!profile?.id) return
+    let justSignedIn = false
+    try {
+      justSignedIn = sessionStorage.getItem('ot_just_signed_in') === '1'
+      if (justSignedIn) sessionStorage.removeItem('ot_just_signed_in')
+    } catch {
+      /* ignore */
+    }
+    if (justSignedIn && profile.role === 'staff' && canAccessPage(effectivePages, 'dashboard.time_attendance')) {
+      navigate('/dashboard/time-attendance', { replace: true })
+    }
+  }, [profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // Jeff, 2026-10-02: "桌面捷徑有辦法有訊息提示嗎" — a badge/dot on the
   // installed-app icon itself (desktop taskbar / Android home screen). This
   // is the Badging API (navigator.setAppBadge / clearAppBadge) — NOT real
