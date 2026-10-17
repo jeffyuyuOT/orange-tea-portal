@@ -766,7 +766,7 @@ export default function ManageRosterPage() {
                   aria-pressed={active}
                   className={
                     active
-                      ? 'whitespace-nowrap rounded-full bg-brand-500 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm sm:px-5 sm:py-2 sm:text-base'
+                      ? 'whitespace-nowrap rounded-full bg-brand-500 px-4 py-2 text-base font-bold text-white shadow-md ring-2 ring-brand-300 sm:px-6 sm:py-2.5 sm:text-lg'
                       : 'whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500 hover:bg-brand-50 hover:text-brand-700 sm:px-4 sm:py-1.5 sm:text-sm'
                   }
                 >
