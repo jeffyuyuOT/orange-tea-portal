@@ -316,8 +316,12 @@ function MonthTimelineViewMobile({ rows, year, month, daysInMonth }) {
               scrolling right to see more employees never scrolls the day
               numbers out of view along with it. */}
           <div className="sticky left-0 z-10 shrink-0 bg-white" style={{ width: `${rulerWidth}px` }}>
-            <div className="h-5" />
-            <div className="relative" style={{ height: `${totalHeight}px` }}>
+            {/* No spacer above the day numbers: the employee columns to the
+                right have no header row (the name is written inside each
+                bar), so a spacer here pushed every number ~1 day LOWER than
+                the bars — a leave on the 24th sat next to the "23". `mt-px`
+                only cancels the 1px top border of the column boxes. */}
+            <div className="relative mt-px" style={{ height: `${totalHeight}px` }}>
               {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
                 <span
                   key={d}
