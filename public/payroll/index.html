@@ -252,6 +252,10 @@ const DEFAULT_PENALTY = {saturday:1.25, sunday:1.5, publicHoliday:2.25, casualLo
 // (see PART 5 below), which splits any shift crossing 6pm on 24 December
 // into an ordinary-rate portion before 6pm and a public-holiday-rate portion
 // from 6pm onward. No manual entry is needed or used for this date.
+// NOTE (2026-10-17): this table and QLD_EKKA_BRISBANE below are now only the
+// FALLBACK used when 「更新並匯入公眾假期」 cannot reach qld.gov.au. Normally the
+// button reads the live table through the `qld-public-holidays` edge function
+// (see fetchQldHolidays), so nothing here needs editing each year.
 const QLD_PUBLIC_HOLIDAYS = {
   2026: [
     {date:"2026-01-01", name:"New Year's Day"},
@@ -282,6 +286,33 @@ const QLD_PUBLIC_HOLIDAYS = {
     {date:"2027-12-26", name:"Boxing Day"},
     {date:"2027-12-28", name:"Boxing Day (additional)"},
   ],
+  2028: [
+    {date:"2028-01-01", name:"New Year's Day"},
+    {date:"2028-01-03", name:"New Year's Day (additional)"},
+    {date:"2028-01-26", name:"Australia Day"},
+    {date:"2028-04-14", name:"Good Friday"},
+    {date:"2028-04-15", name:"Day after Good Friday"},
+    {date:"2028-04-16", name:"Easter Sunday"},
+    {date:"2028-04-17", name:"Easter Monday"},
+    {date:"2028-04-25", name:"Anzac Day"},
+    {date:"2028-05-01", name:"Labour Day"},
+    {date:"2028-10-02", name:"King's Birthday"},
+    {date:"2028-12-25", name:"Christmas Day"},
+    {date:"2028-12-26", name:"Boxing Day"},
+  ],
+  2029: [
+    {date:"2029-01-01", name:"New Year's Day"},
+    {date:"2029-01-26", name:"Australia Day"},
+    {date:"2029-03-30", name:"Good Friday"},
+    {date:"2029-03-31", name:"Day after Good Friday"},
+    {date:"2029-04-01", name:"Easter Sunday"},
+    {date:"2029-04-02", name:"Easter Monday"},
+    {date:"2029-04-25", name:"Anzac Day"},
+    {date:"2029-05-07", name:"Labour Day"},
+    {date:"2029-10-01", name:"King's Birthday"},
+    {date:"2029-12-25", name:"Christmas Day"},
+    {date:"2029-12-26", name:"Boxing Day"},
+  ],
 };
 // Royal Queensland Show (the "Ekka") show holiday -- a REGIONAL holiday, not
 // statewide. This is the Brisbane LGA date specifically (most other QLD
@@ -291,18 +322,45 @@ const QLD_PUBLIC_HOLIDAYS = {
 const QLD_EKKA_BRISBANE = {
   2026: {date:"2026-08-12", name:"Royal Queensland Show (Ekka) - Brisbane"},
   2027: {date:"2027-08-11", name:"Royal Queensland Show (Ekka) - Brisbane"},
+  2028: {date:"2028-08-16", name:"Royal Queensland Show (Ekka) - Brisbane"},
+  2029: {date:"2029-08-15", name:"Royal Queensland Show (Ekka) - Brisbane"},
 };
+// Reads the latest published QLD public holidays (every fully published year,
+// plus the Brisbane Ekka day) through the `qld-public-holidays` edge function,
+// which reads qld.gov.au server-side (the browser can't: no CORS). Never throws:
+// on any failure it returns the built-in tables with live:false + failReason so
+// the caller can say so clearly instead of silently importing stale data.
+async function fetchQldHolidays(){
+  const builtin = {
+    years: QLD_PUBLIC_HOLIDAYS, ekka: QLD_EKKA_BRISBANE,
+    latestYear: Math.max(...Object.keys(QLD_PUBLIC_HOLIDAYS).map(Number)),
+    live: false, skipped: [],
+  };
+  try{
+    const {data, error} = await sb.functions.invoke("qld-public-holidays", {method:"POST", body:{}});
+    if(error){
+      let detail = error.message || String(error);
+      try{ const j = await error.context.json(); if(j && j.error) detail = j.error; }catch(e){}
+      throw new Error(detail);
+    }
+    if(!data || !data.years || !Object.keys(data.years).length) throw new Error("回傳資料是空的");
+    return {years:data.years, ekka:data.ekka||{}, latestYear:data.latestYear,
+      live:true, fetchedAt:data.fetchedAt, skipped:data.skipped||[]};
+  }catch(e){
+    return {...builtin, failReason:String((e && e.message) || e)};
+  }
+}
 // Merges the selected years' QLD public holidays (+ optionally the Brisbane
 // Ekka show day) into a store's publicHolidays list, skipping any date
 // already present (so re-running this for a store that already has some
 // holidays entered doesn't create duplicates). Returns how many were added.
-function applyQldHolidaysToStore(store, years, includeEkka){
+function applyQldHolidaysToStore(store, data, includeEkka){
   store.publicHolidays = store.publicHolidays || [];
   const existingDates = new Set(store.publicHolidays.map(h=>h.date));
   let added = 0;
-  years.forEach(y=>{
-    const list = (QLD_PUBLIC_HOLIDAYS[y]||[]).slice();
-    if(includeEkka && QLD_EKKA_BRISBANE[y]) list.push(QLD_EKKA_BRISBANE[y]);
+  Object.keys(data.years).sort().forEach(y=>{
+    const list = (data.years[y]||[]).slice();
+    if(includeEkka && data.ekka && data.ekka[y]) list.push(data.ekka[y]);
     list.forEach(h=>{
       if(existingDates.has(h.date)) return;
       store.publicHolidays.push({date:h.date, name:h.name});
@@ -3900,7 +3958,6 @@ function wireTab3(){
 
 /* --- 3.1 分店管理 --- */
 function renderBranchMgmt(container){
-  const qldYears = Object.keys(QLD_PUBLIC_HOLIDAYS).map(Number).sort();
   container.innerHTML = `
   <div class="panel">
     <div class="row between"><h3>分店管理</h3><button class="primary" id="addstore">新增分店</button></div>
@@ -3917,16 +3974,15 @@ function renderBranchMgmt(container){
   </div>
   <div class="panel">
     <h3>QLD 公眾假期批次匯入</h3>
-    <div class="small muted" style="margin-bottom:8px;">依 Queensland 政府公告（qld.gov.au）內建的州定公眾假期，一次匯入到勾選的分店；已存在的日期會自動略過，不會重複新增，可放心重複執行。Royal Queensland Show (Ekka) 是 Brisbane 地區專屬的 Show Day 假期，其他地區的分店請取消勾選，改為手動新增該地區自己的 Show Day（各區日期不同，可參考 qld.gov.au/recreation/travel/holidays/show）。Christmas Eve（12/24）不在這份清單內、也不需要手動新增——依昆士蘭法律 12/24 只有晚上 6 點後到午夜才算公眾假期，系統已自動處理：只要班表有記錄上下班時間，跨過晚上 6 點的班次會自動拆成「6 點前照平日/週末費率」、「6 點後照 public holiday 費率」兩段計薪，不需要也不應該把 12/24 加進下方分店的公眾假期清單。</div>
+    <div class="small muted" style="margin-bottom:8px;">按下按鈕會自動連到 Queensland 政府網站（qld.gov.au）讀取最新公布的州定公眾假期（所有已公布的年度），一次匯入到勾選的分店；已存在的日期會自動略過，不會重複新增，可放心重複執行。若無法連線，會改用系統內建的清單並明確提示。Royal Queensland Show (Ekka) 是 Brisbane 地區專屬的 Show Day 假期，其他地區的分店請取消勾選，改為手動新增該地區自己的 Show Day（各區日期不同，可參考 qld.gov.au/recreation/travel/holidays/show）。Christmas Eve（12/24）不在這份清單內、也不需要手動新增——依昆士蘭法律 12/24 只有晚上 6 點後到午夜才算公眾假期，系統已自動處理：只要班表有記錄上下班時間，跨過晚上 6 點的班次會自動拆成「6 點前照平日/週末費率」、「6 點後照 public holiday 費率」兩段計薪，不需要也不應該把 12/24 加進下方分店的公眾假期清單。</div>
     <div class="row" style="gap:16px;flex-wrap:wrap;">
-      ${qldYears.map(y=>`<label class="chk"><input type="checkbox" data-qldyear="${y}" checked> ${y} 年</label>`).join("")}
       <label class="chk"><input type="checkbox" id="qldEkka" checked> 含 Royal Queensland Show (Ekka) — 僅 Brisbane 地區分店適用</label>
     </div>
     <div class="small muted" style="margin:10px 0 4px;">套用到以下分店：</div>
     <div class="row" style="gap:12px;flex-wrap:wrap;">
       ${currentStores.map(s=>`<label class="chk"><input type="checkbox" data-qldstore="${s.id}" checked> ${escapeHtml(s.name)}</label>`).join("") || '<span class="muted small">尚無分店，請先新增分店</span>'}
     </div>
-    <div class="toolbar"><button class="primary" id="qldImportBtn" ${!currentStores.length?'disabled':''}>匯入公眾假期</button></div>
+    <div class="toolbar"><button class="primary" id="qldImportBtn" ${!currentStores.length?'disabled':''}>更新並匯入公眾假期</button></div>
     <div id="qldImportResult"></div>
   </div>`;
   $("#addstore").onclick = ()=>openStoreModal(null);
@@ -3942,23 +3998,41 @@ function renderBranchMgmt(container){
   });
   const qldBtn = $("#qldImportBtn");
   if(qldBtn) qldBtn.onclick = async ()=>{
-    const years = $all("[data-qldyear]").filter(c=>c.checked).map(c=>Number(c.dataset.qldyear));
     const includeEkka = $("#qldEkka").checked;
     const storeIds = $all("[data-qldstore]").filter(c=>c.checked).map(c=>c.dataset.qldstore);
-    if(!years.length){ toast("請至少選擇一個年度"); return; }
     if(!storeIds.length){ toast("請至少選擇一間分店"); return; }
-    const summary = [];
-    for(const sid of storeIds){
-      const store = currentStores.find(s=>s.id===sid);
-      if(!store) continue;
-      const added = applyQldHolidaysToStore(store, years, includeEkka);
-      await saveStore(store);
-      summary.push(`${store.name}：新增 ${added} 筆`);
+    qldBtn.disabled = true;
+    qldBtn.textContent = "更新中…";
+    try{
+      const data = await fetchQldHolidays();
+      const summary = [];
+      for(const sid of storeIds){
+        const store = currentStores.find(s=>s.id===sid);
+        if(!store) continue;
+        const added = applyQldHolidaysToStore(store, data, includeEkka);
+        await saveStore(store);
+        summary.push(`${store.name}：新增 ${added} 筆`);
+      }
+      const yrs = Object.keys(data.years).sort();
+      let head;
+      if(data.live){
+        const when = data.fetchedAt ? new Date(data.fetchedAt).toLocaleString("zh-TW",{timeZone:"Australia/Brisbane",hour12:false}) : "";
+        head = `✅ 已更新至 ${data.latestYear} 年（資料來源 qld.gov.au，${when}）。本次涵蓋年度：${yrs.join("、")}${includeEkka?"，含 Ekka":""}。`;
+        if(data.skipped && data.skipped.length){
+          head += `<br>尚未公布或無法讀取、未匯入的年度：${data.skipped.map(k=>escapeHtml(String(k.year))).join("、")}。`;
+        }
+      }else{
+        head = `⚠️ 無法連線到 qld.gov.au（${escapeHtml(data.failReason||"未知原因")}），改用系統內建清單匯入，僅到 ${data.latestYear} 年，可能不是最新公布的資料，請稍後再按一次。`;
+      }
+      toast(data.live ? "公眾假期已更新並匯入" : "無法取得最新資料，已改用內建清單匯入");
+      renderBranchMgmt(container);
+      const resultBox = document.getElementById("qldImportResult");
+      if(resultBox) resultBox.innerHTML = `<div class="helpbox">${head}<br>${summary.map(s=>escapeHtml(s)).join("<br>")}</div>`;
+    }catch(e){
+      qldBtn.disabled = false;
+      qldBtn.textContent = "更新並匯入公眾假期";
+      toast("匯入失敗：" + ((e && e.message) || e));
     }
-    toast("QLD 公眾假期匯入完成");
-    renderBranchMgmt(container);
-    const resultBox = document.getElementById("qldImportResult");
-    if(resultBox) resultBox.innerHTML = `<div class="helpbox">已完成匯入。<br>${summary.map(s=>escapeHtml(s)).join("<br>")}</div>`;
   };
 }
 // Jeff, 2026-09-30: same swap-based manual-order pattern as reorderEmp() --
