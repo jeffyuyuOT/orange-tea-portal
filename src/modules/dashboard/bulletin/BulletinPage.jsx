@@ -75,16 +75,32 @@ async function notifyManagersOfTrainingHours(newlyCrossed, storeId, sender) {
   for (const { staff, info } of newlyCrossed) {
     const name = `${staff.first_name ?? ''} ${staff.last_name ?? ''}`.trim() || 'This staff member'
     const title = trainingHoursReminderTitle(info, { isSelf: false, name })
+    // Claim this band FIRST, atomically: the UPDATE only matches while the
+    // stored band is still lower, so when two Bulletin loads (or two
+    // managers) get here at the same moment only one UPDATE returns a row
+    // and only that one sends the Message. (Before, the band was written
+    // AFTER the Message was inserted, so both loads read the old band and
+    // each sent one — the double "50 hours left" Message, 2026-10-17.)
+    const { data: claimed, error: claimErr } = await supabase
+      .from('profiles')
+      .update({ training_hours_notified_band: info.band })
+      .eq('id', staff.id)
+      .or(`training_hours_notified_band.is.null,training_hours_notified_band.lt.${info.band}`)
+      .select('id')
+    if (claimErr || !claimed?.length) continue
     const { data: msg, error } = await supabase
       .from('messages')
       .insert({ store_id: storeId, sender_id: sender.id, sender_name: 'System', subject: title, content_html: `<p>${title}</p>` })
       .select()
       .single()
-    if (error || !msg) continue
+    if (error || !msg) {
+      // Message never went out — hand the band back so the next load retries.
+      await supabase.from('profiles').update({ training_hours_notified_band: staff.training_hours_notified_band ?? null }).eq('id', staff.id)
+      continue
+    }
     await supabase
       .from('message_recipients')
       .insert(Array.from(recipients.keys()).map((id) => ({ message_id: msg.id, profile_id: id })))
-    await supabase.from('profiles').update({ training_hours_notified_band: info.band }).eq('id', staff.id)
   }
 }
 
