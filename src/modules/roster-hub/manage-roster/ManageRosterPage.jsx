@@ -741,6 +741,45 @@ export default function ManageRosterPage() {
     <div>
       <h1 className="mb-4 text-xl font-semibold text-gray-900">Manage Roster</h1>
 
+      {/* Jeff, 2026-10-17: Last week / Current week / Next week as always-visible
+          shortcut tabs (they used to be only inside the Action menu). The one
+          matching the week on screen is bigger and filled; picking a date
+          that is none of the three leaves all of them plain. */}
+      {(() => {
+        const base = thisWeekStart()
+        const shift = (n) => format(addDays(parseISO(base), n), 'yyyy-MM-dd')
+        const tabs = [
+          ['Last week', shift(-7)],
+          ['Current week', base],
+          ['Next week', shift(7)],
+        ]
+        return (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {tabs.map(([label, start]) => {
+              const active = weekStart === start
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setWeekStart(start)}
+                  aria-pressed={active}
+                  className={
+                    active
+                      ? 'rounded-full bg-brand-500 px-5 py-2 text-base font-semibold text-white shadow-sm'
+                      : 'rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm text-gray-500 hover:bg-brand-50 hover:text-brand-700'
+                  }
+                >
+                  {label}
+                </button>
+              )
+            })}
+            {weekStart && !loadingPeriod && loadedPeriodStatus === null && (
+              <span className="text-sm text-gray-400">這一週還沒有已儲存的班表資料</span>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Jeff, 2026-10-03: "View Staff's Availability跟Action 靠到最右邊。
           Save (not published)跟Submit & Publish還有說明則往日期那邊靠" —
           flips the single-row desktop layout from 2026-10-01 (which had
@@ -846,37 +885,6 @@ export default function ManageRosterPage() {
                   sm+, where the button genuinely is flush with the screen's
                   right edge again. */
               <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
-                <button
-                  type="button"
-                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
-                  onClick={() => {
-                    setActionMenuOpen(false)
-                    setWeekStart(format(addDays(parseISO(thisWeekStart()), -7), 'yyyy-MM-dd'))
-                  }}
-                >
-                  Last week
-                </button>
-                <button
-                  type="button"
-                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
-                  onClick={() => {
-                    setActionMenuOpen(false)
-                    setWeekStart(thisWeekStart())
-                  }}
-                >
-                  Current week
-                </button>
-                <button
-                  type="button"
-                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
-                  onClick={() => {
-                    setActionMenuOpen(false)
-                    setWeekStart(format(addDays(parseISO(thisWeekStart()), 7), 'yyyy-MM-dd'))
-                  }}
-                >
-                  Next week
-                </button>
-                <div className="my-1 border-t border-gray-100" />
                 <button
                   type="button"
                   className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
