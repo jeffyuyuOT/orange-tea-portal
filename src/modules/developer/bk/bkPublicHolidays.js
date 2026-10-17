@@ -1,4 +1,4 @@
-// Brisbane / Queensland public holidays 2017–2026, copied from the Queensland
+// Brisbane / Queensland public holidays 2017–2027, copied from the Queensland
 // Government's yearly "Queensland public holiday dates" pages
 // (https://www.qld.gov.au/recreation/travel/holidays/public). Used by the 營業
 // pages (🎉 on the date, Event list in 歷史紀錄) for years before the payroll
@@ -33,6 +33,7 @@ const RAW = {
   2024: [['01-01', NY], ['01-26', AU], ['03-29', GF], ['03-30', DGF], ['03-31', ES], ['04-01', EM], ['04-25', ANZ], ['05-06', LAB], ['08-14', EKKA], ['10-07', QB], ['12-24', CE], ['12-25', CD], ['12-26', BD]],
   2025: [['01-01', NY], ['01-27', AU], ['04-18', GF], ['04-19', DGF], ['04-20', ES], ['04-21', EM], ['04-25', ANZ], ['05-05', LAB], ['08-13', EKKA], ['10-06', QB], ['12-24', CE], ['12-25', CD], ['12-26', BD]],
   2026: [['01-01', NY], ['01-26', AU], ['04-03', GF], ['04-04', DGF], ['04-05', ES], ['04-06', EM], ['04-25', ANZ], ['05-04', LAB], ['08-12', EKKA], ['10-05', QB], ['12-24', CE], ['12-25', CD], ['12-26', BD], ['12-28', `${BD} (substitute)`]],
+  2027: [['01-01', NY], ['01-26', AU], ['03-26', GF], ['03-27', DGF], ['03-28', ES], ['03-29', EM], ['04-26', `${ANZ} (substitute)`], ['05-03', LAB], ['08-11', EKKA], ['10-04', QB], ['12-24', CE], ['12-25', CD], ['12-26', BD], ['12-27', `${CD} (substitute)`], ['12-28', `${BD} (substitute)`]],
 }
 
 // { 'YYYY-MM-DD': name }
