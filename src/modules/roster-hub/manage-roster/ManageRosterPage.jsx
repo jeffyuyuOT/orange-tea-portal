@@ -754,7 +754,8 @@ export default function ManageRosterPage() {
           ['Next week', shift(7)],
         ]
         return (
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="mb-3">
+          <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2">
             {tabs.map(([label, start]) => {
               const active = weekStart === start
               return (
@@ -765,16 +766,17 @@ export default function ManageRosterPage() {
                   aria-pressed={active}
                   className={
                     active
-                      ? 'rounded-full bg-brand-500 px-5 py-2 text-base font-semibold text-white shadow-sm'
-                      : 'rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm text-gray-500 hover:bg-brand-50 hover:text-brand-700'
+                      ? 'whitespace-nowrap rounded-full bg-brand-500 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm sm:px-5 sm:py-2 sm:text-base'
+                      : 'whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500 hover:bg-brand-50 hover:text-brand-700 sm:px-4 sm:py-1.5 sm:text-sm'
                   }
                 >
                   {label}
                 </button>
               )
             })}
+          </div>
             {weekStart && !loadingPeriod && loadedPeriodStatus === null && (
-              <span className="text-sm text-gray-400">這一週還沒有已儲存的班表資料</span>
+              <div className="mt-1.5 text-sm text-gray-400">這一週還沒有已儲存的班表資料</div>
             )}
           </div>
         )
