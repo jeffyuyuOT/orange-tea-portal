@@ -21,7 +21,33 @@ export default defineConfig({
         // Storage) to someone who was never meant to know it exists. Left
         // out of the precache manifest, it's only ever fetched on demand,
         // by whoever actually opens /developer-tools/payroll.
-        globIgnores: ['payroll/**'],
+        //
+        // Jeff, 2026-10-17: the same idea for the developer-only BK module and
+        // the two big Excel libraries. By default the service worker downloads
+        // EVERY built JS file into every staff phone on install and on every
+        // site update (~1.6 MB of the ~3 MB total was BK + exceljs + xlsx that
+        // staff never open), which hurts on slow networks. They're left out of
+        // the precache and instead cached the first time someone actually loads
+        // them (runtimeCaching below). Staff data was never at risk (RLS); this
+        // is only about not pushing unused code to their phones.
+        //   assets/dev-*.js      every chunk made ONLY of src/modules/developer/*
+        //                        (named by chunkFileNames further down)
+        //   assets/exceljs*.js   Excel import / export library
+        //   assets/xlsx-*.js     SheetJS (POS xls / xlsx import)
+        globIgnores: ['payroll/**', 'assets/dev-*.js', 'assets/exceljs*.js', 'assets/xlsx-*.js'],
+        // Cache those left-out files on first use. File names are content-hashed,
+        // so CacheFirst can never serve a stale version of the same name.
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /\/assets\/(dev-[^/]*|exceljs[^/]*|xlsx-[^/]*)\.js$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'on-demand-chunks',
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
         // Jeff, 2026-09: "Payroll 連結跳到 Bulletin Board...好像是又開一個
         // 視窗但還是進入ot portal頁面" — this was the real bug, and it's not
         // in the sidebar link at all. Workbox's default NavigationRoute
@@ -88,6 +114,23 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // A chunk whose modules ALL live under src/modules/developer/ (BK, Payroll
+        // page) gets the "dev-" prefix, which workbox.globIgnores above uses to
+        // keep it out of the precache. A chunk that mixes in anything shared stays
+        // un-prefixed (and precached), so this can only ever under-exclude, never
+        // drop a file staff need.
+        chunkFileNames: (chunk) => {
+          const ids = (chunk.moduleIds || []).filter((id) => !id.includes('\0'))
+          const devOnly =
+            ids.length > 0 && ids.every((id) => id.replace(/\\/g, '/').includes('/src/modules/developer/'))
+          return devOnly ? 'assets/dev-[name]-[hash].js' : 'assets/[name]-[hash].js'
+        },
+      },
+    },
+  },
   // exceljs is only loaded when an Excel file is imported / exported (dynamic import).
   // Without this, the dev server finds it late, re-bundles it with a new version
   // code, and an already-open page fails with "Failed to fetch dynamically
