@@ -17,7 +17,7 @@ import {
   sheetNameForStore,
 } from '../bkImportTemplates'
 import BackfillGridImport from './BackfillGridImport'
-import BizGridImport from './BizGridImport'
+import BizGridImport from './BizImportRouter' // picks the per-store importer or the yearly-history importer
 import HourGridImport from './HourGridImport'
 import EntriesExcelImport from '../ucash/EntriesExcelImport'
 import DividendExcelImport from '../bonus/DividendExcelImport'
