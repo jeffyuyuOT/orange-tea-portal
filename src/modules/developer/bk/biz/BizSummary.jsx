@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadSalesRange, loadSfPostRange } from '../bkSalesData'
+import { loadOtherIncomeRange, loadSalesRange, loadSfPostRange } from '../bkSalesData'
+import { IncomeMark, OtherIncomeModal, groupOtherIncome, sumOtherIncome } from './OtherIncome'
 import { bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
 import { Notice, YearMonthPicker } from '../bkUi'
 
@@ -46,6 +47,8 @@ export function summarizeStores(stores, dates, salesRows, postRows) {
 export default function BizSummary({ stores, year, month, onYearMonth, holidays = {} }) {
   const [sales, setSales] = useState([])
   const [posts, setPosts] = useState([])
+  const [income, setIncome] = useState([])
+  const [incomeInfo, setIncomeInfo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const dates = useMemo(() => monthDates(year, month), [year, month])
@@ -60,10 +63,15 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
         const from = dates[0]
         const to = dates[dates.length - 1]
         const sfIds = stores.map((s) => s.sf_store_id).filter(Boolean)
-        const [a, b] = await Promise.all([loadSalesRange(stores.map((s) => s.id), from, to), loadSfPostRange(sfIds, from, to)])
+        const [a, b, inc] = await Promise.all([
+          loadSalesRange(stores.map((s) => s.id), from, to),
+          loadSfPostRange(sfIds, from, to),
+          loadOtherIncomeRange(sfIds, from, to).catch(() => []), // optional: never block the table
+        ])
         if (cancelled) return
         setSales(a)
         setPosts(b)
+        setIncome(inc)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -76,6 +84,14 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
   }, [storeKey, dates]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sums = useMemo(() => summarizeStores(stores, dates, sales, posts), [stores, dates, sales, posts])
+  // { [storeId]: { [date]: { total, items } } } — 其他收入 of a store's linked U帳 store
+  const incomeByStore = useMemo(() => {
+    const out = {}
+    for (const s of stores) {
+      out[s.id] = s.sf_store_id ? groupOtherIncome(income.filter((r) => r.store_id === s.sf_store_id)) : {}
+    }
+    return out
+  }, [stores, income])
 
   const topRow = (label, key, moneyFmt, countFmt, hint) => (
     <tr>
@@ -85,9 +101,18 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
       {stores.map((s, i) => {
         const c = storeColor(i)
         const src = sums[s.id]?.[key] ?? {}
+        const all = key === 'total' ? sumOtherIncome(incomeByStore[s.id] ?? {}) : null
         return [
           <td key={`${s.id}t`} className={`${td} ${c.top} ${split}`}>
-            <div className="px-1 py-1 text-right font-semibold tabular-nums">{moneyFmt(src.total)}</div>
+            <div className="flex items-center justify-end gap-1 px-1 py-1 text-right font-semibold tabular-nums">
+              {all && all.items.length > 0 && (
+                <IncomeMark
+                  title="這個月有 U帳 其他收入，點擊查看合計"
+                  onClick={() => setIncomeInfo({ title: `${s.name} · ${year}/${month} 其他收入`, items: all.items, sales: src.total })}
+                />
+              )}
+              {moneyFmt(src.total)}
+            </div>
           </td>,
           <td key={`${s.id}c`} className={`${td} ${c.top}`}>
             <div className="px-1 py-1 text-right font-semibold tabular-nums">{countFmt(src.cups)}</div>
@@ -147,7 +172,16 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
                       const c = storeColor(i)
                       return [
                         <td key={`${s.id}t`} className={`${td} ${c.cell} ${split}`}>
-                          <div className="px-1 py-1 text-right tabular-nums text-gray-700">{fmtMoney(r.total)}</div>
+                          <div className="flex items-center justify-end gap-1 px-1 py-1 text-right tabular-nums text-gray-700">
+                            {incomeByStore[s.id]?.[date] && (
+                              <IncomeMark
+                                onClick={() =>
+                                  setIncomeInfo({ title: `${s.name} · ${date} ${weekdayOf(date)} 其他收入`, items: incomeByStore[s.id][date].items, sales: r.total })
+                                }
+                              />
+                            )}
+                            {fmtMoney(r.total)}
+                          </div>
                         </td>,
                         <td key={`${s.id}c`} className={`${td} ${c.cell}`}>
                           <div className="px-1 py-1 text-right tabular-nums text-gray-700">{fmtCount(r.cups)}</div>
@@ -161,6 +195,7 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
           </table>
         </div>
       )}
+      <OtherIncomeModal info={incomeInfo} onClose={() => setIncomeInfo(null)} />
     </div>
   )
 }

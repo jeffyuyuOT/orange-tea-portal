@@ -54,7 +54,7 @@ const TEMPLATES = [
 const ROUTES = [
   ['jeff', /jeff/i, '積欠 Jeff'],
   ['emma', /emma/i, '積欠 Emma'],
-  ['hours', /小時|hour/i, '小時統計'],
+  ['hours', /小時|hour|(^|[^a-z])hrs?([^a-z]|$)/i, '小時統計'],
   ['biz', /營業|biz/i, '營業'],
   ['bonus', /收成|dividend|bonus/i, '收成'],
   ['u', /u\s*帳|u\s*account|ucash|分店現金|收支/i, 'U帳'],

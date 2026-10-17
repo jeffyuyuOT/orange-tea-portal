@@ -194,6 +194,65 @@ export function parseHourGridRows(rows) {
   return { days, hours, ignored, unreadable, badCells }
 }
 
+// Month sheets: a tab named YYYYMM (e.g. 202610) holding one block per store,
+// stacked top to bottom — store name in column A, then a row with "hour" in A
+// and the day of month (1..31) across, then one row per hour (hour number in A)
+// with that day's already-summed sales; a SUM row ends each block (ignored,
+// because its column A is empty).  -> [{ storeName, days:{date:{hour:value}}, hours, badCells }]
+export const MONTH_SHEET_RE = /^(\d{4})[-_ ]?(\d{2})$/
+
+export function monthFromSheetName(name) {
+  const m = MONTH_SHEET_RE.exec(String(name ?? '').trim())
+  if (!m) return null
+  const year = Number(m[1])
+  const month = Number(m[2])
+  return month >= 1 && month <= 12 ? { year, month } : null
+}
+
+const isHourLabelCell = (v) => typeof v === 'string' && /^hours?$|^小時$|^時間$/i.test(v.trim())
+
+export function parseMonthStackRows(rows, year, month) {
+  const blocks = []
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    if (!isHourLabelCell(row[0])) continue
+    // store name = closest non-empty text above the header row
+    let storeName = ''
+    for (let k = r - 1; k >= 0 && k >= r - 3; k--) {
+      const a = (rows[k] ?? [])[0]
+      if (typeof a === 'string' && a.trim() && !isHourLabelCell(a)) {
+        storeName = a.trim()
+        break
+      }
+    }
+    const dayCols = [] // [colIndex, 'YYYY-MM-DD']
+    for (let c = 1; c < row.length; c++) {
+      const d = row[c]
+      if (typeof d === 'number' && Number.isInteger(d)) {
+        const date = parseDateCell(d, year, month)
+        if (date) dayCols.push([c, date])
+      }
+    }
+    if (!storeName || dayCols.length === 0) continue
+    const days = {}
+    const hourSet = new Set()
+    let badCells = 0
+    for (let k = r + 1; k < rows.length; k++) {
+      const hr = (rows[k] ?? [])[0]
+      if (typeof hr !== 'number' || !Number.isInteger(hr) || hr < 0 || hr > 23) break
+      for (const [c, date] of dayCols) {
+        const res = cellNumber(rows[k][c])
+        if (res.bad) badCells++
+        if (res.value === undefined) continue
+        ;(days[date] ??= {})[hr] = round2(res.value)
+        hourSet.add(hr)
+      }
+    }
+    blocks.push({ storeName, days, hours: [...hourSet].sort((a, b) => a - b), badCells })
+  }
+  return blocks
+}
+
 // ---------------------------------------------------------------------------
 // Hours shown & per-hour maths
 // ---------------------------------------------------------------------------

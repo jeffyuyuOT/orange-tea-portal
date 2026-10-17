@@ -5,6 +5,7 @@ import { brisbaneToday, fmtMoney, isWeekend, monthDates, weekdayOf } from '../bk
 import { loadHourSalesMonth, loadHourSettings } from '../bkHourData'
 import { gridStats, hourLabel, hourlyByDay, hoursFor, settingsMap } from '../bkHourly'
 import { Notice, StoreTabs, YearMonthPicker } from '../bkUi'
+import HourBreakdown from './HourBreakdown'
 import HourImport from './HourImport'
 
 const th = 'border border-white/70 bg-brand-100 px-1 py-1.5 text-[11px] font-semibold leading-tight text-gray-700'
@@ -25,6 +26,7 @@ export default function HoursTab({ stores, topActive = true }) {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [importing, setImporting] = useState(false)
+  const [dayView, setDayView] = useState(null)
 
   const scopeIds = useMemo(() => (storeId ? [storeId] : stores.map((s) => s.id)), [storeId, stores])
   const storeKey = stores.map((s) => s.id).join(',')
@@ -52,6 +54,21 @@ export default function HoursTab({ stores, topActive = true }) {
   const byDay = useMemo(() => hourlyByDay(rows, scopeIds), [rows, scopeIds])
   const stats = useMemo(() => gridStats(byDay, dates, hours), [byDay, dates, hours])
   const max = useMemo(() => Math.max(0, ...dates.flatMap((d) => hours.map((h) => byDay[d]?.[h] ?? 0))), [dates, hours, byDay])
+
+  // The day's hour distribution as a chart (to copy / download and send on).
+  function openDay(date) {
+    const row = byDay[date]
+    if (!row) return
+    const shown = new Set([...hours, ...Object.keys(row).map(Number)])
+    const name = storeId ? stores.find((s) => s.id === storeId)?.name : '全部分店'
+    setDayView({
+      title: `${name} · ${date} ${weekdayOf(date)}`,
+      note: '每小時營業額（POS + 自動點單）',
+      values: row,
+      days: 1,
+      hours: [...shown].sort((a, b) => a - b),
+    })
+  }
 
   if (stores.length === 0) {
     return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
@@ -116,8 +133,6 @@ export default function HoursTab({ stores, topActive = true }) {
                   </th>
                 )}
               </tr>
-              {topRow('Total', stats.total, stats.grand)}
-              {topRow('平均', stats.average, stats.avgDay, '每個小時的平均（只算有資料的日子）；合計欄是每日平均')}
             </thead>
             <tbody>
               {dates.map((date) => {
@@ -125,9 +140,18 @@ export default function HoursTab({ stores, topActive = true }) {
                 const has = !!byDay[date]
                 return (
                   <tr key={date} className={weekendBg}>
-                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`}>
-                      <span className="font-medium">{Number(date.slice(8))}</span>{' '}
-                      <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
+                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap ${weekendBg}`}>
+                      <button
+                        type="button"
+                        disabled={!has}
+                        onClick={() => openDay(date)}
+                        className="flex w-full items-center gap-1 px-1.5 py-1 text-left enabled:hover:bg-brand-50"
+                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片）' : undefined}
+                      >
+                        <span className="font-medium">{Number(date.slice(8))}</span>
+                        <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
+                        {has && <span className="text-[11px] text-brand-500">📊</span>}
+                      </button>
                     </td>
                     {hours.map((h) => {
                       const v = byDay[date]?.[h]
@@ -149,9 +173,15 @@ export default function HoursTab({ stores, topActive = true }) {
                 )
               })}
             </tbody>
+            <tfoot className="sticky bottom-0 z-20">
+              {topRow('Total', stats.total, stats.grand)}
+              {topRow('平均', stats.average, stats.avgDay, '每個小時的平均（只算有資料的日子）；合計欄是每日平均')}
+            </tfoot>
           </table>
         </div>
       )}
+
+      <HourBreakdown view={dayView} onClose={() => setDayView(null)} />
 
       {importing && (
         <HourImport

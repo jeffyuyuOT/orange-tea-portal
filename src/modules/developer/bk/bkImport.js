@@ -40,7 +40,7 @@ function plain(v) {
   return v
 }
 
-async function loadWorkbookSheets(arrayBuffer) {
+export async function loadWorkbookSheets(arrayBuffer) {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(arrayBuffer)

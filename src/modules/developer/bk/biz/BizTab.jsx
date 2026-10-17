@@ -4,12 +4,13 @@ import Badge from '../../../../components/ui/Badge'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadPublicHolidays, loadSalesMonth, loadSalesNotesMonth, loadSfPostMonth, saveSalesFields, saveSalesNoteForStores } from '../bkSalesData'
+import { loadOtherIncomeRange, loadPublicHolidays, loadSalesMonth, loadSalesNotesMonth, loadSfPostMonth, saveSalesFields, saveSalesNoteForStores } from '../bkSalesData'
 import { BIZ_INPUTS, bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
 import { Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import BizExportModal from './BizExportModal'
 import BizOverview from './BizOverview'
 import BizSummary from './BizSummary'
+import { IncomeMark, OtherIncomeModal, groupOtherIncome, sumOtherIncome } from './OtherIncome'
 
 const OVERVIEW_ID = '__overview'
 const SUMMARY_ID = '__summary'
@@ -50,6 +51,8 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   const [noteDraft, setNoteDraft] = useState('')
   const [noteError, setNoteError] = useState('')
   const [noteAll, setNoteAll] = useState(false) // 套用到全部分店
+  const [incomeRows, setIncomeRows] = useState([]) // U帳 其他收入 of the linked store this month
+  const [incomeInfo, setIncomeInfo] = useState(null) // the open 其他收入 popup
 
   const store = stores.find((s) => s.id === storeId) ?? stores[0] ?? null
   const linked = !!store?.sf_store_id
@@ -98,6 +101,21 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
     }
   }, [topActive])
 
+  // U帳 其他收入 (linked stores only); read again when coming back to this tab.
+  useEffect(() => {
+    if (!topActive || !sfStoreId || overview || summary) {
+      if (!sfStoreId) setIncomeRows([])
+      return
+    }
+    let cancelled = false
+    loadOtherIncomeRange([sfStoreId], dates[0], dates[dates.length - 1])
+      .then((r) => !cancelled && setIncomeRows(r))
+      .catch(() => !cancelled && setIncomeRows([]))
+    return () => {
+      cancelled = true
+    }
+  }, [topActive, sfStoreId, year, month, overview, summary]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function openNote(date) {
     setNoteDate(date)
     setNoteDraft(notes[date] ?? '')
@@ -139,6 +157,8 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
     [dates, days, postMap, linked]
   )
   const { total, average } = useMemo(() => bizTotals(rows), [rows])
+  const incomeByDate = useMemo(() => groupOtherIncome(incomeRows), [incomeRows])
+  const incomeAll = useMemo(() => sumOtherIncome(incomeByDate), [incomeByDate])
 
   async function save() {
     setSaving(true)
@@ -346,6 +366,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                 return (
                   <tr key={date} className={weekendBg}>
                     <td className={`${td} sticky left-0 z-10 whitespace-nowrap ${weekendBg}`}>
+                      <div className="flex items-center">
                       <button
                         type="button"
                         onClick={() => openNote(date)}
@@ -357,6 +378,14 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                         {holiday && <span className="text-[12px]">🎉</span>}
                         {notes[date] && <span className="text-[12px]">📝</span>}
                       </button>
+                      {incomeByDate[date] && (
+                        <IncomeMark
+                          onClick={() =>
+                            setIncomeInfo({ title: `${store.name} · ${date} ${weekdayOf(date)} 其他收入`, items: incomeByDate[date].items, sales: r.total })
+                          }
+                        />
+                      )}
+                      </div>
                     </td>
                     <td className={td}>
                       <div className="px-1 py-1 text-right font-medium tabular-nums text-gray-700" title="POS + Self O + CV × 4">
@@ -391,7 +420,19 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                   <td className={`${td} sticky left-0 z-30 bg-brand-50 px-1.5 py-1.5`} title={label === '平均' ? '用這個月已有資料的天數算每日平均' : undefined}>
                     {label}
                   </td>
-                  <td className={td}>{moneyCell(src.total)}</td>
+                  <td className={td}>
+                    {label === 'Total' && incomeAll.items.length > 0 ? (
+                      <div className="flex items-center justify-end gap-1 px-1 py-1 tabular-nums text-gray-700">
+                        <IncomeMark
+                          title="這個月有 U帳 其他收入，點擊查看合計"
+                          onClick={() => setIncomeInfo({ title: `${store.name} · ${year}/${month} 其他收入`, items: incomeAll.items, sales: src.total })}
+                        />
+                        {fmtMoney(src.total)}
+                      </div>
+                    ) : (
+                      moneyCell(src.total)
+                    )}
+                  </td>
                   <td className={td}>
                     <div className="px-1 py-1 text-right tabular-nums">{countFmt(src.cups)}</div>
                   </td>
@@ -408,6 +449,8 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
       )}
 
       </>)}
+
+      <OtherIncomeModal info={incomeInfo} onClose={() => setIncomeInfo(null)} />
 
       <Modal
         open={!!noteDate}

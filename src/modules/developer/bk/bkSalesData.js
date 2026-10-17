@@ -284,3 +284,20 @@ export async function saveSalesFields(storeId, days, fields) {
     unwrap(await q)
   }
 }
+
+// U帳 其他收入 entries (bk_cash_entries, kind other_income) of the given SF / U帳
+// stores between two dates — the 營業 pages mark the days that have some.
+export async function loadOtherIncomeRange(sfStoreIds, from, to) {
+  if (!sfStoreIds || sfStoreIds.length === 0) return []
+  return fetchAll(() =>
+    supabase
+      .from('bk_cash_entries')
+      .select('store_id, entry_date, amount, description, note')
+      .in('store_id', sfStoreIds)
+      .eq('kind', 'other_income')
+      .gte('entry_date', from)
+      .lte('entry_date', to)
+      .order('entry_date')
+      .order('created_at')
+  )
+}

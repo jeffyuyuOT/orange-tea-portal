@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
-import { readWorkbookRows } from '../bkImport'
+import { loadWorkbookSheets, readWorkbookRows } from '../bkImport'
 import { fmtMoney, round2 } from '../bkUtils'
 import { saveCombinedHours } from '../bkHourData'
-import { hourLabel, parseHourGridRows } from '../bkHourly'
+import { hourLabel, matchStore, monthFromSheetName, parseHourGridRows, parseMonthStackRows } from '../bkHourly'
 import { sheetNameForStore } from '../bkImportTemplates'
 import { Notice } from '../bkUi'
 
@@ -25,6 +25,30 @@ export default function HourGridImport({ file, stores, onImported, onClose }) {
         const jobs = []
         const notFound = []
         const broken = []
+        // Layout B: month tabs (202610 …) with every store stacked in each tab.
+        const monthSheets = (await loadWorkbookSheets(buf)).filter((s) => monthFromSheetName(s.name))
+        const stacked = new Map() // store.id -> merged job
+        const unmatched = new Set()
+        for (const sheet of monthSheets) {
+          const { year, month } = monthFromSheetName(sheet.name)
+          for (const b of parseMonthStackRows(sheet.rows, year, month)) {
+            const store = matchStore(stores, { storeName: b.storeName })
+            if (!store) {
+              unmatched.add(b.storeName)
+              continue
+            }
+            const job = stacked.get(store.id) ?? { key: store.id, store, days: {}, hours: [], ignored: [], unreadable: 0, badCells: 0 }
+            Object.assign(job.days, b.days)
+            job.hours = [...new Set([...job.hours, ...b.hours])].sort((x, y) => x - y)
+            job.badCells += b.badCells
+            stacked.set(store.id, job)
+          }
+        }
+        if (stacked.size > 0 || unmatched.size > 0) {
+          const list = [...stacked.values()].filter((j) => Object.keys(j.days).length > 0)
+          if (!cancelled) setState({ jobs: list, notFound: [], broken: [], unmatched: [...unmatched] })
+          return
+        }
         for (const store of stores) {
           const sheetName = sheetNameForStore(store.name)
           const sheet = await readWorkbookRows(buf, { sheetNames: [sheetName] })
@@ -93,7 +117,7 @@ export default function HourGridImport({ file, stores, onImported, onClose }) {
     >
       <div className="space-y-3 text-sm">
         <Notice kind="info">
-          這裡直接寫入資料庫。每個分店會讀檔案裡同名的工作表（列 = 日期，欄 = 小時，數字是 POS 和自動點單已經加總的營業額）。同一天重新匯入會取代之前匯入的加總數字；已經有 POS／自動點單資料的小時，畫面上會以 POS＋自動點單 為準。
+          這裡直接寫入資料庫。支援兩種格式：① 範本：每個分店一個同名工作表（列 = 日期，欄 = 小時）；② 月份工作表（如 202610），同一頁由上往下堆疊各分店，列 = 小時，欄 = 1–31 日，分店名稱在區塊第一格。數字都是 POS 和自動點單已經加總的營業額。同一天重新匯入會取代之前匯入的加總數字；已經有 POS／自動點單資料的小時，畫面上會以 POS＋自動點單 為準。
         </Notice>
         {state.loading && <LoadingSpinner label="讀取檔案…" />}
         {state.failed && <Notice kind="error">{state.failed}</Notice>}
@@ -101,6 +125,7 @@ export default function HourGridImport({ file, stores, onImported, onClose }) {
         {!state.loading && !state.failed && (
           <>
             <div className="text-gray-500">檔案：{file.name}</div>
+            {state.unmatched?.length > 0 && <Notice kind="info">檔案裡的「{state.unmatched.join('、')}」在現有分店裡找不到同名的分店，這些沒有被匯入（請確認分店名稱）。</Notice>}
             {state.notFound?.length > 0 && <Notice kind="info">檔案裡沒有找到「{state.notFound.join('、')}」的分頁，這些分店沒有被匯入。</Notice>}
             {state.broken?.length > 0 && <Notice kind="error">{state.broken.map((b) => `「${b.name}」：${b.error}`).join('；')}</Notice>}
             {jobs.length === 0 ? (
