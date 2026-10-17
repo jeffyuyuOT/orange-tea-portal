@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
+import Modal from '../../../../components/ui/Modal'
 import { fmtMoney, isWeekend, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadOtherIncomeRange, loadSalesRange, loadSfPostRange } from '../bkSalesData'
+import { loadOtherIncomeRange, loadSalesNotesRange, loadSalesRange, loadSfPostRange } from '../bkSalesData'
 import { IncomeMark, OtherIncomeModal, groupOtherIncome, sumOtherIncome } from './OtherIncome'
 import { bizDayRow, bizDaysFromRows, bizTotals, postMapFromRows } from '../bkSalesUtils'
 import { Notice, YearMonthPicker } from '../bkUi'
@@ -49,6 +50,8 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
   const [posts, setPosts] = useState([])
   const [income, setIncome] = useState([])
   const [incomeInfo, setIncomeInfo] = useState(null)
+  const [notes, setNotes] = useState([])
+  const [noteDate, setNoteDate] = useState(null) // the date whose 附註 popup is open
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const dates = useMemo(() => monthDates(year, month), [year, month])
@@ -63,15 +66,17 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
         const from = dates[0]
         const to = dates[dates.length - 1]
         const sfIds = stores.map((s) => s.sf_store_id).filter(Boolean)
-        const [a, b, inc] = await Promise.all([
+        const [a, b, inc, noteRows] = await Promise.all([
           loadSalesRange(stores.map((s) => s.id), from, to),
           loadSfPostRange(sfIds, from, to),
           loadOtherIncomeRange(sfIds, from, to).catch(() => []), // optional: never block the table
+          loadSalesNotesRange(stores.map((s) => s.id), from, to).catch(() => []), // optional too
         ])
         if (cancelled) return
         setSales(a)
         setPosts(b)
         setIncome(inc)
+        setNotes(noteRows)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -92,6 +97,18 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
     }
     return out
   }, [stores, income])
+
+  // { [date]: [{ storeId, storeName, note }] } in the stores' own order
+  const notesByDate = useMemo(() => {
+    const out = {}
+    for (const s of stores) {
+      for (const n of notes) {
+        if (n.store_id !== s.id) continue
+        ;(out[n.day] ??= []).push({ storeId: s.id, storeName: s.name, note: n.note })
+      }
+    }
+    return out
+  }, [stores, notes])
 
   const topRow = (label, key, moneyFmt, countFmt, hint) => (
     <tr>
@@ -162,10 +179,27 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
                 const weekendBg = holiday ? 'bg-rose-50' : isWeekend(date) ? 'bg-gray-50' : 'bg-white'
                 return (
                   <tr key={date} className={weekendBg}>
-                    <td className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`} title={holiday ? `Public holiday：${holiday}` : undefined}>
+                    <td
+                      className={`${td} sticky left-0 z-10 whitespace-nowrap px-1.5 py-1 ${weekendBg}`}
+                      title={
+                        [holiday && `Public holiday：${holiday}`, ...(notesByDate[date] ?? []).map((n) => `${n.storeName}：${n.note}`)]
+                          .filter(Boolean)
+                          .join('\n') || undefined
+                      }
+                    >
                       <span className="font-medium">{Number(date.slice(8))}</span>{' '}
                       <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
                       {holiday && <span className="ml-1 text-[12px]">🎉</span>}
+                      {notesByDate[date] && (
+                        <button
+                          type="button"
+                          onClick={() => setNoteDate(date)}
+                          title="有附註，點擊查看"
+                          className="ml-0.5 rounded px-0.5 text-[12px] leading-none hover:bg-brand-100"
+                        >
+                          📝
+                        </button>
+                      )}
                     </td>
                     {stores.map((s, i) => {
                       const r = sums[s.id]?.rows[di] ?? {}
@@ -196,6 +230,32 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
         </div>
       )}
       <OtherIncomeModal info={incomeInfo} onClose={() => setIncomeInfo(null)} />
+      <DayNotesModal date={noteDate} items={noteDate ? notesByDate[noteDate] ?? [] : []} holiday={noteDate ? holidays[noteDate] : ''} storeCount={stores.length} onClose={() => setNoteDate(null)} />
     </div>
+  )
+}
+
+// The 附註 of one day, across stores: stores with the same text are listed together
+// ("全部分店" when every store has it). Editing stays on the 營業 tab (click the date there).
+function DayNotesModal({ date, items, holiday, storeCount, onClose }) {
+  const groups = []
+  for (const it of items) {
+    const g = groups.find((x) => x.note === it.note)
+    if (g) g.stores.push(it.storeName)
+    else groups.push({ note: it.note, stores: [it.storeName] })
+  }
+  return (
+    <Modal open={!!date} onClose={onClose} title={date ? `${date} ${weekdayOf(date)} 附註` : ''}>
+      <div className="space-y-2 text-sm">
+        {holiday && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">🎉 Public holiday：{holiday}</div>}
+        {groups.map((g) => (
+          <div key={g.note} className="rounded-lg border border-gray-200 p-2.5">
+            <div className="text-xs font-semibold text-gray-500">{g.stores.length === storeCount && storeCount > 1 ? '全部分店' : g.stores.join('、')}</div>
+            <div className="mt-0.5 whitespace-pre-wrap text-gray-800">{g.note}</div>
+          </div>
+        ))}
+        <p className="text-xs text-gray-400">要修改附註，請到「營業」分頁點該日期。</p>
+      </div>
+    </Modal>
   )
 }

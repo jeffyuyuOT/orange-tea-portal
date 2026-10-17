@@ -173,6 +173,21 @@ export async function loadSalesNotesMonth(storeId, year, month) {
   )
 }
 
+// Notes of several stores for a date range (the 營業 總覽 shows a 📝 on days where any store has one).
+export async function loadSalesNotesRange(storeIds, from, to) {
+  if (storeIds.length === 0) return []
+  return fetchAll(() =>
+    supabase
+      .from('bk_sales_notes')
+      .select('store_id, day, note')
+      .in('store_id', storeIds)
+      .gte('day', from)
+      .lte('day', to)
+      .order('store_id')
+      .order('day')
+  )
+}
+
 export async function loadSalesNotesAll(storeIds) {
   if (storeIds.length === 0) return []
   return fetchAll(() => supabase.from('bk_sales_notes').select('store_id, day, note').in('store_id', storeIds).order('store_id').order('day'))
