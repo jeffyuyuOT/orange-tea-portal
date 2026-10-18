@@ -46,21 +46,25 @@ export default function AuditSheet({ data, onChange, editable = false, storeName
 
         {data.items.map((it, i) => (
           <div key={i} className={`space-y-2 border-b border-brand-100 px-4 py-3 ${GRID} md:space-y-0`}>
-            <div className="flex items-start gap-1.5 text-sm font-medium text-gray-900">
-              <span>{it.title}</span>
-              {(it.files ?? []).map((f) => (
-                <a
-                  key={f.path}
-                  href={auditFileUrl(f.path)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={`Open file: ${f.name || f.path}`}
-                  aria-label={`Open file: ${f.name || f.path}`}
-                  className="shrink-0 text-base leading-5 hover:opacity-70"
-                >
-                  📎
-                </a>
-              ))}
+            <div>
+              <div className="text-sm font-medium text-gray-900">{it.title}</div>
+              {(it.files ?? []).length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {it.files.map((f) => (
+                    <a
+                      key={f.path}
+                      href={auditFileUrl(f.path)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Open file: ${f.name || f.path}`}
+                      className="flex items-start gap-1 text-xs font-normal text-brand-700 hover:underline"
+                    >
+                      <span className="shrink-0">📎</span>
+                      <span className="break-all">{f.name || f.path}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="whitespace-pre-wrap text-sm text-gray-600">{it.content}</div>
             <div>

@@ -107,14 +107,19 @@ export default function AuditSettingsPage() {
                 </div>
               )}
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
-                  {it.title}
-                  {(it.files ?? []).map((f) => (
-                    <a key={f.path} href={auditFileUrl(f.path)} target="_blank" rel="noreferrer" title={f.name || 'Open file'} className="hover:opacity-70">
-                      📎
-                    </a>
-                  ))}
-                </div>
+                <div className="text-sm font-medium text-gray-900">{it.title}</div>
+                {(it.files ?? []).map((f) => (
+                  <a
+                    key={f.path}
+                    href={auditFileUrl(f.path)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-0.5 flex items-start gap-1 text-xs text-brand-700 hover:underline"
+                  >
+                    <span className="shrink-0">📎</span>
+                    <span className="break-all">{f.name || f.path}</span>
+                  </a>
+                ))}
                 {it.content && <div className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">{it.content}</div>}
               </div>
               {canEdit && (

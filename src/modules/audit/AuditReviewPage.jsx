@@ -56,10 +56,9 @@ export default function AuditReviewPage() {
     const { data: items, error: err } = await supabase
       .from('audit_items')
       .select('*')
-      .eq('store_id', currentStoreId)
       .order('sort_order')
     if (err) return setError(err.message)
-    if (!items?.length) return setError('There are no audit items for this store yet. Add some in Audit > Settings first.')
+    if (!items?.length) return setError('There are no audit items yet. Add some in Audit > Settings first.')
     setEditing({
       id: null,
       audit_date: brisbaneToday(),
