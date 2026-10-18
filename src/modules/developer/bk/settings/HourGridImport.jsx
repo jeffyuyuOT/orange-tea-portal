@@ -9,7 +9,7 @@ import { hourLabel, matchStore, monthFromSheetName, parseHourGridRows, parseMont
 import { sheetNameForStore } from '../bkImportTemplates'
 import { Notice } from '../bkUi'
 
-// 系統設置 › 匯入 › 小時統計: reads the tab named after each SF / U帳 store (the
+// 系統設置 › 匯入 › 小時統計: reads the tab named after each 營業 store (the
 // template has one tab per store; rows = dates, columns = hours, already-summed
 // 營業額) and writes straight to the database, all dates found.
 export default function HourGridImport({ file, stores, onImported, onClose }) {

@@ -215,7 +215,7 @@ export default function BkPage() {
           {visited.has('hours') && (
             <div className={tab === 'hours' ? '' : 'hidden'}>
               <Suspense fallback={<LoadingSpinner />}>
-                <HoursTab stores={stores} topActive={tab === 'hours'} />
+                <HoursTab stores={salesStores} topActive={tab === 'hours'} />
               </Suspense>
             </div>
           )}

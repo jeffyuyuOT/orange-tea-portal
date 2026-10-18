@@ -42,7 +42,7 @@ const SUBTABS = [
 const TEMPLATES = [
   ['SF', (stores) => downloadSfTemplate(stores)],
   ['營業', (stores, salesStores) => downloadBizTemplate(salesStores)],
-  ['小時統計', (stores) => downloadHourTemplate(stores)],
+  ['小時統計', (stores, salesStores) => downloadHourTemplate(salesStores)],
   ['U帳', () => downloadUAccountTemplate()],
   ['收成', () => downloadDividendTemplate()],
   ['積欠 Jeff', () => downloadJeffOwedTemplate()],
@@ -233,7 +233,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
               </select>
               <Button
                 variant="secondary"
-                disabled={((templateChoice === 'SF' || templateChoice === '小時統計') && stores.length === 0) || (templateChoice === '營業' && salesStores.length === 0)}
+                disabled={(templateChoice === 'SF' && stores.length === 0) || ((templateChoice === '營業' || templateChoice === '小時統計') && salesStores.length === 0)}
                 onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores, salesStores)}
               >
                 下載範本
@@ -246,9 +246,9 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
             )}
             {templateChoice === '小時統計' && (
               <div className="text-xs text-gray-500">
-                {stores.length === 0
-                  ? '還沒有任何分店，無法產生小時統計範本。'
-                  : '小時統計範本每個分店（SF / U帳 的分店）各自一個分頁，列是日期、欄是小時（用 系統設置 › 小時統計 設定的時段），數字填 POS 和自動點單已加總的營業額。'}
+                {salesStores.length === 0
+                  ? '還沒有任何營業分店，無法產生小時統計範本。'
+                  : '小時統計範本每個營業分店各自一個分頁，列是日期、欄是小時（用 系統設置 › 小時統計 設定的時段），數字填 POS 和自動點單已加總的營業額。'}
               </div>
             )}
             {templateChoice === 'SF' && (
@@ -330,10 +330,10 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
                   ))}
 
                 {kind === 'hours' &&
-                  (stores.length === 0 ? (
-                    <Notice kind="info">還沒有任何分店，無法匯入小時統計。</Notice>
+                  (salesStores.length === 0 ? (
+                    <Notice kind="info">還沒有任何營業分店，無法匯入小時統計。</Notice>
                   ) : (
-                    <HourGridImport file={file} stores={stores} onClose={reset} onImported={(count) => imported(count, '小時統計')} />
+                    <HourGridImport file={file} stores={salesStores} onClose={reset} onImported={(count) => imported(count, '小時統計')} />
                   ))}
 
                 {kind === 'u' &&
@@ -464,7 +464,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
         />
       </div>
 
-      {sub === 'hours' && <HourSettings stores={stores} />}
+      {sub === 'hours' && <HourSettings stores={salesStores} />}
       {sub === 'biz' && <BizStoreManager salesStores={salesStores} sfStores={stores} onChanged={onSalesStoresChanged} />}
 
       <div className={sub === 'bonus' ? '' : 'hidden'}>

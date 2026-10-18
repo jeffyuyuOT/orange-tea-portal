@@ -14,7 +14,7 @@ const HOUR_W = 66
 const money = (v) => (v === null || v === undefined ? '' : fmtMoney(v))
 
 // 小時統計: every day of a month × every hour (the hours set for the store in
-// 系統設置 › 小時統計), 營業額 = POS + 自動點單. Stores are the SF / U帳 list.
+// 系統設置 › 小時統計), 營業額 = POS + 自動點單. Stores are the 營業 stores.
 export default function HoursTab({ stores, topActive = true }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(null) // null = 全部分店
@@ -71,7 +71,7 @@ export default function HoursTab({ stores, topActive = true }) {
   }
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
   }
 
   const cols = hours.length + 1 + (stats.outsideAny ? 1 : 0)

@@ -191,13 +191,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   }
 
   // 小時統計 button of a detail row. spec = { type:'day', date } | { type:'weekday', index, year, filter }.
-  // Hour data is keyed by the SF / U帳 stores, so the chosen 營業 stores are mapped through their SF link.
   async function openHours(spec, title) {
-    const ids = scopeIds.map((id) => salesStores.find((s) => s.id === id)?.sf_store_id).filter(Boolean)
-    if (ids.length === 0) {
-      setHourView({ title, message: '這家店沒有連到 SF / U帳 的分店，所以沒有小時營業額資料。' })
-      return
-    }
+    const ids = scopeIds
     setHourView({ title, loading: true })
     try {
       const from = spec.type === 'day' ? spec.date : `${spec.year}-01-01`

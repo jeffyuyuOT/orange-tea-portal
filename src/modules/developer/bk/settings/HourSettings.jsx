@@ -8,7 +8,7 @@ import { Field, Notice, StoreTabs, inputCls } from '../bkUi'
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 
 // 系統設置 › 小時統計: the hours each store shows on the 小時統計 page. The stores
-// are the SF / U帳 list (系統設置 › SF › 分店管理); a store with nothing saved
+// are the 營業 stores (系統設置 › 營業 › 分店管理); a store with nothing saved
 // uses the default.
 export default function HourSettings({ stores }) {
   const [storeId, setStoreId] = useState(stores[0]?.id ?? null)
@@ -32,7 +32,7 @@ export default function HourSettings({ stores }) {
     setMsg('')
   }, [settings, storeId])
 
-  if (stores.length === 0) return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
+  if (stores.length === 0) return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
   if (!settings) return error ? <Notice kind="error">{error}</Notice> : <LoadingSpinner />
 
   const saved = settings[storeId]
