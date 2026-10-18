@@ -97,7 +97,7 @@ export default function HoursTab({ stores, topActive = true }) {
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />
       <div className="flex flex-wrap items-center gap-3">
         <YearMonthPicker year={year} month={month} onChange={(v) => (setYear(v.year), setMonth(v.month))} />
-        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定。點日期可看當天的小時分佈圖（可複製／下載圖片）</span>
+        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定。點日期可看當天的小時分佈圖（可複製圖片／表格）</span>
         <div className="ml-auto">
           <Button variant="secondary" onClick={() => setImporting(true)}>
             匯入
@@ -146,7 +146,7 @@ export default function HoursTab({ stores, topActive = true }) {
                         disabled={!has}
                         onClick={() => openDay(date)}
                         className="flex w-full items-center gap-1 px-1.5 py-1 text-left enabled:hover:bg-brand-50 enabled:hover:underline"
-                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片）' : undefined}
+                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片／表格）' : undefined}
                       >
                         <span className="font-medium">{Number(date.slice(8))}</span>
                         <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
