@@ -99,6 +99,18 @@ export const SECTIONS = {
       settings: 'Setting',
     },
   },
+  // Jeff, 2026-10-18: per-store audit checklists. Shop manager and above only
+  // (staff/training/etc. never get these keys, so the pages' code is never even
+  // downloaded for them — routes are lazy — and nothing is queried). Settings is
+  // admin/developer only, same exclusion treatment as other settings pages.
+  audit: {
+    label: 'Audit',
+    pages: {
+      review: 'Review',
+      history: 'History',
+      settings: 'Settings',
+    },
+  },
   admin_center: {
     label: 'Admin Center',
     pages: {
@@ -200,6 +212,7 @@ const ROLE_DEFAULTS = {
         'admin_center.system_setting',
         'admin_center.training_journey_setting',
         'shop_management.qr_code',
+        'audit.settings',
         'developer_tools.payroll',
         'developer_tools.bk',
       ].includes(key)

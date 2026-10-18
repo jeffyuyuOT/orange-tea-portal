@@ -31,6 +31,10 @@ const RosterHistoryPage = lazy(() => import('../modules/roster-hub/history/Roste
 const LeaveManagementPage = lazy(() => import('../modules/roster-hub/leave-management/LeaveManagementPage'))
 const RosterSettingsPage = lazy(() => import('../modules/roster-hub/settings/RosterSettingsPage'))
 
+const AuditReviewPage = lazy(() => import('../modules/audit/AuditReviewPage'))
+const AuditHistoryPage = lazy(() => import('../modules/audit/AuditHistoryPage'))
+const AuditSettingsPage = lazy(() => import('../modules/audit/AuditSettingsPage'))
+
 const FormulaDatabasePage = lazy(() => import('../modules/admin-center/formula-database/FormulaDatabasePage'))
 const AdminQuizBankPage = lazy(() => import('../modules/admin-center/quiz-bank/AdminQuizBankPage'))
 const FileRepositoryPage = lazy(() => import('../modules/admin-center/file-repository/FileRepositoryPage'))
@@ -153,6 +157,10 @@ export default function AppRoutes() {
         <Route path="/roster-hub/history" element={guarded('roster_hub.history', <RosterHistoryPage />)} />
         <Route path="/roster-hub/leave-management" element={guarded('roster_hub.leave_management', <LeaveManagementPage />)} />
         <Route path="/roster-hub/settings" element={guarded('roster_hub.settings', <RosterSettingsPage />)} />
+
+        <Route path="/audit/review" element={guarded('audit.review', <AuditReviewPage />)} />
+        <Route path="/audit/history" element={guarded('audit.history', <AuditHistoryPage />)} />
+        <Route path="/audit/settings" element={guarded('audit.settings', <AuditSettingsPage />)} />
 
         <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
         <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <AdminQuizBankPage />)} />

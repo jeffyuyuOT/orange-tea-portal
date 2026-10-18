@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { supabase } from '../../lib/supabaseClient'
 import { canAccessSection, canAccessPage } from '../../lib/permissions'
 import { orderedSectionEntries, logicalPageEntries } from '../../lib/sidebarOrder'
 import { useAuth } from '../../lib/AuthContext'
@@ -13,9 +15,47 @@ import Badge from '../ui/Badge'
 // in Admin Center > System Setting, rather than SECTIONS' own literal order
 // in permissions.js.
 export function SidebarNavLinks({ onNavigate }) {
-  const { effectivePages, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, sidebarOrder } =
-    useAuth()
+  const {
+    effectivePages,
+    rosterUpdates,
+    hasFormulaUpdates,
+    hasBulletinUpdates,
+    unreadMessageCount,
+    hasTimeDiscrepancies,
+    sidebarOrder,
+    profile,
+    currentStoreId,
+  } = useAuth()
   const { pathname } = useLocation()
+
+  // Jeff, 2026-10-18: red dot on Audit > Review for a shop manager when an
+  // audit at this store is waiting for their signature. Only queried for
+  // someone who actually has the page AND is a shop manager — everyone else
+  // (staff, training, …) never touches audit data at login.
+  const [auditPending, setAuditPending] = useState(false)
+  const watchAudit = profile?.role === 'shop_manager' && !!currentStoreId && canAccessPage(effectivePages, 'audit.review')
+  useEffect(() => {
+    if (!watchAudit) {
+      setAuditPending(false)
+      return undefined
+    }
+    let cancelled = false
+    const check = () =>
+      supabase
+        .from('audit_reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('store_id', currentStoreId)
+        .eq('status', 'pending_confirmation')
+        .then(({ count }) => {
+          if (!cancelled) setAuditPending((count ?? 0) > 0)
+        })
+    check()
+    window.addEventListener('audit-changed', check)
+    return () => {
+      cancelled = true
+      window.removeEventListener('audit-changed', check)
+    }
+  }, [watchAudit, currentStoreId, pathname])
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -104,6 +144,9 @@ export function SidebarNavLinks({ onNavigate }) {
                         Same plain dot treatment as Bulletin's above, for the
                         same reason (no single word covers "some staff
                         member's hours don't add up"). */}
+                    {fullKey === 'audit.review' && auditPending && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" aria-label="Update" />
+                    )}
                     {fullKey === 'shop_management.staff_time_logs' && hasTimeDiscrepancies && (
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" aria-label="Update" />
                     )}
