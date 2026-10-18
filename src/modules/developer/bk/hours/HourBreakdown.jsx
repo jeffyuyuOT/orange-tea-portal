@@ -25,12 +25,46 @@ function sheetData(view) {
     return [String(h), v > 0 ? money2(v) : '']
   })
   const total = view.hours.reduce((sum, h) => sum + (view.values[h] ?? 0), 0)
-  return { header: ['SP hour', sheetHeader(view)], rows, total: ['Total', money2(total)] }
+  return { header: ['Hour', sheetHeader(view)], rows, total: ['Total', money2(total)] }
 }
-// Tab-separated, so Excel / Google Sheets drop it into cells.
-function sheetText(view) {
+// Draw the table (with grid lines) onto a canvas -> PNG, for chat apps like LINE that only paste images.
+function tablePng(view) {
   const { header, rows, total } = sheetData(view)
-  return [header, ...rows, [''], total].map((r) => r.join('\t')).join('\n')
+  const all = [header, ...rows, ['', ''], total]
+  const sc = 2, rowH = 26, w0 = 70, w1 = 90
+  const c = document.createElement('canvas')
+  c.width = (w0 + w1) * sc
+  c.height = all.length * rowH * sc
+  const g = c.getContext('2d')
+  g.scale(sc, sc)
+  g.fillStyle = '#fff'
+  g.fillRect(0, 0, w0 + w1, all.length * rowH)
+  g.font = '14px Calibri, Arial, sans-serif'
+  g.textBaseline = 'middle'
+  all.forEach((r, i) => {
+    const y = i * rowH
+    const isTotal = i === all.length - 1
+    if (i === 0) {
+      g.fillStyle = '#f2f2f2'
+      g.fillRect(0, y, w0 + w1, rowH)
+    }
+    g.fillStyle = '#000'
+    g.font = `${i === 0 || isTotal ? 'bold ' : ''}14px Calibri, Arial, sans-serif`
+    g.textAlign = i === 0 ? 'left' : 'right'
+    g.fillText(r[0], i === 0 ? 8 : w0 - 8, y + rowH / 2)
+    g.font = `${i === 0 || isTotal ? 'bold ' : ''}14px Calibri, Arial, sans-serif`
+    g.textAlign = 'right'
+    g.fillText(r[1], w0 + w1 - 8, y + rowH / 2)
+  })
+  g.strokeStyle = '#000'
+  g.lineWidth = 1
+  for (let i = 0; i <= all.length; i++) {
+    g.beginPath(); g.moveTo(0, i * rowH + 0.5); g.lineTo(w0 + w1, i * rowH + 0.5); g.stroke()
+  }
+  for (const x of [0.5, w0 + 0.5, w0 + w1 - 0.5]) {
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, all.length * rowH); g.stroke()
+  }
+  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('無法產生圖片'))), 'image/png'))
 }
 
 // The hourly 營業額 of one day, or the per-hour average of several days
@@ -68,27 +102,26 @@ export default function HourBreakdown({ view, onClose }) {
       setMsg('瀏覽器不允許直接複製，已改成下載圖片。')
     }
   }
-  // Copy the lower table as tab-separated text, for pasting into a spreadsheet.
-  async function copyTable() {
-    const text = sheetText(view)
+  // LINE and other chat apps only take images, so copy the table as a PNG with grid lines.
+  async function copyTableImage() {
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': tablePng(view) })])
+      setMsg('已複製表格圖片（含格線），可以直接貼到 LINE。')
     } catch {
-      // Older / stricter browsers: select a hidden textarea and use the legacy copy command.
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      const ok = document.execCommand('copy')
-      ta.remove()
-      if (!ok) {
-        setMsg('瀏覽器不允許複製。')
-        return
+      try {
+        const blob = await tablePng(view)
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = 'hour-table.png'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+        setMsg('瀏覽器不允許直接複製，已改成下載表格圖片。')
+      } catch (e) {
+        setMsg(e.message)
       }
     }
-    setMsg('已複製表格，可以直接貼到 Excel。')
   }
   const sheet = view?.values && view.days > 0 ? sheetData(view) : null
   return (
@@ -97,25 +130,23 @@ export default function HourBreakdown({ view, onClose }) {
       wide
       onClose={() => (setMsg(''), onClose())}
       title={view?.title ?? ''}
-      footer={
-        <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-green-700">{msg}</span>
-          <div className="flex gap-2">
-            {view?.values && view.days > 0 && (
-              <>
-                <Button variant="secondary" onClick={copyTable}>
-                  複製表格
-                </Button>
-                <Button variant="secondary" onClick={copy}>
-                  複製圖片
-                </Button>
-              </>
-            )}
-            <Button onClick={() => (setMsg(''), onClose())}>關閉</Button>
-          </div>
-        </div>
-      }
     >
+      <div className="sticky top-0 z-10 -mx-5 -mt-4 mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-white px-5 py-2">
+        <span className="text-xs text-green-700">{msg}</span>
+        <div className="flex gap-2">
+          {view?.values && view.days > 0 && (
+            <>
+              <Button variant="secondary" onClick={copyTableImage}>
+                複製表格
+              </Button>
+              <Button variant="secondary" onClick={copy}>
+                複製圖片
+              </Button>
+            </>
+          )}
+          <Button onClick={() => (setMsg(''), onClose())}>關閉</Button>
+        </div>
+      </div>
       {view?.loading && <LoadingSpinner />}
       {view?.message && <p className="text-sm text-gray-500">{view.message}</p>}
       {view?.values && (
@@ -154,7 +185,7 @@ export default function HourBreakdown({ view, onClose }) {
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-gray-400">這張表的格式跟 Excel 的 SP hour 表一樣，按「複製表格」可直接貼上。</p>
+            <p className="text-xs text-gray-400">這張表的格式跟 Excel 的 Hour 表一樣，按「複製表格」可複製成帶格線的圖片，直接貼上。</p>
             </>
           )}
         </div>

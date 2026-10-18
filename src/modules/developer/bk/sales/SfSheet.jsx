@@ -6,7 +6,6 @@ import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import {
   buildColumns,
   computeSfDay,
-  columnCopyText,
   computeSfTotals,
   countSfDataDays,
   dMapFromRows,
@@ -33,6 +32,7 @@ import { loadSalesMonth } from '../bkSalesData'
 import { selfOMapFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import ImportByImage from './ImportByImage'
+import MyobFillModal from './MyobFillModal'
 
 const emptyDay = () => ({ o_ca: '', o_post: '', total: '', amounts: {} })
 
@@ -59,7 +59,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
   const [msg, setMsg] = useState('')
   const [problems, setProblems] = useState(null)
   const [mismatch, setMismatch] = useState(null) // { reference, counts: [{ id, name, days }] }
-  const [copied, setCopied] = useState(null) // type id just copied
+  const [myobOpen, setMyobOpen] = useState(false)
   // The saved month row of what is on screen (keyed, so a save can never use another store / month's row)
   const monthKey = `${store.id}|${year}|${month}`
   const sfMonthRef = useRef({ key: '', month: null })
@@ -168,39 +168,6 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
     setDirty(true)
     setMsg('')
   }
-
-  // Copy one column's month of values (1st … last, one per line) to the clipboard.
-  async function copyColumn(typeId, values) {
-    const text = columnCopyText(values)
-    try {
-      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
-      else throw new Error('no clipboard api')
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      ta.remove()
-    }
-    setCopied(typeId)
-    setTimeout(() => setCopied((cur) => (cur === typeId ? null : cur)), 1500)
-  }
-
-  const copyBtn = (type, values) =>
-    type.can_copy ? (
-      <button
-        type="button"
-        onClick={() => copyColumn(type.id, values)}
-        title={copied === type.id ? '已複製' : `複製 ${type.name} 整欄數值`}
-        aria-label={`複製 ${type.name} 整欄數值`}
-        className="absolute right-0.5 top-0.5 rounded px-1 text-xs leading-none text-brand-600 hover:bg-brand-200"
-      >
-        {copied === type.id ? '✓' : '⧉'}
-      </button>
-    ) : null
 
   // Saves run one after another (typing autosave, leaving a store, 儲存, 提交 can overlap).
   function persist(submit, opts) {
@@ -394,6 +361,9 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
           >
             匯出 Excel
           </Button>
+          <Button variant="secondary" onClick={() => setMyobOpen(true)} title="把所有分店這個月的 SF 填進會計用的 Excel">
+            填入會計表
+          </Button>
         </div>
       </div>
 
@@ -432,8 +402,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
               <tr>
                 <th className={`${th} sticky left-0 z-30 bg-brand-100 text-left`}>日期</th>
                 {columns.map((c) => (
-                  <th key={c.id} className={`${th} relative bg-brand-100`}>
-                    {copyBtn(c, rows.map((r) => r.mains[c.id]))}
+                  <th key={c.id} className={`${th} bg-brand-100`}>
                     {c.name}
                     {!c.is_active && <div className="text-[10px] font-normal text-gray-400">(已停用)</div>}
                     {c.subs.length > 0 && <div className="text-[10px] font-normal text-gray-500">= sub 加總</div>}
@@ -447,8 +416,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
                 </th>
                 <th className={`${th} bg-gray-100`}>Sum vs Total</th>
                 {subs.map((s) => (
-                  <th key={s.id} className={`${th} relative bg-sky-50`}>
-                    {copyBtn(s, rows.map((r) => r.subAmounts[s.id]))}
+                  <th key={s.id} className={`${th} bg-sky-50`}>
                     {s.name}
                     <div className="text-[10px] font-normal text-gray-500">{s.parentName}</div>
                   </th>
@@ -669,6 +637,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
           </div>
         )}
       </Modal>
+      <MyobFillModal open={myobOpen} onClose={() => setMyobOpen(false)} stores={stores} salesStores={salesStores} year={year} month={month} />
     </div>
   )
 }

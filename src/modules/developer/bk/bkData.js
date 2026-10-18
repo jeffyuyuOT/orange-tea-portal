@@ -84,7 +84,6 @@ export async function savePaymentType(storeId, form) {
     kind: form.kind,
     parent_id: form.kind === 'sub' ? form.parent_id : null,
     is_locked: !!form.is_locked,
-    can_copy: !!form.can_copy,
     updated_at: new Date().toISOString(),
   }
   if (form.id) {

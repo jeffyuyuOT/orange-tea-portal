@@ -201,12 +201,6 @@ export function kioskMismatch(sfValue, bizValue) {
   return { sf, biz }
 }
 
-// A column's month of values as clipboard text: one line per day (1st … last,
-// blank line for an empty day) so it pastes straight down an Excel column.
-export function columnCopyText(values) {
-  return values.map((v) => (v === null || v === undefined ? '' : String(round2(v)))).join('\n')
-}
-
 // Column totals for the bottom row.
 export function computeSfTotals(columns, rows) {
   const mains = {}

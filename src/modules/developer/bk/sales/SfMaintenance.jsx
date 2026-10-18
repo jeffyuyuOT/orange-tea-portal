@@ -76,7 +76,6 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
       parent_id: kind === 'sub' ? (firstParent?.id ?? '') : null,
       is_active: true,
       is_locked: false,
-      can_copy: false,
     })
   }
   function openEdit(t) {
@@ -88,7 +87,6 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
       parent_id: t.parent_id,
       is_active: t.is_active,
       is_locked: !!t.is_locked,
-      can_copy: !!t.can_copy,
     })
   }
 
@@ -153,7 +151,6 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
       </div>
       <span className={`font-medium ${t.is_active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{t.name}</span>
       {t.is_locked && <Badge color="gray">鎖定</Badge>}
-      {t.can_copy && <Badge color="brand">可複製</Badge>}
       {!t.is_active && <Badge color="red">已停用</Badge>}
       <Button variant="secondary" className="ml-auto" onClick={() => openEdit(t)}>
         編輯
@@ -165,7 +162,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
     <div className="space-y-4">
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} />
       <Notice kind="info">
-        以下設定只套用在目前這間分店。順序由上到下 = SF 頁面由左到右。Cash、Pos total 與 Self order kiosk 是計算用的欄位，名稱不能改、也不能停用（Total = Pos total + Self order kiosk）。每個 payment type 都可以勾選「鎖定」（鎖定的不能刪除）與「可複製資料」（SF 欄位標題會出現複製圖示）。
+        以下設定只套用在目前這間分店。順序由上到下 = SF 頁面由左到右。Cash、Pos total 與 Self order kiosk 是計算用的欄位，名稱不能改、也不能停用（Total = Pos total + Self order kiosk）。每個 payment type 都可以勾選「鎖定」（鎖定的不能刪除）。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
 
@@ -276,14 +273,6 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
                 onChange={(e) => setEditing({ ...editing, is_locked: e.target.checked })}
               />
               鎖定（鎖定的 payment type 不能刪除；要刪除請先取消鎖定）
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={editing.can_copy}
-                onChange={(e) => setEditing({ ...editing, can_copy: e.target.checked })}
-              />
-              可複製資料（SF 欄位標題右上角會有複製圖示，點一下複製整欄數值，可貼到 Excel）
             </label>
             {isFormula && (
               <Notice kind="info">這是計算用的 payment type，名稱不能改、也不能停用。</Notice>
