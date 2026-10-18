@@ -112,9 +112,12 @@ export function parseSelfHourly(rows) {
 
 // Which bk_store a report's store name points at (exact name or code, ignoring case/space).
 const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, '')
+// The self-order system still calls Brisbane One "WestEnd".
+const STORE_ALIASES = { westend: 'brisbaneone' }
+const aliased = (s) => STORE_ALIASES[norm(s)] ?? norm(s)
 export function matchStore(stores, { storeName, storeCode }) {
-  const n = norm(storeName)
-  const c = norm(storeCode)
+  const n = aliased(storeName)
+  const c = aliased(storeCode)
   return (
     stores.find((s) => n && norm(s.name) === n) ??
     stores.find((s) => c && norm(s.name) === c) ??
