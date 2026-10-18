@@ -33,6 +33,7 @@ import { selfOMapFromRows } from '../bkSalesUtils'
 import { MoneyInput, Notice, StoreTabs, YearMonthPicker } from '../bkUi'
 import ImportByImage from './ImportByImage'
 import MyobFillModal from './MyobFillModal'
+import ReplyAccountantModal from './ReplyAccountantModal'
 
 const emptyDay = () => ({ o_ca: '', o_post: '', total: '', amounts: {} })
 
@@ -60,6 +61,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
   const [problems, setProblems] = useState(null)
   const [mismatch, setMismatch] = useState(null) // { reference, counts: [{ id, name, days }] }
   const [myobOpen, setMyobOpen] = useState(false)
+  const [replyOpen, setReplyOpen] = useState(false)
   // The saved month row of what is on screen (keyed, so a save can never use another store / month's row)
   const monthKey = `${store.id}|${year}|${month}`
   const sfMonthRef = useRef({ key: '', month: null })
@@ -353,17 +355,24 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
         <YearMonthPicker year={year} month={month} onChange={(v) => onNavigate(v)} />
         <Badge color={status.color}>{status.text}</Badge>
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="secondary"
-            disabled={!canExport}
-            onClick={doExport}
-            title={canExport ? '' : '只有已提交且沒有未提交變更的 SF 才能匯出'}
+          <select
+            value=""
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === 'myob') setMyobOpen(true)
+              else if (v === 'reply') setReplyOpen(true)
+              else if (v === 'export') doExport()
+            }}
+            className="rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-700"
+            aria-label="Action"
           >
-            匯出 Excel
-          </Button>
-          <Button variant="secondary" onClick={() => setMyobOpen(true)} title="把所有分店這個月的 SF 填進會計用的 Excel">
-            填入會計表
-          </Button>
+            <option value="">Action</option>
+            <option value="myob">填入會計表</option>
+            <option value="reply">回復會計</option>
+            <option value="export" disabled={!canExport}>
+              匯出 Excel{canExport ? '' : '（要先提交且沒有未提交變更）'}
+            </option>
+          </select>
         </div>
       </div>
 
@@ -637,6 +646,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
           </div>
         )}
       </Modal>
+      <ReplyAccountantModal open={replyOpen} onClose={() => setReplyOpen(false)} stores={stores} />
       <MyobFillModal open={myobOpen} onClose={() => setMyobOpen(false)} stores={stores} salesStores={salesStores} year={year} month={month} />
     </div>
   )
