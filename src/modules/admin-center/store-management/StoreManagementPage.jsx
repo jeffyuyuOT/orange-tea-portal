@@ -23,7 +23,7 @@ export default function StoreManagementPage() {
   const [stores, setStores] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null) // null closed, {} = new, store = edit
-  const [form, setForm] = useState({ name: '', code: '', is_active: true })
+  const [form, setForm] = useState({ name: '', code: '', is_active: true, audit_enabled: false })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // Every File Repository file (grouped by category for the picker below)
@@ -64,14 +64,14 @@ export default function StoreManagementPage() {
   }, [])
 
   function openNew() {
-    setForm({ name: '', code: '', is_active: true })
+    setForm({ name: '', code: '', is_active: true, audit_enabled: false })
     setDocLinks({})
     setError('')
     setEditing({})
   }
 
   async function openEdit(store) {
-    setForm({ name: store.name, code: store.code, is_active: store.is_active })
+    setForm({ name: store.name, code: store.code, is_active: store.is_active, audit_enabled: !!store.audit_enabled })
     setError('')
     setEditing(store)
     const { data } = await supabase
@@ -90,7 +90,7 @@ export default function StoreManagementPage() {
     }
     setSaving(true)
     setError('')
-    const payload = { name: form.name.trim(), code: form.code.trim(), is_active: form.is_active }
+    const payload = { name: form.name.trim(), code: form.code.trim(), is_active: form.is_active, audit_enabled: form.audit_enabled }
     const { data: savedStore, error: err } = editing.id
       ? await supabase.from('stores').update(payload).eq('id', editing.id).select().single()
       : await supabase.from('stores').insert(payload).select().single()
@@ -213,6 +213,20 @@ export default function StoreManagementPage() {
               onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
             />
             Active
+          </label>
+          <label className="flex items-start gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={form.audit_enabled}
+              onChange={(e) => setForm({ ...form, audit_enabled: e.target.checked })}
+            />
+            <span>
+              Audit
+              <span className="block text-xs text-gray-400">
+                Shop managers of this store get the Audit tab, and the store appears in Audit&apos;s store switcher.
+              </span>
+            </span>
           </label>
 
           {editing?.id && (

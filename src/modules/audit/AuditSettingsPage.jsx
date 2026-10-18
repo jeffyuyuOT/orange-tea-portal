@@ -10,9 +10,8 @@ import { auditFileUrl, isAuditAdmin } from './auditUtils'
 const EMPTY = { id: null, title: '', content: '', file_path: null, file_name: null }
 
 export default function AuditSettingsPage() {
-  const { profile, currentStoreId, accessibleStores } = useAuth()
+  const { profile } = useAuth()
   const canEdit = isAuditAdmin(profile)
-  const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
 
   const [items, setItems] = useState(null) // null = loading
   const [form, setForm] = useState(null) // item being added/edited
@@ -20,11 +19,10 @@ export default function AuditSettingsPage() {
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    if (!currentStoreId) return
-    const { data, error: err } = await supabase.from('audit_items').select('*').eq('store_id', currentStoreId).order('sort_order')
+    const { data, error: err } = await supabase.from('audit_items').select('*').order('sort_order')
     if (err) setError(err.message)
     setItems(data ?? [])
-  }, [currentStoreId])
+  }, [])
 
   useEffect(() => {
     setItems(null)
@@ -46,7 +44,7 @@ export default function AuditSettingsPage() {
       ? await supabase.from('audit_items').update(fields).eq('id', form.id)
       : await supabase
           .from('audit_items')
-          .insert({ ...fields, store_id: currentStoreId, sort_order: items.length ? Math.max(...items.map((i) => i.sort_order)) + 1 : 0 })
+          .insert({ ...fields, sort_order: items.length ? Math.max(...items.map((i) => i.sort_order)) + 1 : 0 })
     if (err) return setError(err.message)
     setForm(null)
     await load()
@@ -82,8 +80,7 @@ export default function AuditSettingsPage() {
         {canEdit && <Button onClick={() => setForm({ ...EMPTY })}>+ Add item</Button>}
       </div>
       <p className="mb-4 text-sm text-gray-500">
-        The items that appear on every new audit for <span className="font-medium text-gray-700">{storeName}</span>. Changes only affect
-        audits created afterwards.
+        The items that appear on every new audit, for all stores. Changes only affect audits created afterwards.
       </p>
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
 

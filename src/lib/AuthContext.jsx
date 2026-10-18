@@ -183,11 +183,11 @@ export function AuthProvider({ children }) {
       (async () => {
         // developer is admin's superset (see permissions.js / migration
         // 0058_developer_is_admin_superset.sql) — sees every store.
-        if (isWide) return must(await supabase.from('stores').select('id, name, code').eq('is_active', true))
+        if (isWide) return must(await supabase.from('stores').select('id, name, code, audit_enabled').eq('is_active', true))
         const [userStoreRows, primaryRow] = await Promise.all([
-          supabase.from('user_stores').select('store_id, stores ( id, name, code )').eq('profile_id', userId).then(must),
+          supabase.from('user_stores').select('store_id, stores ( id, name, code, audit_enabled )').eq('profile_id', userId).then(must),
           profileRow.primary_store_id
-            ? supabase.from('stores').select('id, name, code').eq('id', profileRow.primary_store_id).then(must)
+            ? supabase.from('stores').select('id, name, code, audit_enabled').eq('id', profileRow.primary_store_id).then(must)
             : Promise.resolve([]),
         ])
         const byId = new Map()
@@ -574,7 +574,17 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }, [])
 
-  const effectivePages = useMemo(() => getEffectivePages(profile, overrides), [profile, overrides])
+  // Jeff, 2026-10-18: Audit is switched on per store (Store Management). Anyone
+  // other than admin/developer only has the Audit pages while at least one of
+  // their stores has it on — otherwise they don't see the tab at all.
+  const effectivePages = useMemo(() => {
+    const pages = getEffectivePages(profile, overrides)
+    const seesAllStores = profile?.role === 'admin' || profile?.role === 'developer'
+    if (!seesAllStores && !accessibleStores.some((s) => s.audit_enabled)) {
+      for (const key of Array.from(pages)) if (key.startsWith('audit.')) pages.delete(key)
+    }
+    return pages
+  }, [profile, overrides, accessibleStores])
 
   const value = {
     session,

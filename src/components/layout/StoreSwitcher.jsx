@@ -1,7 +1,11 @@
+import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext'
 
 export default function StoreSwitcher() {
-  const { accessibleStores, currentStoreId, setCurrentStoreId } = useAuth()
+  const { accessibleStores: allStores, currentStoreId, setCurrentStoreId } = useAuth()
+  // Inside Audit only stores with Audit switched on (Store Management) are offered.
+  const onAudit = useLocation().pathname.startsWith('/audit')
+  const accessibleStores = onAudit ? allStores.filter((s) => s.audit_enabled) : allStores
 
   if (accessibleStores.length <= 1) {
     return accessibleStores.length === 1 ? (

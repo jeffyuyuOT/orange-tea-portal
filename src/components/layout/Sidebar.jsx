@@ -24,16 +24,15 @@ export function SidebarNavLinks({ onNavigate }) {
     hasTimeDiscrepancies,
     sidebarOrder,
     profile,
-    currentStoreId,
   } = useAuth()
   const { pathname } = useLocation()
 
   // Jeff, 2026-10-18: red dot on Audit > Review for a shop manager when an
-  // audit at this store is waiting for their signature. Only queried for
+  // audit at one of their stores is waiting for their signature. Only queried for
   // someone who actually has the page AND is a shop manager — everyone else
   // (staff, training, …) never touches audit data at login.
   const [auditPending, setAuditPending] = useState(false)
-  const watchAudit = profile?.role === 'shop_manager' && !!currentStoreId && canAccessPage(effectivePages, 'audit.review')
+  const watchAudit = profile?.role === 'shop_manager' && canAccessPage(effectivePages, 'audit.review')
   useEffect(() => {
     if (!watchAudit) {
       setAuditPending(false)
@@ -44,7 +43,6 @@ export function SidebarNavLinks({ onNavigate }) {
       supabase
         .from('audit_reports')
         .select('id', { count: 'exact', head: true })
-        .eq('store_id', currentStoreId)
         .eq('status', 'pending_confirmation')
         .then(({ count }) => {
           if (!cancelled) setAuditPending((count ?? 0) > 0)
@@ -55,7 +53,7 @@ export function SidebarNavLinks({ onNavigate }) {
       cancelled = true
       window.removeEventListener('audit-changed', check)
     }
-  }, [watchAudit, currentStoreId, pathname])
+  }, [watchAudit, pathname])
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">

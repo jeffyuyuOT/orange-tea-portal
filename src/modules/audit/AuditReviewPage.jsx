@@ -5,6 +5,7 @@ import { rosterDisplayName } from '../../lib/excelRoster'
 import Button from '../../components/ui/Button'
 import Badge from '../../components/ui/Badge'
 import LoadingSpinner, { EmptyState } from '../../components/ui/LoadingSpinner'
+import { useAuditStore } from './useAuditStore'
 import SignaturePad from './SignaturePad'
 import AuditSheet from './AuditSheet'
 import { brisbaneToday, formatAuditDate, formatAuditDateTime, isAuditAdmin, reportToSheetData } from './auditUtils'
@@ -12,10 +13,10 @@ import { brisbaneToday, formatAuditDate, formatAuditDateTime, isAuditAdmin, repo
 export const AUDIT_CHANGED_EVENT = 'audit-changed'
 
 export default function AuditReviewPage() {
-  const { profile, currentStoreId, accessibleStores } = useAuth()
+  const { profile } = useAuth()
+  const { storeId: currentStoreId, storeName, hasAuditStores } = useAuditStore()
   const isAdmin = isAuditAdmin(profile)
   const isManager = profile?.role === 'shop_manager'
-  const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
 
   const [reports, setReports] = useState(null) // null = loading
   const [editing, setEditing] = useState(null) // admin: sheet data being filled in
@@ -244,6 +245,8 @@ export default function AuditReviewPage() {
       </div>
     )
   }
+
+  if (!hasAuditStores) return <EmptyState label="Audit isn't switched on for any of your stores." />
 
   return (
     <div>

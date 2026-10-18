@@ -101,7 +101,9 @@ export default function AppShell() {
   // the same — that app has its own separate notion of "store" entirely
   // unrelated to OT Portal's stores, so the switcher would be misleading
   // there too.
-  const isAdminCenter = location.pathname.startsWith('/admin-center') || location.pathname.startsWith('/developer-tools')
+  const isAdminCenter = location.pathname.startsWith('/admin-center') || location.pathname.startsWith('/developer-tools') ||
+    // Audit Settings is one form shared by every store.
+    location.pathname === '/audit/settings'
 
   // Below the sidebar's md breakpoint there was previously no way at all to
   // reach anything but whatever page you landed on — the sidebar (and every

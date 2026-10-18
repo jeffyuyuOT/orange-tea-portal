@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import { useAuth } from '../../lib/AuthContext'
 import Modal from '../../components/ui/Modal'
 import Badge from '../../components/ui/Badge'
 import LoadingSpinner, { EmptyState } from '../../components/ui/LoadingSpinner'
+import { useAuditStore } from './useAuditStore'
 import AuditSheet from './AuditSheet'
 import { formatAuditDate, reportToSheetData } from './auditUtils'
 
 export default function AuditHistoryPage() {
-  const { currentStoreId, accessibleStores } = useAuth()
-  const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
+  const { storeId: currentStoreId, storeName, hasAuditStores } = useAuditStore()
   const [reports, setReports] = useState(null) // null = loading
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState('')
@@ -31,6 +30,8 @@ export default function AuditHistoryPage() {
         setReports(data ?? [])
       })
   }, [currentStoreId])
+
+  if (!hasAuditStores) return <EmptyState label="Audit isn't switched on for any of your stores." />
 
   return (
     <div>
