@@ -99,6 +99,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     Object.entries(overrides).map(([page_key, allowed]) => ({ page_key, allowed }))
   )
 
+  // Jeff, 2026-10-18: Audit is switched on per store (Store Management). A
+  // non-admin only gets the Audit pages if one of THEIR stores has it on, so
+  // the checkboxes are locked off until then (AuthContext.jsx applies the same
+  // rule to what the person actually sees).
+  const auditAvailable =
+    role === 'admin' ||
+    role === 'developer' ||
+    [storeId, ...extraStoreIds].some((id) => id && accessibleStores.find((s) => s.id === id)?.audit_enabled)
+
   function togglePage(pageKey, roleDefault) {
     setOverrides((prev) => {
       const current = pageKey in prev ? prev[pageKey] : roleDefault
@@ -302,13 +311,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
             <div className="flex flex-wrap gap-3">
               {Object.entries(section.pages).map(([pageKey, pageLabel]) => {
                 const fullKey = `${sectionKey}.${pageKey}`
-                const checked = effective.has(fullKey)
+                const auditLocked = sectionKey === 'audit' && !auditAvailable
+                const checked = effective.has(fullKey) && !auditLocked
                 const isOverridden = fullKey in overrides
                 return (
                   <label key={fullKey} className={`flex items-center gap-1.5 text-sm ${isOverridden ? 'text-brand-700 font-medium' : 'text-gray-600'}`}>
                     <input
                       type="checkbox"
                       checked={checked}
+                      disabled={auditLocked}
                       onChange={() => {
                         const roleDefaultSet = getEffectivePages({ role }, [])
                         togglePage(fullKey, roleDefaultSet.has(fullKey))
@@ -319,6 +330,11 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                   </label>
                 )
               })}
+              {sectionKey === 'audit' && !auditAvailable && (
+                <p className="w-full text-xs text-gray-400">
+                  Audit isn&apos;t switched on for this person&apos;s store(s). Tick Audit on the store in Store Management first.
+                </p>
+              )}
               {sectionKey === 'shop_management' && (
                 <>
                   {/* Jeff, 2026-09-30: "Edit attendance logs和Staff
