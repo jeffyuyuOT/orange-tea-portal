@@ -48,17 +48,19 @@ export default function AuditSheet({ data, onChange, editable = false, storeName
           <div key={i} className={`space-y-2 border-b border-brand-100 px-4 py-3 ${GRID} md:space-y-0`}>
             <div className="flex items-start gap-1.5 text-sm font-medium text-gray-900">
               <span>{it.title}</span>
-              {it.file_path && (
+              {(it.files ?? []).map((f) => (
                 <a
-                  href={auditFileUrl(it.file_path)}
+                  key={f.path}
+                  href={auditFileUrl(f.path)}
                   target="_blank"
                   rel="noreferrer"
-                  title={it.file_name ? `Open file: ${it.file_name}` : 'Open file'}
+                  title={`Open file: ${f.name || f.path}`}
+                  aria-label={`Open file: ${f.name || f.path}`}
                   className="shrink-0 text-base leading-5 hover:opacity-70"
                 >
                   📎
                 </a>
-              )}
+              ))}
             </div>
             <div className="whitespace-pre-wrap text-sm text-gray-600">{it.content}</div>
             <div>

@@ -7,7 +7,7 @@ import FileRepositoryPicker from '../../components/ui/FileRepositoryPicker'
 import LoadingSpinner, { EmptyState } from '../../components/ui/LoadingSpinner'
 import { auditFileUrl, isAuditAdmin } from './auditUtils'
 
-const EMPTY = { id: null, title: '', content: '', file_path: null, file_name: null }
+const EMPTY = { id: null, title: '', content: '', files: [] }
 
 export default function AuditSettingsPage() {
   const { profile } = useAuth()
@@ -37,8 +37,7 @@ export default function AuditSettingsPage() {
     const fields = {
       title: form.title.trim(),
       content: form.content.trim() || null,
-      file_path: form.file_path,
-      file_name: form.file_name,
+      files: form.files,
     }
     const { error: err } = form.id
       ? await supabase.from('audit_items').update(fields).eq('id', form.id)
@@ -110,11 +109,11 @@ export default function AuditSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
                   {it.title}
-                  {it.file_path && (
-                    <a href={auditFileUrl(it.file_path)} target="_blank" rel="noreferrer" title={it.file_name || 'Open file'} className="hover:opacity-70">
+                  {(it.files ?? []).map((f) => (
+                    <a key={f.path} href={auditFileUrl(f.path)} target="_blank" rel="noreferrer" title={f.name || 'Open file'} className="hover:opacity-70">
                       📎
                     </a>
-                  )}
+                  ))}
                 </div>
                 {it.content && <div className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">{it.content}</div>}
               </div>
@@ -159,21 +158,27 @@ export default function AuditSettingsPage() {
               <textarea rows={5} className="input" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Linked file (optional)</label>
-              {form.file_path ? (
-                <div className="flex items-center gap-2 text-sm">
-                  <span>📎</span>
-                  <span className="truncate text-gray-700">{form.file_name || form.file_path}</span>
-                  <button className="ml-auto text-xs font-medium text-red-600 hover:text-red-800" onClick={() => setForm({ ...form, file_path: null, file_name: null })}>
-                    Remove
-                  </button>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Linked files (optional)</label>
+              {form.files.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {form.files.map((f) => (
+                    <div key={f.path} className="flex items-center gap-2 text-sm">
+                      <span>📎</span>
+                      <span className="truncate text-gray-700">{f.name || f.path}</span>
+                      <button
+                        className="ml-auto shrink-0 text-xs font-medium text-red-600 hover:text-red-800"
+                        onClick={() => setForm({ ...form, files: form.files.filter((x) => x.path !== f.path) })}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <Button variant="secondary" onClick={() => setPickingFile(true)}>
-                  + From File Repository
-                </Button>
               )}
-              <p className="mt-1 text-xs text-gray-400">A 📎 icon shows next to this item on the audit sheet and opens the file.</p>
+              <Button variant="secondary" onClick={() => setPickingFile(true)}>
+                + From File Repository
+              </Button>
+              <p className="mt-1 text-xs text-gray-400">Each linked file shows as a 📎 icon next to this item on the audit sheet and opens the file.</p>
             </div>
           </div>
         )}
@@ -184,7 +189,11 @@ export default function AuditSettingsPage() {
           accept="all"
           onClose={() => setPickingFile(false)}
           onSelect={(f) => {
-            setForm((cur) => ({ ...cur, file_path: f.file_path, file_name: f.display_name }))
+            setForm((cur) =>
+              cur.files.some((x) => x.path === f.file_path)
+                ? cur
+                : { ...cur, files: [...cur.files, { path: f.file_path, name: f.display_name }] }
+            )
             setPickingFile(false)
           }}
         />

@@ -43,8 +43,7 @@ export function reportToSheetData(report) {
       .map((it) => ({
         title: it.title,
         content: it.content,
-        file_path: it.file_path,
-        file_name: it.file_name,
+        files: Array.isArray(it.files) ? it.files : [],
         comment: it.comment ?? '',
         audited: !!it.audited,
       })),
