@@ -4,6 +4,7 @@ import { useAuth } from '../../../../lib/AuthContext'
 import Button from '../../../../components/ui/Button'
 import Badge from '../../../../components/ui/Badge'
 import Modal from '../../../../components/ui/Modal'
+import ClampedText from '../../../../components/ui/ClampedText'
 import { EmptyState } from '../../../../components/ui/LoadingSpinner'
 import QuestionEditModal from './QuestionEditModal'
 
@@ -156,21 +157,23 @@ export default function QuizBankPage() {
       ) : (
         <div className="mb-5 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-gray-50">
           {adminQuestions.map((q) => (
-            <div key={q.id} className="flex items-center gap-2 px-4 py-2.5 opacity-80">
+            <div key={q.id} className="flex items-start gap-2 px-4 py-2.5 opacity-80">
               {q.image_path && (
                 <img
                   src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
                   alt=""
-                  className="h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
+                  className="mt-0.5 h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
                 />
               )}
-              <span className="text-sm text-gray-700">{q.question}</span>
-              <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'} className="ml-2">
-                {TYPE_LABEL[q.question_type] ?? 'Single choice'}
-              </Badge>
-              <Badge color="gray" className="ml-1">
-                Importance {q.importance}
-              </Badge>
+              <div className="min-w-0 flex-1">
+                <ClampedText text={q.question} title="Question" className="text-sm text-gray-700" />
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'}>
+                    {TYPE_LABEL[q.question_type] ?? 'Single choice'}
+                  </Badge>
+                  <Badge color="gray">Importance {q.importance}</Badge>
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -192,33 +195,42 @@ export default function QuizBankPage() {
             // flex-wrap + min-w-0 on the title button lets the action
             // cluster drop to its own (right-aligned via ml-auto) line on
             // narrow screens instead of overflowing.
-            <div key={q.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-              <button onClick={() => setEditing(q)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+            <div key={q.id} className="flex items-start gap-2 px-4 py-2.5">
+              <div onClick={() => setEditing(q)} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-left">
                 {q.image_path && (
-                  <img
-                    src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
-                    alt=""
-                    className="h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
-                  />
-                )}
-                <span className="text-sm text-gray-800">{q.question}</span>
-                <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'} className="ml-2">
-                  {TYPE_LABEL[q.question_type] ?? 'Single choice'}
-                </Badge>
-                <Badge color="gray" className="ml-1">
-                  Importance {q.importance}
-                </Badge>
-              </button>
-              <div className="ml-auto flex shrink-0 items-center gap-1">
+                <img
+                  src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
+                  alt=""
+                  className="mt-0.5 h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
+                />
+              )}
+                <div className="min-w-0 flex-1">
+                  <ClampedText text={q.question} title="Question" className="text-sm text-gray-800" />
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'}>
+                    {TYPE_LABEL[q.question_type] ?? 'Single choice'}
+                  </Badge>
+                  <Badge color="gray">Importance {q.importance}</Badge>
+                </div>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
                 {isAdmin && (
-                  <Button variant="secondary" onClick={() => setCopyingQuestion(q)}>
-                    Copy to store…
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setCopyingQuestion(q)}
+                    className="rounded-lg border border-brand-200 p-1.5 text-brand-700 hover:bg-brand-50"
+                    title="Copy to store…"
+                    aria-label="Copy to store"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
+                  </button>
                 )}
                 <button
                   onClick={() => remove(q.id)}
                   disabled={removingId === q.id}
-                  className="text-gray-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                  className="rounded-md px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Delete"
                 >
                   ✕
                 </button>

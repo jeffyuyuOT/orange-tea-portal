@@ -4,6 +4,7 @@ import { useAuth } from '../../../../lib/AuthContext'
 import Button from '../../../../components/ui/Button'
 import Badge from '../../../../components/ui/Badge'
 import Modal from '../../../../components/ui/Modal'
+import ClampedText from '../../../../components/ui/ClampedText'
 import SimpleRichTextEditor from '../../../../components/ui/SimpleRichTextEditor'
 import { EmptyState } from '../../../../components/ui/LoadingSpinner'
 import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker'
@@ -112,63 +113,63 @@ export default function ShopTrainingDatabasePage() {
             // wide) lets the button cluster drop to its own line on a
             // narrow screen instead; ml-auto keeps it right-aligned either
             // way (single line on desktop, its own line on mobile).
-            <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-              <button onClick={() => setEditing(item)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                <span className="font-medium text-gray-800">{item.title}</span>
-                {item.is_must_know && (
-                  <span className="text-amber-500" title="Must Know Item">
-                    ⭐
-                  </span>
-                )}
-                {/* Jeff, 2026-10-07: "shop training database裡的item新增
-                    assign to training journey的選項" — same phase badge
-                    TrainingJourneySettingPage.jsx's own item list already
-                    shows, so a phase assignment made from either place is
-                    visible here at a glance. */}
-                {item.training_journey_phase && (
-                  <span
-                    className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700"
-                    title="Training Journey phase"
-                  >
-                    {item.training_journey_phase === 4 ? 'Phase 4 (Master)' : `Phase ${item.training_journey_phase}`}
-                  </span>
-                )}
-                {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
-              </button>
-              <div className="ml-auto flex shrink-0 items-center gap-1">
+            <div key={item.id} className="flex items-start gap-2 px-4 py-2.5">
+              <div onClick={() => setEditing(item)} className="min-w-0 flex-1 cursor-pointer text-left">
+                <ClampedText text={item.title} title="Item title" className="font-medium text-gray-800" />
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {item.is_must_know && (
+                    <span className="text-amber-500" title="Must Know Item">
+                      ⭐
+                    </span>
+                  )}
+                  {item.training_journey_phase && (
+                    <span
+                      className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700"
+                      title="Training Journey phase"
+                    >
+                      {item.training_journey_phase === 4 ? 'Phase 4 (Master)' : `Phase ${item.training_journey_phase}`}
+                    </span>
+                  )}
+                  {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-0.5">
                 <button
                   disabled={idx === 0 || moving}
                   onClick={() => move(item, -1)}
-                  className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                  className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                  aria-label="Move up"
                 >
                   ↑
                 </button>
                 <button
                   disabled={idx === items.length - 1 || moving}
                   onClick={() => move(item, 1)}
-                  className="px-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                  className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                  aria-label="Move down"
                 >
                   ↓
                 </button>
                 {isAdmin && (
-                  <Button variant="secondary" onClick={() => setCopyingItem(item)}>
-                    Copy to store…
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setCopyingItem(item)}
+                    className="rounded-lg border border-brand-200 p-1.5 text-brand-700 hover:bg-brand-50"
+                    title="Copy to store…"
+                    aria-label="Copy to store"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
+                  </button>
                 )}
-                {/* Jeff, 2026-09-30: "手機板的...shop training database的
-                    商品刪除鍵改成X，這樣可以讓前面空間大一點" — icon-only
-                    instead of the "Delete" text label so this shrink:0
-                    button cluster takes less width, leaving more room for
-                    the title button to its left (min-w-0 flex-1, above). */}
-                <Button
-                  variant="danger"
-                  className="px-2.5"
+                <button
+                  type="button"
                   title="Delete"
                   aria-label="Delete"
                   onClick={() => remove(item.id)}
+                  className="rounded-md px-1.5 py-0.5 text-xs text-red-500 hover:bg-red-50"
                 >
                   ✕
-                </Button>
+                </button>
               </div>
             </div>
           ))}
