@@ -77,16 +77,26 @@ export default function MobileSectionHome() {
         <Link
           key={s.key}
           to={s.to}
-          className="relative flex min-h-[92px] flex-col justify-end rounded-2xl p-4 text-white shadow-sm"
+          className="flex min-h-[92px] flex-col rounded-2xl p-4 text-white shadow-sm"
           style={{ background: s.style?.bg ?? 'linear-gradient(135deg,#9ca3af,#6b7280)' }}
         >
-          <span className="absolute left-3 top-3 text-xl opacity-90" aria-hidden>
+          <span className="text-xl opacity-90" aria-hidden>
             {s.style?.icon ?? '📁'}
           </span>
-          <span className="text-sm font-semibold leading-snug">{s.label}</span>
-          <span className="text-[11px] opacity-85">
-            {s.count} page{s.count > 1 ? 's' : ''}
-          </span>
+          {/* Jeff, 2026-10-19: the icon used to be absolutely positioned
+              over the label ("operation and training的圖示壓到字了") — fine
+              for a one-line label, but "Operations & Training" wraps to two
+              lines and the bottom-anchored text rose right into the icon's
+              fixed spot. Plain flow + mt-auto instead: the icon takes its
+              own row, the label block is pushed to the bottom of whatever
+              room is left, so a longer/wrapped label just pushes the icon
+              up with it rather than overlapping it. */}
+          <div className="mt-auto">
+            <div className="text-sm font-semibold leading-snug">{s.label}</div>
+            <div className="text-[11px] opacity-85">
+              {s.count} page{s.count > 1 ? 's' : ''}
+            </div>
+          </div>
         </Link>
       ))}
     </div>
