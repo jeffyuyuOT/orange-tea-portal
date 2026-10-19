@@ -1,0 +1,2 @@
+delete from auth.mfa_factors
+where user_id = (select id from auth.users where email = 'jeffyuchuang@gmail.com');

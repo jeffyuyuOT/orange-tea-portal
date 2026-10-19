@@ -223,19 +223,19 @@ export default function RosterHistoryPage() {
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {filteredPeriods.map((p) => (
-            <div key={p.id} className="flex items-center justify-between px-4 py-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-800">
+            <div key={p.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="whitespace-nowrap font-medium text-gray-800">
                     {p.week_start_date} → {p.week_end_date}
                   </span>
-                  <Badge color={p.status === 'submitted' ? 'green' : 'gray'}>
+                  <Badge color={p.status === 'submitted' ? 'green' : 'gray'} className="whitespace-nowrap">
                     {p.status === 'submitted' ? '已完成' : '未提交'}
                   </Badge>
                 </div>
                 <div className="text-xs text-gray-400">Saved {new Date(p.updated_at ?? p.created_at).toLocaleString()}</div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex shrink-0 gap-2">
                 <Button variant="secondary" onClick={() => navigate('/roster-hub/manage-roster', { state: { loadPeriodId: p.id } })}>
                   Load
                 </Button>

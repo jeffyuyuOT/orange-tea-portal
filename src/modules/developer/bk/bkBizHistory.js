@@ -97,8 +97,22 @@ export function dayAcrossYears(records, mmdd) {
 // `holidays` = { [date]: name }. Only the stores in `storeIds` contribute notes.
 // → [{ date, label, kind: 'note'|'holiday' }] sorted by date.
 // "Queen's Birthday" (until 2022) and "King's Birthday" are the same holiday, so they share a key.
-export const eventKey = (label) =>
-  label.trim().replace(/\s+/g, ' ').toLowerCase().replace(/queen['’]?s birthday/g, "king's birthday")
+// The year in a note ("2025周年慶") is not part of the event, and every note that mentions
+// 周年慶 / 週年慶 / anniversary is the same event, so 歷年 shows them all together.
+const SAME_EVENT_WORDS = [[/周年慶|週年慶|anniversary/, '周年慶']]
+export const eventKey = (label) => {
+  const k = label
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/queen'?s birthday/g, "king's birthday")
+    .replace(/(?<!\d)(19|20)\d{2}(?!\d)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  for (const [re, key] of SAME_EVENT_WORDS) if (re.test(k)) return key
+  return k
+}
 export function buildEvents(notes, holidays, storeIds) {
   const ids = new Set(storeIds)
   const seen = new Set()
