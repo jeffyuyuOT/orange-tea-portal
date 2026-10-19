@@ -14,7 +14,7 @@ const HOUR_W = 66
 const money = (v) => (v === null || v === undefined ? '' : fmtMoney(v))
 
 // 小時統計: every day of a month × every hour (the hours set for the store in
-// 系統設置 › 小時統計), 營業額 = POS + 自動點單. Stores are the SF / U帳 list.
+// 系統設置 › 小時統計), 營業額 = POS + 自動點單. Stores are the 營業 stores.
 export default function HoursTab({ stores, topActive = true }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(null) // null = 全部分店
@@ -26,7 +26,6 @@ export default function HoursTab({ stores, topActive = true }) {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [importing, setImporting] = useState(false)
-  const [dayView, setDayView] = useState(null)
 
   const scopeIds = useMemo(() => (storeId ? [storeId] : stores.map((s) => s.id)), [storeId, stores])
   const storeKey = stores.map((s) => s.id).join(',')
@@ -56,22 +55,39 @@ export default function HoursTab({ stores, topActive = true }) {
   const max = useMemo(() => Math.max(0, ...dates.flatMap((d) => hours.map((h) => byDay[d]?.[h] ?? 0))), [dates, hours, byDay])
 
   // The day's hour distribution as a chart (to copy / download and send on).
-  function openDay(date) {
-    const row = byDay[date]
-    if (!row) return
-    const shown = new Set([...hours, ...Object.keys(row).map(Number)])
+  // Derived from (dayDate, storeId), so the ‹ › buttons in the window just move
+  // storeId along the store tabs (全部分店 → each store → back round) and the
+  // chart follows.
+  const [dayDate, setDayDate] = useState(null)
+  const tabIds = useMemo(() => [null, ...stores.map((s) => s.id)], [stores])
+  function stepStore(dir) {
+    const i = tabIds.indexOf(storeId)
+    setStoreId(tabIds[(i + dir + tabIds.length) % tabIds.length])
+  }
+  const dayView = useMemo(() => {
+    if (!dayDate) return null
     const name = storeId ? stores.find((s) => s.id === storeId)?.name : '全部分店'
-    setDayView({
-      title: `${name} · ${date} ${weekdayOf(date)}`,
+    const title = `${name} · ${dayDate} ${weekdayOf(dayDate)}`
+    const nav = { onPrev: () => stepStore(-1), onNext: () => stepStore(1) }
+    const row = byDay[dayDate]
+    if (!row) return { title, nav, message: '這天沒有小時資料。' }
+    const shown = new Set([...hours, ...Object.keys(row).map(Number)])
+    return {
+      title,
+      nav,
       note: '每小時營業額（POS + 自動點單）',
       values: row,
       days: 1,
-      hours: [...shown].sort((a, b) => a - b),
-    })
+      hours: [...shown].sort((x, y) => x - y),
+    }
+  }, [dayDate, storeId, stores, byDay, hours]) // eslint-disable-line react-hooks/exhaustive-deps
+  function openDay(date) {
+    if (!byDay[date]) return
+    setDayDate(date)
   }
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
   }
 
   const cols = hours.length + 1 + (stats.outsideAny ? 1 : 0)
@@ -97,7 +113,7 @@ export default function HoursTab({ stores, topActive = true }) {
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />
       <div className="flex flex-wrap items-center gap-3">
         <YearMonthPicker year={year} month={month} onChange={(v) => (setYear(v.year), setMonth(v.month))} />
-        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定</span>
+        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定。點日期可看當天的小時分佈圖（可複製圖片／表格）</span>
         <div className="ml-auto">
           <Button variant="secondary" onClick={() => setImporting(true)}>
             匯入
@@ -145,13 +161,12 @@ export default function HoursTab({ stores, topActive = true }) {
                         type="button"
                         disabled={!has}
                         onClick={() => openDay(date)}
-                        className="flex w-full items-center gap-1 px-1.5 py-1 text-left enabled:hover:bg-brand-50"
-                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片）' : undefined}
+                        className="flex w-full items-center gap-1 px-1.5 py-1 text-left enabled:hover:bg-brand-50 enabled:hover:underline"
+                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片／表格）' : undefined}
                       >
                         <span className="font-medium">{Number(date.slice(8))}</span>
                         <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
-                        {has && <span className="text-[11px] text-brand-500">📊</span>}
-                      </button>
+                                      </button>
                     </td>
                     {hours.map((h) => {
                       const v = byDay[date]?.[h]
@@ -181,7 +196,7 @@ export default function HoursTab({ stores, topActive = true }) {
         </div>
       )}
 
-      <HourBreakdown view={dayView} onClose={() => setDayView(null)} />
+      <HourBreakdown view={dayView} onClose={() => setDayDate(null)} />
 
       {importing && (
         <HourImport

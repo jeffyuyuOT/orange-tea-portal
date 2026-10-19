@@ -3,7 +3,7 @@ import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import { fmtMoney } from '../bkUtils'
 import { saveHourDay } from '../bkHourData'
-import { detectHourlyFile, hourLabel, matchStore, parsePosHourly, parseSelfHourly, selfJobs, sumHours } from '../bkHourly'
+import { detectHourlyFile, hourLabel, matchStore, parsePosHourly, posStoreNameFromFile, parseSelfHourly, selfJobs, sumHours } from '../bkHourly'
 import { Notice, inputCls } from '../bkUi'
 
 const SOURCE_LABEL = { pos: 'POS', self: '自動點單' }
@@ -38,7 +38,7 @@ export default function HourImport({ stores, defaultStoreId, onImported, onClose
         const kind = detectHourlyFile(rows)
         if (kind === 'pos') {
           const p = parsePosHourly(rows)
-          next.push(p.error ? { file: file.name, error: p.error } : { file: file.name, source: 'pos', jobs: [{ key: `${file.name}|pos`, date: p.date, hours: p.hours, storeName: '' }] })
+          next.push(p.error ? { file: file.name, error: p.error } : { file: file.name, source: 'pos', jobs: [{ key: `${file.name}|pos`, date: p.date, hours: p.hours, storeName: posStoreNameFromFile(file.name) }] })
         } else if (kind === 'self') {
           const p = parseSelfHourly(rows)
           next.push(
@@ -60,7 +60,9 @@ export default function HourImport({ stores, defaultStoreId, onImported, onClose
   const storeFor = (job, source) => {
     if (choice[job.key]) return choice[job.key]
     if (source === 'self') return matchStore(stores, job)?.id ?? ''
-    return choice[`${job.key}`] ?? defaultStoreId ?? stores[0]?.id ?? ''
+    // POS: the file name's store letter (…s / t / b / u / bb) picks the store, else the page's current store
+    const byName = job.storeName ? matchStore(stores, job)?.id : null
+    return byName ?? defaultStoreId ?? stores[0]?.id ?? ''
   }
 
   const jobs = files.flatMap((f) => (f.jobs ?? []).map((j) => ({ ...j, source: f.source, file: f.file, storeId: storeFor(j, f.source) })))
