@@ -1,9 +1,47 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { SECTIONS, getEffectivePages, roleSelectOptions, roleLabelFor } from '../../../lib/permissions'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+
+// Small ⓘ next to an option — click it to show the detail, click again (or
+// anywhere else) to hide it.
+function InfoTip({ label, children }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('touchstart', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('touchstart', close)
+    }
+  }, [open])
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-5 w-5 items-center justify-center rounded-full border border-gray-300 text-[11px] font-semibold leading-none text-gray-400 hover:border-brand-400 hover:text-brand-600"
+        aria-label={`About ${label}`}
+        aria-expanded={open}
+        title={`About ${label}`}
+      >
+        i
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-72 max-w-[75vw] whitespace-pre-line rounded-lg border border-brand-100 bg-white p-3 text-xs font-normal normal-case text-gray-600 shadow-lg">
+          {children}
+        </div>
+      )}
+    </span>
+  )
+}
 
 export default function UserDetailModal({ user, onClose, onSaved }) {
   const { profile: me, accessibleStores } = useAuth()
@@ -326,28 +364,32 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                 </label>
               ))}
           </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
-            <input type="checkbox" checked={joinStoreActivity} onChange={(e) => setJoinStoreActivity(e.target.checked)} />
-            Join store activity
-          </label>
-          {/* Jeff, 2026-09 — exact verbatim wording, applies to Store above
-              AND every "also belong to" store checked here (see migration
-              0067 / storeVisibility.js's isActiveStoreMember). */}
-          <p className="mt-1 whitespace-pre-line text-xs text-gray-400">
-            {'Checked:  full active participant at Manage Roster (including applying for leave/staff availability/listed in Roster Staff Order)/shown in Staff Information/Learning Tracker/Staff Time Logs there. \nUnchecked: View-only access (can switch to the store, but excluded from all rosters and tracking).'}
-          </p>
-          <label className="mt-3 flex items-center gap-2 text-sm text-gray-600">
-            <input
-              type="checkbox"
-              checked={bypassExamEffective}
-              disabled={!joinStoreActivity}
-              onChange={(e) => setBypassExam(e.target.checked)}
-            />
-            Bypass exam
-          </label>
-          <p className="mt-1 text-xs text-gray-400">
-            Checked: no Title Defend exam for this person. Always checked (and locked) while Join store activity is off.
-          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" checked={joinStoreActivity} onChange={(e) => setJoinStoreActivity(e.target.checked)} />
+              Join store activity
+            </label>
+            {/* Jeff, 2026-09 — exact verbatim wording, applies to Store above
+                AND every "also belong to" store checked here (see migration
+                0067 / storeVisibility.js's isActiveStoreMember). */}
+            <InfoTip label="Join store activity">
+              {'Checked:  full active participant at Manage Roster (including applying for leave/staff availability/listed in Roster Staff Order)/shown in Staff Information/Learning Tracker/Staff Time Logs there. \nUnchecked: View-only access (can switch to the store, but excluded from all rosters and tracking).'}
+            </InfoTip>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={bypassExamEffective}
+                disabled={!joinStoreActivity}
+                onChange={(e) => setBypassExam(e.target.checked)}
+              />
+              Bypass exam
+            </label>
+            <InfoTip label="Bypass exam">
+              Checked: no Title Defend exam for this person. Always checked (and locked) while Join store activity is off.
+            </InfoTip>
+          </div>
         </div>
       )}
 
@@ -373,7 +415,14 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
           .filter(([sectionKey]) => sectionKey !== 'developer_tools' || me?.role === 'developer')
           .map(([sectionKey, section]) => (
           <div key={sectionKey}>
-            <p className="mb-1 text-xs font-semibold uppercase text-gray-400">{section.label}</p>
+            <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-gray-400">
+              {section.label}
+              {sectionKey === 'audit' && (
+                <InfoTip label="Audit">
+                  Audit is only for shop managers whose store has Audit switched on (tick it on the store in Store Management). Ticks clear automatically otherwise.
+                </InfoTip>
+              )}
+            </p>
             <div className="flex flex-wrap gap-3">
               {Object.entries(section.pages).map(([pageKey, pageLabel]) => {
                 const fullKey = `${sectionKey}.${pageKey}`
@@ -396,11 +445,6 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                   </label>
                 )
               })}
-              {sectionKey === 'audit' && !auditAvailable && (
-                <p className="w-full text-xs text-gray-400">
-                  Audit is only for shop managers whose store has Audit switched on (tick it on the store in Store Management). Ticks clear automatically otherwise.
-                </p>
-              )}
               {sectionKey === 'shop_management' && (
                 <>
                   {/* Jeff, 2026-09-30: "Edit attendance logs和Staff
