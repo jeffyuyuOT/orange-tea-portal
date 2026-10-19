@@ -3,10 +3,18 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from '../components/layout/AppShell'
 import RequireAuth from './RequireAuth'
 import RequirePage from './RequirePage'
+import RequireTwoFactor from './RequireTwoFactor'
 import { useAuth } from '../lib/AuthContext'
 import { firstAccessiblePagePath } from '../lib/sidebarOrder'
 
 const SetPasswordPage = lazy(() => import('../modules/auth/SetPasswordPage'))
+// Jeff, 2026-10-19 (mobile nav redesign, points 1 & 2): the mobile
+// section-grid "go up a level" screen, and the shared top-tab-bar layout
+// used by every multi-page section below — both lazy like every other
+// route-level component here, same reasoning as the 2026-10-15 comment
+// just below (first login shouldn't download layouts nobody's visited yet).
+const MobileSectionHome = lazy(() => import('../components/layout/MobileSectionHome'))
+const SectionTabLayout = lazy(() => import('../components/layout/SectionTabLayout'))
 
 const FormulaPage = lazy(() => import('../modules/operations-training/formula/FormulaPage'))
 const ShopTrainingPage = lazy(() => import('../modules/operations-training/shop-training/ShopTrainingPage'))
@@ -106,9 +114,12 @@ export default function AppRoutes() {
         }
       >
         <Route path="/" element={<RootRedirect />} />
+        <Route path="/home" element={<MobileSectionHome />} />
 
-        <Route path="/operations-training/formula" element={guarded('operations_training.formula', <FormulaPage />)} />
-        <Route path="/operations-training/shop-training" element={guarded('operations_training.shop_training', <ShopTrainingPage />)} />
+        <Route element={<SectionTabLayout sectionKey="operations_training" />}>
+          <Route path="/operations-training/formula" element={guarded('operations_training.formula', <FormulaPage />)} />
+          <Route path="/operations-training/shop-training" element={guarded('operations_training.shop_training', <ShopTrainingPage />)} />
+        </Route>
 
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<Navigate to="bulletin" replace />} />
@@ -124,57 +135,75 @@ export default function AppRoutes() {
             it briefly was. */}
         <Route path="/support/submit-request" element={guarded('support.submit_request', <SupportPage />)} />
 
-        <Route path="/shop-management/learning-tracker" element={guarded('shop_management.learning_tracker', <LearningTrackerPage />)} />
-        <Route path="/shop-management/staff-information" element={guarded('shop_management.staff_information', <StaffListPage />)} />
+        <Route element={<SectionTabLayout sectionKey="shop_management" />}>
+          <Route path="/shop-management/learning-tracker" element={guarded('shop_management.learning_tracker', <LearningTrackerPage />)} />
+          <Route path="/shop-management/staff-information" element={guarded('shop_management.staff_information', <StaffListPage />)} />
 
-        {/* Jeff, 2026-09: "training centre是放在shop management下的" — these
-            three share TrainingCentreLayout's tab bar but keep their own
-            page keys/URLs under /shop-management/..., same as every other
-            page in this section (and matching how Sidebar.jsx generically
-            builds each link as /{section}/{page} from permissions.js — no
-            change needed there). This wrapper Route has no path of its own
-            (same pathless-layout pattern AppShell's own wrapping Route
-            above uses), so its children's absolute paths resolve from root
-            exactly as if it weren't there. */}
-        <Route element={<TrainingCentreLayout />}>
-          <Route path="/shop-management/quiz-bank" element={guarded('shop_management.quiz_bank', <TrainingCentreQuizBankPage />)} />
+          {/* Jeff, 2026-09: "training centre是放在shop management下的" — these
+              three share TrainingCentreLayout's OWN tab bar underneath this
+              section's tab bar (SectionTabLayout above folds all three into
+              one "Training Centre" tab, same as Sidebar.jsx's grouped row —
+              see sidebarOrder.js's PAGE_GROUPS) but keep their own page
+              keys/URLs under /shop-management/..., same as every other page
+              in this section. Both wrapper Routes are pathless layouts (same
+              pattern AppShell's own wrapping Route uses), so nesting one
+              inside the other doesn't change any child's absolute path. */}
+          <Route element={<TrainingCentreLayout />}>
+            <Route path="/shop-management/quiz-bank" element={guarded('shop_management.quiz_bank', <TrainingCentreQuizBankPage />)} />
+            <Route
+              path="/shop-management/shop-training-database"
+              element={guarded('shop_management.shop_training_database', <TrainingCentreShopTrainingDatabasePage />)}
+            />
+            <Route
+              path="/shop-management/training-journey-setting"
+              element={guarded('shop_management.training_journey_setting', <TrainingCentreTrainingJourneySettingPage />)}
+            />
+          </Route>
+
+          <Route path="/shop-management/staff-time-logs" element={guarded('shop_management.staff_time_logs', <StaffTimeLogsPage />)} />
+          <Route path="/shop-management/qr-code" element={guarded('shop_management.qr_code', <QrCodeDisplayPage />)} />
+        </Route>
+
+        <Route element={<SectionTabLayout sectionKey="roster_hub" />}>
+          <Route path="/roster-hub/my-roster" element={guarded('roster_hub.my_roster', <MyRosterPage />)} />
+          <Route path="/roster-hub/my-availability" element={guarded('roster_hub.my_availability', <MyAvailabilityPage />)} />
+          <Route path="/roster-hub/manage-roster" element={guarded('roster_hub.manage_roster', <ManageRosterPage />)} />
+          <Route path="/roster-hub/history" element={guarded('roster_hub.history', <RosterHistoryPage />)} />
+          <Route path="/roster-hub/leave-management" element={guarded('roster_hub.leave_management', <LeaveManagementPage />)} />
+          <Route path="/roster-hub/settings" element={guarded('roster_hub.settings', <RosterSettingsPage />)} />
+        </Route>
+
+        <Route element={<SectionTabLayout sectionKey="audit" />}>
+          <Route path="/audit/review" element={guarded('audit.review', <AuditReviewPage />)} />
+          <Route path="/audit/history" element={guarded('audit.history', <AuditHistoryPage />)} />
+          <Route path="/audit/settings" element={guarded('audit.settings', <AuditSettingsPage />)} />
+        </Route>
+
+        <Route element={<SectionTabLayout sectionKey="admin_center" />}>
+          <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
+          <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <AdminQuizBankPage />)} />
+          <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
+          <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
+          <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />
+          <Route path="/admin-center/system-setting" element={guarded('admin_center.system_setting', <SystemSettingPage />)} />
           <Route
-            path="/shop-management/shop-training-database"
-            element={guarded('shop_management.shop_training_database', <TrainingCentreShopTrainingDatabasePage />)}
-          />
-          <Route
-            path="/shop-management/training-journey-setting"
-            element={guarded('shop_management.training_journey_setting', <TrainingCentreTrainingJourneySettingPage />)}
+            path="/admin-center/training-journey-setting"
+            element={guarded('admin_center.training_journey_setting', <AdminTrainingJourneySettingPage />)}
           />
         </Route>
 
-        <Route path="/shop-management/staff-time-logs" element={guarded('shop_management.staff_time_logs', <StaffTimeLogsPage />)} />
-        <Route path="/shop-management/qr-code" element={guarded('shop_management.qr_code', <QrCodeDisplayPage />)} />
-
-        <Route path="/roster-hub/my-roster" element={guarded('roster_hub.my_roster', <MyRosterPage />)} />
-        <Route path="/roster-hub/my-availability" element={guarded('roster_hub.my_availability', <MyAvailabilityPage />)} />
-        <Route path="/roster-hub/manage-roster" element={guarded('roster_hub.manage_roster', <ManageRosterPage />)} />
-        <Route path="/roster-hub/history" element={guarded('roster_hub.history', <RosterHistoryPage />)} />
-        <Route path="/roster-hub/leave-management" element={guarded('roster_hub.leave_management', <LeaveManagementPage />)} />
-        <Route path="/roster-hub/settings" element={guarded('roster_hub.settings', <RosterSettingsPage />)} />
-
-        <Route path="/audit/review" element={guarded('audit.review', <AuditReviewPage />)} />
-        <Route path="/audit/history" element={guarded('audit.history', <AuditHistoryPage />)} />
-        <Route path="/audit/settings" element={guarded('audit.settings', <AuditSettingsPage />)} />
-
-        <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
-        <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <AdminQuizBankPage />)} />
-        <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
-        <Route path="/admin-center/user-management" element={guarded('admin_center.user_management', <UserManagementPage />)} />
-        <Route path="/admin-center/store-management" element={guarded('admin_center.store_management', <StoreManagementPage />)} />
-        <Route path="/admin-center/system-setting" element={guarded('admin_center.system_setting', <SystemSettingPage />)} />
+        {/* Jeff, 2026-10-19: on top of the page_key check guarded() already
+            does (still developer-only — see permissions.js), these two
+            also require a second factor (Supabase Auth TOTP MFA) before
+            rendering — see RequireTwoFactor's own comment for why. */}
         <Route
-          path="/admin-center/training-journey-setting"
-          element={guarded('admin_center.training_journey_setting', <AdminTrainingJourneySettingPage />)}
+          path="/developer-tools/payroll"
+          element={guarded('developer_tools.payroll', <RequireTwoFactor><PayrollPage /></RequireTwoFactor>)}
         />
-
-        <Route path="/developer-tools/payroll" element={guarded('developer_tools.payroll', <PayrollPage />)} />
-        <Route path="/developer-tools/bk" element={guarded('developer_tools.bk', <BkPage />)} />
+        <Route
+          path="/developer-tools/bk"
+          element={guarded('developer_tools.bk', <RequireTwoFactor><BkPage /></RequireTwoFactor>)}
+        />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

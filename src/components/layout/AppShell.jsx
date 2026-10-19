@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import Sidebar, { SidebarBrand, SidebarNavLinks } from './Sidebar'
+import Sidebar from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
 import { useAuth } from '../../lib/AuthContext'
 import { ROLE_LABELS, NON_PICKABLE_STAFF_ROLES, canAccessPage } from '../../lib/permissions'
@@ -26,7 +26,6 @@ export default function AppShell() {
   } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // Jeff, 2026-10-17: right after a real password sign-in, front-line staff land on
   // Time & Attendance wherever the address bar happened to be (RootRedirect only
   // covers "/"). Once per sign-in; refreshes and later navigation are untouched,
@@ -104,15 +103,6 @@ export default function AppShell() {
   const isAdminCenter = location.pathname.startsWith('/admin-center') || location.pathname.startsWith('/developer-tools') ||
     // Audit Settings is one form shared by every store.
     location.pathname === '/audit/settings'
-
-  // Below the sidebar's md breakpoint there was previously no way at all to
-  // reach anything but whatever page you landed on — the sidebar (and every
-  // link in it) was simply `hidden` with no phone-sized replacement. This
-  // hamburger + slide-out drawer covers that, reusing the exact same
-  // permission-filtered link list as the desktop sidebar.
-  useEffect(() => {
-    setMobileNavOpen(false)
-  }, [location.pathname])
 
   // Jeff, 2026-10-08: "被qualified的員工，登入系統時中間會跳出視窗顯示
   // Congratulations! You have officially qualified as an Advanced staff
@@ -202,35 +192,23 @@ export default function AppShell() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
 
-        {hasSidebar && mobileNavOpen && (
-          <div className="fixed inset-0 z-40 flex md:hidden">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
-            <div className="relative flex w-64 max-w-[80vw] flex-col bg-white shadow-xl">
-              <div className="flex items-center justify-between border-b border-brand-100 pr-2">
-                <SidebarBrand />
-                <button
-                  onClick={() => setMobileNavOpen(false)}
-                  className="rounded-full p-1 text-gray-400 hover:bg-brand-50 hover:text-brand-600"
-                  aria-label="Close menu"
-                >
-                  ✕
-                </button>
-              </div>
-              <SidebarNavLinks onNavigate={() => setMobileNavOpen(false)} />
-            </div>
-          </div>
-        )}
-
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center justify-between gap-2 border-b border-brand-100 px-3 py-3 md:px-6">
             <div className="flex min-w-0 items-center gap-2">
               {hasSidebar && (
+                // Jeff, 2026-10-19 (mobile nav redesign, point 1): replaces
+                // the old hamburger + slide-out drawer — this now jumps
+                // straight to MobileSectionHome's colored section grid
+                // (routes.jsx's /home), the "go up a level" screen for
+                // switching sections on a phone. Desktop never shows this;
+                // its permanent <aside> sidebar covers the same job already.
                 <button
-                  onClick={() => setMobileNavOpen(true)}
+                  onClick={() => navigate('/home')}
                   className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
-                  aria-label="Open menu"
+                  aria-label="Go to sections"
+                  title="Sections"
                 >
-                  ☰
+                  ▦
                 </button>
               )}
               {isAdminCenter ? <span className="text-sm font-medium text-brand-700">All Stores</span> : <StoreSwitcher />}
