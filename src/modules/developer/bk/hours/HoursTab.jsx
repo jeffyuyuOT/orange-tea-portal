@@ -14,7 +14,7 @@ const HOUR_W = 66
 const money = (v) => (v === null || v === undefined ? '' : fmtMoney(v))
 
 // 小時統計: every day of a month × every hour (the hours set for the store in
-// 系統設置 › 小時統計), 營業額 = POS + 自動點單. Stores are the 營業 stores.
+// 系統設置 › 小時統計), 營業額 = POS + 自動點單. Stores are the SF / U帳 list.
 export default function HoursTab({ stores, topActive = true }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(null) // null = 全部分店
@@ -71,7 +71,7 @@ export default function HoursTab({ stores, topActive = true }) {
   }
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
   }
 
   const cols = hours.length + 1 + (stats.outsideAny ? 1 : 0)
@@ -97,7 +97,7 @@ export default function HoursTab({ stores, topActive = true }) {
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />
       <div className="flex flex-wrap items-center gap-3">
         <YearMonthPicker year={year} month={month} onChange={(v) => (setYear(v.year), setMonth(v.month))} />
-        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定。點日期可看當天的小時分佈圖（可複製圖片／表格）</span>
+        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定</span>
         <div className="ml-auto">
           <Button variant="secondary" onClick={() => setImporting(true)}>
             匯入
@@ -145,12 +145,13 @@ export default function HoursTab({ stores, topActive = true }) {
                         type="button"
                         disabled={!has}
                         onClick={() => openDay(date)}
-                        className="flex w-full items-center gap-1 px-1.5 py-1 text-left enabled:hover:bg-brand-50 enabled:hover:underline"
-                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片／表格）' : undefined}
+                        className="flex w-full items-center gap-1 px-1.5 py-1 text-left enabled:hover:bg-brand-50"
+                        title={has ? '點擊查看這天的小時分佈圖（可複製圖片）' : undefined}
                       >
                         <span className="font-medium">{Number(date.slice(8))}</span>
                         <span className="text-[11px] text-gray-400">{weekdayOf(date)}</span>
-                                      </button>
+                        {has && <span className="text-[11px] text-brand-500">📊</span>}
+                      </button>
                     </td>
                     {hours.map((h) => {
                       const v = byDay[date]?.[h]
