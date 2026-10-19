@@ -12,7 +12,6 @@ import Badge from '../../../components/ui/Badge'
 import Modal from '../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import AnnouncementDetailModal from './AnnouncementDetailModal'
-import ImportantAnnouncementsModal from './ImportantAnnouncementsModal'
 import RosterWeekTable from '../../roster-hub/shared/RosterWeekTable'
 
 // Toggle filters shown to the user. There's no button for quiz reminders —
@@ -110,17 +109,24 @@ async function notifyManagersOfTrainingHours(newlyCrossed, storeId, sender) {
 // they're more than a month old; quiz reminders instead stay until the
 // person actually takes the quiz, since they describe current status, not a
 // one-off posting. Important announcements are the other exception — they
-// never drop out here either, matching the standalone "⭐ Important
-// Announcements" picker (ImportantAnnouncementsModal.jsx), which never had a
-// date filter at all. Jeff, 2026-09.
+// never drop out here either, so they're always reachable via the
+// Important star toggle below (see importantOnly) even past the one-month
+// cutoff. Jeff, 2026-09.
+//
+// Jeff, 2026-10-19: the important-announcements picker used to be a
+// separate "⭐ Important Announcements" button opening its own popup
+// (ImportantAnnouncementsModal.jsx — still used by the older/unrouted
+// AnnouncementsTab.jsx, but no longer referenced here). Replaced with a
+// star toggle right next to the "Store Announcement" filter button: see
+// importantOnly/toggleImportant below.
 export default function BulletinPage() {
   const { currentStoreId, profile, refreshBulletinUpdates } = useAuth()
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
+  const [importantOnly, setImportantOnly] = useState(false) // only meaningful while filter === 'announcement'
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
   const [openAnnouncementId, setOpenAnnouncementId] = useState(null) // null closed, 'new', or uuid
   const [openRosterPeriod, setOpenRosterPeriod] = useState(null)
-  const [showImportant, setShowImportant] = useState(false)
 
   // Jeff (2026-09): developer (Jeff Chuang) couldn't post an announcement at
   // all — this check only ever matched 'admin'/'shop_manager', never
@@ -423,7 +429,14 @@ export default function BulletinPage() {
     load()
   }, [currentStoreId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const visible = useMemo(() => (filter ? items.filter((i) => i.type === filter) : items), [items, filter])
+  const visible = useMemo(() => {
+    const byType = filter ? items.filter((i) => i.type === filter) : items
+    // Jeff, 2026-10-19 (point 3): the star toggle narrows the Store
+    // Announcement filter further, to important-only — it never applies
+    // outside that filter (toggleFilter/toggleImportant below keep the two
+    // in sync, so this guard is just belt-and-suspenders).
+    return filter === 'announcement' && importantOnly ? byType.filter((i) => i.isImportant) : byType
+  }, [items, filter, importantOnly])
   // The Roster tab's small dot (see below) stays lit as long as ANY roster
   // row in the (unfiltered) list still has an unopened update — switching
   // filters never affects this, only actually opening a week does (openItem
@@ -442,7 +455,29 @@ export default function BulletinPage() {
   )
 
   function toggleFilter(key) {
-    setFilter((prev) => (prev === key ? null : key))
+    setFilter((prev) => {
+      const next = prev === key ? null : key
+      // Switching off the Store Announcement filter (or onto a different
+      // one) drops the important-only narrowing too — it has no meaning
+      // outside that filter.
+      if (next !== 'announcement') setImportantOnly(false)
+      return next
+    })
+  }
+
+  // Jeff, 2026-10-19 (point 3): star beside the Store Announcement filter
+  // button. First click (from anywhere): jumps straight to the Store
+  // Announcement filter AND narrows it to important-only, star fills
+  // yellow. Clicking it again while already on important-only: drops back
+  // to every Store Announcement, not just important ones — filter itself
+  // stays put, only the narrowing clears, star goes back to outline.
+  function toggleImportant() {
+    if (filter === 'announcement' && importantOnly) {
+      setImportantOnly(false)
+    } else {
+      setFilter('announcement')
+      setImportantOnly(true)
+    }
   }
 
   function openItem(item) {
@@ -478,37 +513,52 @@ export default function BulletinPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
+        <div className="inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-brand-50 p-1">
           {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => toggleFilter(f.key)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${
-                filter === f.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
-              }`}
-            >
-              {f.label}
-              {/* A light "something in here is still unopened" hint at the
-                  tab level — the detail lives on each affected Roster row
-                  itself (see below), so this stays a small raised dot
-                  rather than repeating an "Update" pill here too. Stays lit
-                  until every week in the list has actually been opened. */}
-              {f.key === 'roster' && hasUnviewedRoster && (
-                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="New" />
+            <div key={f.key} className="flex items-center">
+              <button
+                onClick={() => toggleFilter(f.key)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${
+                  filter === f.key ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
+                }`}
+              >
+                {f.label}
+                {/* A light "something in here is still unopened" hint at the
+                    tab level — the detail lives on each affected Roster row
+                    itself (see below), so this stays a small raised dot
+                    rather than repeating an "Update" pill here too. Stays lit
+                    until every week in the list has actually been opened. */}
+                {f.key === 'roster' && hasUnviewedRoster && (
+                  <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="New" />
+                )}
+                {f.key === 'announcement' && hasUnviewedAnnouncement && (
+                  <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
+                )}
+                {f.key === 'customer_complaint' && hasUnviewedComplaint && (
+                  <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
+                )}
+              </button>
+              {/* Jeff, 2026-10-19 (point 3): replaces the old standalone
+                  "⭐ Important Announcements" popup button — this star sits
+                  right next to the Store Announcement filter instead, and
+                  narrows that same filter rather than opening anything. */}
+              {f.key === 'announcement' && (
+                <button
+                  type="button"
+                  onClick={toggleImportant}
+                  aria-pressed={importantOnly}
+                  title={importantOnly ? 'Showing important announcements only — click to show all' : 'Show important announcements only'}
+                  className={`px-1.5 text-lg leading-none ${
+                    importantOnly ? 'text-yellow-400' : 'text-brand-300 hover:text-brand-500'
+                  }`}
+                >
+                  {importantOnly ? '★' : '☆'}
+                </button>
               )}
-              {f.key === 'announcement' && hasUnviewedAnnouncement && (
-                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
-              )}
-              {f.key === 'customer_complaint' && hasUnviewedComplaint && (
-                <span className="-translate-y-1.5 h-1.5 w-1.5 rounded-full bg-red-500" aria-label="Update" />
-              )}
-            </button>
+            </div>
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => setShowImportant(true)}>
-            ⭐ Important Announcements
-          </Button>
           {canPost && <Button onClick={() => setOpenAnnouncementId('new')}>+ New Announcement</Button>}
         </div>
       </div>
@@ -584,16 +634,6 @@ export default function BulletinPage() {
             setOpenAnnouncementId(null)
             load()
             refreshBulletinUpdates?.()
-          }}
-        />
-      )}
-      {showImportant && (
-        <ImportantAnnouncementsModal
-          storeId={currentStoreId}
-          onClose={() => setShowImportant(false)}
-          onSelect={(id) => {
-            setShowImportant(false)
-            setOpenAnnouncementId(id)
           }}
         />
       )}
