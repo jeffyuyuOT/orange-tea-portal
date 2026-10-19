@@ -95,7 +95,10 @@ export const SECTIONS = {
       my_availability: 'My Availability',
       manage_roster: 'Manage Roster',
       history: 'History',
-      leave_management: 'Leave Management',
+      // Jeff, 2026-10-19: shortened from "Leave Management" so a staff
+      // member's Roster Hub tab bar (My Roster / My Availability / Leave —
+      // the only three they can reach) fits on one line without wrapping.
+      leave_management: 'Leave',
       settings: 'Setting',
     },
   },
