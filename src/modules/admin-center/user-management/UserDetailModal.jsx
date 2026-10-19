@@ -163,12 +163,29 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     // this is what Manage Roster / Name display use to decide which
     // store(s) this person appears on, instead of assuming an admin
     // belongs on every store's roster.
+    //
+    // Only the difference is written: a store they stay on keeps its row (so its
+    // roster order, roster name and hidden flag survive saving this form), a store
+    // they are taken off is deleted, and a store they are newly added to gets a row
+    // that starts HIDDEN from the roster (Roster Hub › Setting › Roster Staff Order →
+    // "Not shown on the roster") — a new person is not scheduled until a manager
+    // restores them there, unless they are linked to a Pending staff name that was
+    // already on the roster (UserManagementPage.linkPending takes over that name's place).
     const storeIds = Array.from(new Set([storeId, ...extraStoreIds].filter(Boolean)))
-    await supabase.from('user_stores').delete().eq('profile_id', user.id)
-    if (storeIds.length) {
+    const { data: existingRows, error: readError } = await supabase.from('user_stores').select('store_id').eq('profile_id', user.id)
+    if (readError) {
+      alert(`Save failed while updating stores: ${readError.message}`)
+      setSaving(false)
+      return
+    }
+    const existingIds = new Set((existingRows ?? []).map((r) => r.store_id))
+    const toRemove = [...existingIds].filter((id) => !storeIds.includes(id))
+    const toAdd = storeIds.filter((id) => !existingIds.has(id))
+    if (toRemove.length) await supabase.from('user_stores').delete().eq('profile_id', user.id).in('store_id', toRemove)
+    if (toAdd.length) {
       const { error: storeError } = await supabase
         .from('user_stores')
-        .insert(storeIds.map((id) => ({ profile_id: user.id, store_id: id })))
+        .insert(toAdd.map((id) => ({ profile_id: user.id, store_id: id, hidden_from_roster: true })))
       if (storeError) {
         alert(`Save failed while updating stores: ${storeError.message}`)
         setSaving(false)

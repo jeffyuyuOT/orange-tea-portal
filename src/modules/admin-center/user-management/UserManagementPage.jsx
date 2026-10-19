@@ -141,6 +141,12 @@ export default function UserManagementPage() {
     if (!profileId) return
     setLinkingId(pending.id)
     await supabase.from('roster_entries').update({ profile_id: profileId }).eq('staff_name_raw', pendingRosterName(pending)).is('profile_id', null)
+    // A new account starts hidden from the roster (see UserDetailModal); linking it to a
+    // name that was on the roster puts it in that name's place — same order, same
+    // visibility, and the name it was shown under.
+    const place = { roster_order: pending.roster_order, hidden_from_roster: pending.hidden_from_roster }
+    if (pending.roster_display_name) place.roster_display_name = pending.roster_display_name
+    await supabase.from('user_stores').update(place).match({ profile_id: profileId, store_id: pending.store_id })
     await supabase.from('roster_pending_staff').delete().eq('id', pending.id)
     setPendingList((prev) => prev.filter((p) => p.id !== pending.id))
     setLinkingId(null)
