@@ -114,33 +114,37 @@ export default function AdminQuestionsTab() {
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
           {questions.map((q) => (
-            <div key={q.id} className="flex items-start gap-2 px-4 py-2.5">
-              <div onClick={() => setEditing(q)} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-left">
+            <div key={q.id} className="px-4 py-2.5">
+              <div onClick={() => setEditing(q)} className="flex cursor-pointer items-start gap-2 text-left">
                 {q.image_path && (
-                <img
-                  src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
-                  alt=""
-                  className="mt-0.5 h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
-                />
-              )}
+                  <img
+                    src={supabase.storage.from('documents').getPublicUrl(q.image_path).data.publicUrl}
+                    alt=""
+                    className="h-8 w-8 shrink-0 rounded border border-gray-200 object-contain"
+                  />
+                )}
                 <div className="min-w-0 flex-1">
                   <ClampedText text={q.question} title="Question" className="text-sm text-gray-800" />
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                </div>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                   <Badge color={q.question_type === 'fill_blank' ? 'brand' : q.question_type === 'multi' ? 'green' : 'gray'}>
                     {TYPE_LABEL[q.question_type] ?? 'Single choice'}
                   </Badge>
                   <Badge color="gray">Importance {q.importance}</Badge>
                 </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => remove(q.id)}
+                    disabled={removingId === q.id}
+                    className="rounded-md px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                    aria-label="Delete"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={() => remove(q.id)}
-                disabled={removingId === q.id}
-                className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
-                aria-label="Delete"
-              >
-                ✕
-              </button>
             </div>
           ))}
         </div>

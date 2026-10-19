@@ -113,10 +113,12 @@ export default function ShopTrainingDatabasePage() {
             // wide) lets the button cluster drop to its own line on a
             // narrow screen instead; ml-auto keeps it right-aligned either
             // way (single line on desktop, its own line on mobile).
-            <div key={item.id} className="flex items-start gap-2 px-4 py-2.5">
-              <div onClick={() => setEditing(item)} className="min-w-0 flex-1 cursor-pointer text-left">
+            <div key={item.id} className="px-4 py-2.5">
+              <div onClick={() => setEditing(item)} className="cursor-pointer text-left">
                 <ClampedText text={item.title} title="Item title" className="font-medium text-gray-800" />
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                   {item.is_must_know && (
                     <span className="text-amber-500" title="Must Know Item">
                       ⭐
@@ -132,26 +134,25 @@ export default function ShopTrainingDatabasePage() {
                   )}
                   {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
                 </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <button
-                  disabled={idx === 0 || moving}
-                  onClick={() => move(item, -1)}
-                  className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
-                  aria-label="Move up"
-                >
-                  ↑
-                </button>
-                <button
-                  disabled={idx === items.length - 1 || moving}
-                  onClick={() => move(item, 1)}
-                  className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
-                  aria-label="Move down"
-                >
-                  ↓
-                </button>
-                {isAdmin && (
+                <div className="flex shrink-0 items-center gap-0.5">
                   <button
+                    disabled={idx === 0 || moving}
+                    onClick={() => move(item, -1)}
+                    className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                    aria-label="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    disabled={idx === items.length - 1 || moving}
+                    onClick={() => move(item, 1)}
+                    className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
+                    aria-label="Move down"
+                  >
+                    ↓
+                  </button>
+                  {isAdmin && (
+                    <button
                     type="button"
                     onClick={() => setCopyingItem(item)}
                     className="rounded-lg border border-brand-200 p-1.5 text-brand-700 hover:bg-brand-50"
@@ -160,16 +161,17 @@ export default function ShopTrainingDatabasePage() {
                   >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
                   </button>
-                )}
-                <button
-                  type="button"
-                  title="Delete"
-                  aria-label="Delete"
-                  onClick={() => remove(item.id)}
-                  className="rounded-md px-1.5 py-0.5 text-xs text-red-500 hover:bg-red-50"
-                >
-                  ✕
-                </button>
+                  )}
+                  <button
+                    type="button"
+                    title="Delete"
+                    aria-label="Delete"
+                    onClick={() => remove(item.id)}
+                    className="rounded-md px-1.5 py-0.5 text-xs text-red-500 hover:bg-red-50"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             </div>
           ))}

@@ -43,9 +43,14 @@ export default function ClampedText({ text, title = 'Full text', lines = 3, clas
           •••
         </button>
       )}
-      <Modal open={open} onClose={() => setOpen(false)} title={title}>
-        <p className="whitespace-pre-wrap break-words text-sm text-gray-800">{text}</p>
-      </Modal>
+      {/* React events bubble through the tree even for fixed-position popups, so
+          without this a click on the popup's ✕ / backdrop reached the row's own
+          "open editor" onClick. */}
+      <div onClick={(e) => e.stopPropagation()}>
+        <Modal open={open} onClose={() => setOpen(false)} title={title}>
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-800">{text}</p>
+        </Modal>
+      </div>
     </div>
   )
 }
