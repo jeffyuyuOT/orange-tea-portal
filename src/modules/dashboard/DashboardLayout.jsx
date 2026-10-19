@@ -61,7 +61,13 @@ export default function DashboardLayout() {
         )}
       </h1>
 
-      <div className="mb-5 flex gap-1 border-b border-brand-100">
+      {/* Jeff, 2026-10-19: "my information選不到無法進去" — on a narrow
+          phone these 5 tabs overflow the row with no wrap, pushing My
+          Information (the last one) off-screen and out of reach. Same
+          flex-wrap fix TrainingCentreLayout.jsx already got for the same
+          overflow problem (2026-09-29/2026-10-02): the bar wraps onto a
+          second line on a narrow screen instead of clipping a tab. */}
+      <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-100">
         {TABS.filter((t) => canAccessPage(effectivePages, t.key)).map((t) => (
           <NavLink
             key={t.key}
