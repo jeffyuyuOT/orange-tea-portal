@@ -162,6 +162,8 @@ export function findStaleMustKnowItems(itemsByPhase, currentPhase, { phaseFourIt
 // --- Title-defense helpers -------------------------------------------------
 
 export function isDefenseDue(profile) {
+  // bypass_exam (User Management › Bypass exam): never has to defend a title.
+  if (profile?.bypass_exam) return false
   return !!profile?.title_defense_due_at && new Date(profile.title_defense_due_at) <= new Date()
 }
 

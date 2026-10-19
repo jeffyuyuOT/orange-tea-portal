@@ -607,7 +607,10 @@ export function AuthProvider({ children }) {
   const effectivePages = useMemo(() => {
     const pages = getEffectivePages(profile, overrides)
     const seesAllStores = profile?.role === 'admin' || profile?.role === 'developer'
-    if (!seesAllStores && !accessibleStores.some((s) => s.audit_enabled)) {
+    // Audit is for shop managers (and admin/developer) only — a person moved to
+    // another role, or without an Audit-enabled store, loses it even if an old
+    // override still says yes.
+    if (!seesAllStores && (profile?.role !== 'shop_manager' || !accessibleStores.some((s) => s.audit_enabled))) {
       for (const key of Array.from(pages)) if (key.startsWith('audit.')) pages.delete(key)
     }
     return pages

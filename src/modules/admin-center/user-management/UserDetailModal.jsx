@@ -61,6 +61,12 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // applies to Store above too, not just the "also belong to" list (see
   // storeVisibility.js's isActiveStoreMember).
   const [joinStoreActivity, setJoinStoreActivity] = useState(user.join_store_activity ?? true)
+  // Jeff, 2026-10-20: "Bypass exam" — this person never has to take the Title
+  // Defend exam (Advanced / Master). Always on for someone who doesn't join
+  // store activity (box locked ticked); optional for those who do. Migration
+  // 0122 keeps the same rule in the database.
+  const [bypassExam, setBypassExam] = useState(user.bypass_exam ?? false)
+  const bypassExamEffective = !joinStoreActivity || bypassExam
   // There was briefly a second, separate "Post and receive Bulletin
   // messages" checkbox (join_bulletin_activity, migrations 0065/0066) —
   // Jeff removed it again the same day (migration
@@ -74,6 +80,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // Fresh Audit flags straight from the DB — accessibleStores is loaded at
   // login, so it goes stale after Audit is ticked in Store Management.
   const [auditStoreIds, setAuditStoreIds] = useState(null)
+  const [loadedParts, setLoadedParts] = useState(0) // overrides + user_stores both read (2)
   useEffect(() => {
     supabase
       .from('stores')
@@ -91,6 +98,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         const map = {}
         ;(data ?? []).forEach((o) => (map[o.page_key] = o.allowed))
         setOverrides(map)
+        setLoadedParts((n) => n + 1)
       })
     supabase
       .from('user_stores')
@@ -98,6 +106,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       .eq('profile_id', user.id)
       .then(({ data }) => {
         setExtraStoreIds((data ?? []).map((r) => r.store_id).filter((id) => id !== (user.primary_store_id ?? '')))
+        setLoadedParts((n) => n + 1)
       })
   }, [user.id, user.primary_store_id])
 
@@ -114,10 +123,26 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // non-admin only gets the Audit pages if one of THEIR stores has it on, so
   // the checkboxes are locked off until then (AuthContext.jsx applies the same
   // rule to what the person actually sees).
+  // Jeff, 2026-10-19: only shop managers (plus admin/developer) can have Audit,
+  // and a shop manager only with an Audit-enabled store. Change the role to staff
+  // or move them to a store without Audit and the ticks clear themselves
+  // (effect below) and the boxes lock.
   const auditAvailable =
     role === 'admin' ||
     role === 'developer' ||
-    [storeId, ...extraStoreIds].some((id) => id && (auditStoreIds ? auditStoreIds.has(id) : accessibleStores.find((s) => s.id === id)?.audit_enabled))
+    (role === 'shop_manager' && [storeId, ...extraStoreIds].some((id) => id && (auditStoreIds ? auditStoreIds.has(id) : accessibleStores.find((s) => s.id === id)?.audit_enabled)))
+
+  const auditReady = loadedParts >= 2 && auditStoreIds !== null // don't judge before the data is in
+  useEffect(() => {
+    if (!auditReady || auditAvailable) return
+    setOverrides((prev) => {
+      const keys = Object.keys(prev).filter((k) => k.startsWith('audit.'))
+      if (!keys.length) return prev
+      const copy = { ...prev }
+      keys.forEach((k) => delete copy[k])
+      return copy
+    })
+  }, [auditReady, auditAvailable, overrides])
 
   function togglePage(pageKey, roleDefault) {
     setOverrides((prev) => {
@@ -152,6 +177,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         can_edit_attendance_logs: canEditAttendanceLogs,
         can_view_staff_confidential: canViewStaffConfidential,
         join_store_activity: joinStoreActivity,
+        bypass_exam: bypassExamEffective,
       })
       .eq('id', user.id)
     if (profileError) {
@@ -310,6 +336,18 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
           <p className="mt-1 whitespace-pre-line text-xs text-gray-400">
             {'Checked:  full active participant at Manage Roster (including applying for leave/staff availability/listed in Roster Staff Order)/shown in Staff Information/Learning Tracker/Staff Time Logs there. \nUnchecked: View-only access (can switch to the store, but excluded from all rosters and tracking).'}
           </p>
+          <label className="mt-3 flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={bypassExamEffective}
+              disabled={!joinStoreActivity}
+              onChange={(e) => setBypassExam(e.target.checked)}
+            />
+            Bypass exam
+          </label>
+          <p className="mt-1 text-xs text-gray-400">
+            Checked: no Title Defend exam for this person. Always checked (and locked) while Join store activity is off.
+          </p>
         </div>
       )}
 
@@ -360,7 +398,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
               })}
               {sectionKey === 'audit' && !auditAvailable && (
                 <p className="w-full text-xs text-gray-400">
-                  Audit isn&apos;t switched on for this person&apos;s store(s). Tick Audit on the store in Store Management first.
+                  Audit is only for shop managers whose store has Audit switched on (tick it on the store in Store Management). Ticks clear automatically otherwise.
                 </p>
               )}
               {sectionKey === 'shop_management' && (

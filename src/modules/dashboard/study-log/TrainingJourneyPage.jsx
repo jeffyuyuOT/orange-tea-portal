@@ -89,7 +89,7 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
       loadTrainingJourneyData(profileId, currentStoreId),
       supabase
         .from('profiles')
-        .select('qualified, qualified_at, training_journey_phase, has_master_title, master_title_earned_at, title_defense_due_at')
+        .select('qualified, qualified_at, training_journey_phase, has_master_title, master_title_earned_at, title_defense_due_at, bypass_exam')
         .eq('id', profileId)
         .single(),
     ])
