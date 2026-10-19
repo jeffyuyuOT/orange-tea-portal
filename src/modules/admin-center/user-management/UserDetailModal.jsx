@@ -71,6 +71,17 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
 
+  // Fresh Audit flags straight from the DB — accessibleStores is loaded at
+  // login, so it goes stale after Audit is ticked in Store Management.
+  const [auditStoreIds, setAuditStoreIds] = useState(null)
+  useEffect(() => {
+    supabase
+      .from('stores')
+      .select('id')
+      .eq('audit_enabled', true)
+      .then(({ data }) => setAuditStoreIds(new Set((data ?? []).map((r) => r.id))))
+  }, [])
+
   useEffect(() => {
     supabase
       .from('permission_overrides')
@@ -106,7 +117,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   const auditAvailable =
     role === 'admin' ||
     role === 'developer' ||
-    [storeId, ...extraStoreIds].some((id) => id && accessibleStores.find((s) => s.id === id)?.audit_enabled)
+    [storeId, ...extraStoreIds].some((id) => id && (auditStoreIds ? auditStoreIds.has(id) : accessibleStores.find((s) => s.id === id)?.audit_enabled))
 
   function togglePage(pageKey, roleDefault) {
     setOverrides((prev) => {
