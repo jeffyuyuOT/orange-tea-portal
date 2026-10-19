@@ -83,8 +83,11 @@ export default function AuditReviewPage() {
       meeting_summary: editing.meeting_summary || null,
       auditor_name: editing.auditor_name.trim() || null,
       auditor_signature: editing.auditor_signature,
-      status,
-      submitted_at: status === 'pending_confirmation' ? new Date().toISOString() : null,
+      // Always written as a draft first: the items' RLS only lets them be
+      // rewritten while the report is a draft, so Submit flips the status
+      // only after the items are in (last step below).
+      status: 'draft',
+      submitted_at: null,
     }
     let id = editing.id
     if (id) {
@@ -115,6 +118,16 @@ export default function AuditReviewPage() {
       // Keep the id so the next Save updates this row instead of inserting a duplicate.
       setEditing((e) => ({ ...e, id }))
       return setError(itemsErr.message)
+    }
+    if (status === 'pending_confirmation') {
+      const { error: subErr } = await supabase
+        .from('audit_reports')
+        .update({ status: 'pending_confirmation', submitted_at: new Date().toISOString() })
+        .eq('id', id)
+      if (subErr) {
+        setEditing((e) => ({ ...e, id }))
+        return setError(subErr.message)
+      }
     }
     return id
   }
