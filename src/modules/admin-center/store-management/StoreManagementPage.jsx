@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
+import { useAuth } from '../../../lib/AuthContext'
 import { STAFF_DOC_TYPES } from '../../../lib/staffDocumentTypes'
 import Button from '../../../components/ui/Button'
 import Badge from '../../../components/ui/Badge'
@@ -20,6 +21,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 // safe equivalent — it hides the store from pickers/assignment (see
 // AuthContext.jsx / StoreSwitcher.jsx) without touching its history.
 export default function StoreManagementPage() {
+  const { refreshStoreFlags } = useAuth()
   const [stores, setStores] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null) // null closed, {} = new, store = edit
@@ -131,6 +133,7 @@ export default function StoreManagementPage() {
       setError(linkErr.message)
       return
     }
+    refreshStoreFlags()
     setEditing(null)
     load()
   }

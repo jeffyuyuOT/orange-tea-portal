@@ -293,6 +293,33 @@ export function AuthProvider({ children }) {
     }
   }, [accessibleStores]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Jeff, 2026-10-19: audit_enabled is loaded with the profile at login, so
+  // ticking Audit on a store in Store Management never reached an open app
+  // (Audit store switcher / permissions stayed stale). Re-read just those
+  // flags whenever the app comes back to the foreground, and on demand.
+  const refreshStoreFlags = useCallback(async () => {
+    const { data, error } = await supabase.from('stores').select('id, audit_enabled')
+    if (error || !data) return
+    const flags = new Map(data.map((r) => [r.id, !!r.audit_enabled]))
+    setAccessibleStores((prev) => {
+      let changed = false
+      const next = prev.map((s) => {
+        if (!flags.has(s.id) || !!s.audit_enabled === flags.get(s.id)) return s
+        changed = true
+        return { ...s, audit_enabled: flags.get(s.id) }
+      })
+      return changed ? next : prev
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!session?.user) return undefined
+    refreshStoreFlags()
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshStoreFlags() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [session?.user?.id, refreshStoreFlags])
+
   function setCurrentStoreId(id) {
     setCurrentStoreIdState(id)
     if (id) localStorage.setItem('ot_current_store_id', id)
@@ -598,6 +625,7 @@ export function AuthProvider({ children }) {
     currentStoreId,
     setCurrentStoreId,
     profileError,
+    refreshStoreFlags,
     refreshProfile: () => session?.user && loadProfileData(session.user.id),
     rosterUpdates,
     refreshRosterUpdates,
