@@ -22,9 +22,13 @@ const QUIZ_TYPE_LABEL = {
   mock_master: 'Mock Master Exam',
 }
 
+// Jeff, 2026-10-19: "將training journey移到study log左邊。所以learning
+// tracker在點選員工時，會先進training journey" — Training Journey now sits
+// first/leftmost, and (see the `tab` state's initial value below) is also
+// what a manager lands on first when they click into a staff member here.
 const TABS = [
-  { key: 'study_log', label: 'Study Log' },
   { key: 'training_journey', label: '🏆 Training Journey' },
+  { key: 'study_log', label: 'Study Log' },
 ]
 
 // Jeff, 2026-10-02 (Training Journey spec, points 1-2, applied to the
@@ -40,7 +44,7 @@ const TABS = [
 // TrainingJourneyPage's own comment).
 export default function StaffStudyDetail({ staff, onBack }) {
   const { profile, currentStoreId } = useAuth()
-  const [tab, setTab] = useState('study_log')
+  const [tab, setTab] = useState('training_journey')
   const [showHistory, setShowHistory] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
   const [attempts, setAttempts] = useState([])

@@ -15,9 +15,13 @@ import Button from '../../../components/ui/Button'
 // right next to the Take a Quiz button instead of behind a second tab, both
 // opening as a popup on click rather than taking over the page. A new
 // top-level "Training Journey" tab sits alongside the Study Log list itself.
+// Jeff, 2026-10-19: "將training journey移到study log左邊" — Training
+// Journey now sits first/leftmost, and (see the `tab` state's initial value
+// below) is also what opens by default now, ahead of the plain Study Log
+// checklist.
 const TABS = [
-  { key: 'study_log', label: 'Study Log' },
   { key: 'training_journey', label: '🏆 Training Journey' },
+  { key: 'study_log', label: 'Study Log' },
 ]
 
 // Jeff, 2026-10-03: "原本新員工進度每20%考試的機制取消，因為現在有phase
@@ -31,7 +35,7 @@ const TABS = [
 export default function StudyLogPage() {
   const { profile } = useAuth()
   const qualified = !!profile?.qualified
-  const [tab, setTab] = useState('study_log')
+  const [tab, setTab] = useState('training_journey')
   const [showQuiz, setShowQuiz] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
