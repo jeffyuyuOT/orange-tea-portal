@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { checkForAppUpdate } from '../../../lib/pwaUpdate'
+import { getPushPermissionState, subscribeToPush, unsubscribeFromPush } from '../../../lib/webPush'
 import Button from '../../../components/ui/Button'
 import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 import MyStaffIdModal from './MyStaffIdModal'
@@ -18,11 +19,33 @@ export default function MyInformationPage() {
   // 'uptodate' | 'unsupported'. See lib/pwaUpdate.js for what this actually
   // does and why a manual check is needed at all.
   const [updateStatus, setUpdateStatus] = useState('')
+  // Jeff, 2026-10-21 (full Web Push): 'unsupported' | 'ios-needs-install' |
+  // 'denied' | 'off' | 'on' | 'working' (subscribing/unsubscribing in
+  // flight). See lib/webPush.js for what each state means and why.
+  const [pushState, setPushState] = useState('')
 
   async function handleCheckForUpdate() {
     setUpdateStatus('checking')
     const { supported, updateFound } = await checkForAppUpdate()
     setUpdateStatus(!supported ? 'unsupported' : updateFound ? 'updating' : 'uptodate')
+  }
+
+  useEffect(() => {
+    getPushPermissionState().then(setPushState)
+  }, [])
+
+  async function handleTogglePush() {
+    setPushState('working')
+    try {
+      if ((await getPushPermissionState()) === 'on') {
+        await unsubscribeFromPush()
+      } else {
+        await subscribeToPush(profile.id)
+      }
+    } catch (e) {
+      alert(e.message)
+    }
+    setPushState(await getPushPermissionState())
   }
 
   useEffect(() => {
@@ -160,6 +183,27 @@ export default function MyInformationPage() {
           If the app ever seems out of date after an update — e.g. after not opening it for a while — tap this instead
           of uninstalling and reinstalling. It'll reload on its own if a newer version is found.
         </p>
+
+        {/* Jeff, 2026-10-21: "還是做完整的 Web Push...這樣員工使用起來才知道
+            有訊息可以點進去看" — Message / Bulletin / Roster changes now send
+            a real push notification (see migration + supabase/functions/send-push).
+            This is where someone turns it on for this device; AppShell.jsx also
+            offers a one-time nudge banner so this isn't the only way to find it. */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {pushState === 'ios-needs-install' ? (
+            <p className="text-sm text-gray-500">
+              請先把 OT Portal 加到主畫面才能開啟推播通知：點 Safari 的分享鍵 → 「加入主畫面」，再從主畫面的圖示打開。
+            </p>
+          ) : pushState === 'unsupported' ? (
+            <p className="text-sm text-gray-500">這個瀏覽器不支援推播通知。</p>
+          ) : pushState === 'denied' ? (
+            <p className="text-sm text-gray-500">通知權限被拒絕了——要到手機/瀏覽器的通知設定裡手動開啟。</p>
+          ) : (
+            <Button variant="secondary" onClick={handleTogglePush} disabled={pushState === 'working' || pushState === ''}>
+              {pushState === 'working' ? '處理中…' : pushState === 'on' ? '🔕 關閉推播通知' : '🔔 開啟推播通知'}
+            </Button>
+          )}
+        </div>
       </section>
 
       <StaffDocumentsSection profileId={profile?.id} storeId={currentStoreId} />

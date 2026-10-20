@@ -11,6 +11,7 @@ import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerMod
 import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
 import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
+import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
 
 export default function AppShell() {
   const {
@@ -79,6 +80,42 @@ export default function AppShell() {
       navigator.clearAppBadge().catch(() => {})
     }
   }, [badgeCount])
+  // Jeff, 2026-10-21: "還是做完整的 Web Push，這樣員工使用起來才知道有訊息
+  // 可以點進去看" — a toggle buried in My Information (MyInformationPage.jsx
+  // has the full on/off control) won't get found organically, so this is a
+  // one-time nudge: shown once per device while notification permission is
+  // still undecided, dismissible, remembered in localStorage (per-device is
+  // the right scope here anyway — a push subscription is inherently
+  // per-device, unlike every other profile-level "seen" flag in this file).
+  const [showPushNudge, setShowPushNudge] = useState(false)
+  useEffect(() => {
+    if (!profile?.id || !isPushSupported() || isIosNonStandalone()) return
+    if (typeof Notification === 'undefined' || Notification.permission !== 'default') return
+    let dismissed = false
+    try {
+      dismissed = localStorage.getItem('ot_push_nudge_dismissed') === '1'
+    } catch {
+      /* ignore */
+    }
+    if (!dismissed) setShowPushNudge(true)
+  }, [profile?.id])
+  const dismissPushNudge = () => {
+    setShowPushNudge(false)
+    try {
+      localStorage.setItem('ot_push_nudge_dismissed', '1')
+    } catch {
+      /* ignore */
+    }
+  }
+  const enablePushFromNudge = async () => {
+    try {
+      await subscribeToPush(profile.id)
+    } catch {
+      /* the My Information page explains failures in more detail; a silent
+         no-op here just means the button stays visible to retry */
+    }
+    dismissPushNudge()
+  }
   // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
   // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
   // ANY page, not just after navigating into My Dashboard > Time & Attendance
@@ -243,6 +280,19 @@ export default function AppShell() {
               </button>
             </div>
           </header>
+          {showPushNudge && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
+              <span className="text-brand-800">🔔 開啟推播通知，才不會錯過新訊息、公告跟班表更新。</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <button onClick={enablePushFromNudge} className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">
+                  開啟推播通知
+                </button>
+                <button onClick={dismissPushNudge} className="rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">
+                  之後再說
+                </button>
+              </div>
+            </div>
+          )}
           {/* overflow-x-hidden here is a safety net: if some element inside a
               page is ever too wide for the screen (like the Study Log header
               row Jeff hit on mobile, before it got its own flex-wrap fix),

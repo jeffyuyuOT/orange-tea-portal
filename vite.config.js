@@ -69,6 +69,13 @@ export default defineConfig({
         // /payroll/ hit the network for real instead of substituting the
         // SPA shell.
         navigateFallbackDenylist: [/^\/payroll\//],
+        // Jeff, 2026-10-21: full Web Push. `importScripts` loads public/push-sw.js
+        // (plain JS, no bundler) into this generated service worker — purely
+        // additive, so every precache/runtimeCaching/navigateFallback rule above
+        // stays exactly as tuned. Switching PWA strategy (generateSW ->
+        // injectManifest) to add a push handler would have meant re-deriving all
+        // of the above by hand; importScripts avoids that entirely.
+        importScripts: ['/push-sw.js'],
       },
       manifest: {
         name: 'Orange Tea AU Staff & Manager Portal',
