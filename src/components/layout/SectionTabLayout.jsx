@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext'
 import { SECTIONS, canAccessPage } from '../../lib/permissions'
@@ -6,6 +5,7 @@ import { logicalPageEntries } from '../../lib/sidebarOrder'
 import { useAuditPending } from '../../lib/useAuditPending'
 import { badgeForKeys } from '../../lib/navBadges'
 import NavBadge from '../ui/NavBadge'
+import { SECTION_STYLE } from '../../lib/sectionStyle'
 
 // Jeff, 2026-10-19 (mobile nav redesign, point 2): a shared top tab bar +
 // <Outlet/> for every multi-page section, generalizing the pattern
@@ -31,19 +31,29 @@ import NavBadge from '../ui/NavBadge'
 // the one it happens to link to (same "isActive across every member"
 // treatment Sidebar.jsx's own group row already uses).
 //
-// Jeff, 2026-10-19 (follow-up): "admin在分頁太多的情況，手機上半部幾乎被tab
-// 占滿了" — Admin Center's 7 tabs wrapped to 4 rows on a phone before any
-// page content even started. Desktop keeps the pill row no matter how many
-// tabs (plenty of width there); on mobile, a section with MANY tabs
-// (DROPDOWN_THRESHOLD or more) collapses to a one-row dropdown instead —
-// confirmed with a mockup (two live versions to compare space used) before
-// building this. A section with few tabs (Operations & Training, Audit)
-// keeps the same visible pill row on mobile too — nothing to collapse, and
-// visible tabs are one tap instead of two. Deliberately NOT horizontal
-// scroll: Jeff explicitly moved away from that for TrainingCentreLayout.jsx
-// (2026-09-29/2026-10-02, "必须往旁边滑" was the complaint), so a dropdown
-// was picked over reviving the swipe pattern here.
-const DROPDOWN_THRESHOLD = 5
+// Jeff, 2026-10-21 (mobile nav redesign, level 2): "手機版的主分頁下常常會有
+// 5-7個子分頁...如果現在有按鈕的方式也可以顯示提示訊息...按鈕比較清楚看到所有
+// 子分頁，而且分頁內容也可以省掉tab的空間" — replaces the old mobile
+// pill-row/dropdown (2026-10-19's DROPDOWN_THRESHOLD, now gone) with a
+// single-line back-bar to a button-card chooser screen at this section's
+// own bare path (SectionSubpageHome), mirroring MobileSectionHome.jsx one
+// level down. Desktop is untouched: the pill row below always shows every
+// page at once, exactly as before, regardless of tab count.
+//
+// A PAGE_GROUPS entry that owns its OWN nested layout (today: Shop
+// Management's "Training Centre", via TrainingCentreLayout) gets its own
+// back-bar for its own subtree instead of this one stacking on top of it —
+// Jeff: "為什麼一定要顯示shop management?...在所有第二層子分頁按紐頁再顯示
+// shop management" — exactly one back-bar is ever on screen, always
+// pointing one level up from wherever you are. GROUP_SUBPAGE names which
+// chooser path such a group's own card should link to (instead of jumping
+// straight to its first member page, which is what the desktop pill still
+// does); `nestedPaths` (derived from it below) is every path — the group's
+// member pages AND its own chooser — that this layout steps aside for
+// because a more specific layout already covers them.
+const GROUP_SUBPAGE = {
+  training_centre: '/shop-management/training-centre',
+}
 
 function pillClass(isActive) {
   return `flex items-center gap-1.5 px-3 py-2 text-sm font-medium ${
@@ -57,30 +67,28 @@ export default function SectionTabLayout({ sectionKey }) {
   const { pathname } = useLocation()
   const section = SECTIONS[sectionKey]
   const prefix = `/${sectionKey.replace(/_/g, '-')}`
-  const [ddOpen, setDdOpen] = useState(false)
   // Jeff, 2026-10-20 (point 7): "分頁按鈕右上角要顯示數字提示" — the same
   // "something's new" signals Sidebar.jsx already showed on the desktop
-  // page list (see navBadges.jsx), now on each tab here too. auditPending
+  // page list (see navBadges.jsx), now on each tab/card here too. auditPending
   // isn't part of AuthContext itself — see useAuditPending.js (this hook is
   // always called, even outside the Audit section; it internally no-ops
   // for every role but shop_manager viewing audit.review).
   const auditPending = useAuditPending(profile, effectivePages)
   const signals = { rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, auditPending }
 
-  useEffect(() => {
-    setDdOpen(false)
-  }, [pathname])
-
   const tabs = logicalPageEntries(sectionKey, sidebarOrder)
     .map((entry) => {
       if (entry.type === 'group') {
         const accessibleMembers = entry.pages.filter((p) => canAccessPage(effectivePages, `${sectionKey}.${p}`))
         if (!accessibleMembers.length) return null
+        const memberPaths = accessibleMembers.map((p) => `${prefix}/${p.replace(/_/g, '-')}`)
+        const subpageTo = GROUP_SUBPAGE[entry.key]
         return {
           key: entry.key,
           label: entry.label,
-          to: `${prefix}/${accessibleMembers[0].replace(/_/g, '-')}`,
-          matchPaths: accessibleMembers.map((p) => `${prefix}/${p.replace(/_/g, '-')}`),
+          to: memberPaths[0],
+          subpageTo,
+          matchPaths: subpageTo ? [...memberPaths, subpageTo] : memberPaths,
           fullKeys: accessibleMembers.map((p) => `${sectionKey}.${p}`),
         }
       }
@@ -96,13 +104,10 @@ export default function SectionTabLayout({ sectionKey }) {
       badge: badgeForKeys(t.fullKeys, signals),
     }))
 
-  const activeTab = tabs.find((t) => t.isActive) ?? tabs[0]
-  const useDropdownOnMobile = tabs.length >= DROPDOWN_THRESHOLD
-  // Aggregate badge for the collapsed dropdown button itself — with the
-  // list closed there's no other way to see any one tab's own badge, so
-  // the toggle needs its own "something in here" signal (point 7's
-  // "這樣user才知道裡面有提示訊息要按進去看").
-  const anyBadge = useDropdownOnMobile ? badgeForKeys(tabs.flatMap((t) => t.fullKeys), signals) : null
+  // Every path a nested group's own layout already owns a back-bar for —
+  // this layout's back-bar steps aside on all of them (see comment above).
+  const nestedPaths = tabs.filter((t) => t.subpageTo).flatMap((t) => t.matchPaths)
+  const showBackBar = pathname !== prefix && !nestedPaths.includes(pathname)
 
   function renderPill(t) {
     return (
@@ -122,50 +127,25 @@ export default function SectionTabLayout({ sectionKey }) {
           look (DashboardLayout.jsx, TrainingCentreLayout.jsx). */}
       <div className="mb-5 hidden flex-wrap gap-1 border-b border-brand-100 md:flex">{tabs.map(renderPill)}</div>
 
-      {/* Mobile: pills when there's not many, a dropdown once there are —
-          see this component's top comment. */}
-      {useDropdownOnMobile ? (
-        <div className="relative mb-5 md:hidden">
-          <button
-            type="button"
-            onClick={() => setDdOpen((v) => !v)}
-            aria-expanded={ddOpen}
-            className="relative flex w-full items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm font-semibold text-brand-700"
-          >
-            <span className="truncate">{activeTab?.label}</span>
-            <span className={`shrink-0 text-xs text-brand-400 transition-transform ${ddOpen ? 'rotate-180' : ''}`} aria-hidden>
-              ▾
-            </span>
-            <NavBadge badge={anyBadge} corner />
-          </button>
-          {ddOpen && (
-            <>
-              {/* Click-away target, same pattern AppShell's old mobile
-                  drawer used for the same purpose. */}
-              <div className="fixed inset-0 z-10" onClick={() => setDdOpen(false)} />
-              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl border border-brand-100 bg-white shadow-lg">
-                {tabs.map((t) => (
-                  <Link
-                    key={t.key}
-                    to={t.to}
-                    onClick={() => setDdOpen(false)}
-                    className={`flex items-center justify-between gap-2 border-b border-gray-100 px-3.5 py-2.5 text-sm last:border-b-0 ${
-                      t.isActive ? 'bg-brand-50 font-semibold text-brand-700' : 'text-gray-600'
-                    }`}
-                  >
-                    {t.label}
-                    <NavBadge badge={t.badge} />
-                  </Link>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-100 md:hidden">{tabs.map(renderPill)}</div>
+      {/* Mobile: a slim back-bar instead of a tab bar — the button-card
+          chooser at this section's own bare path (SectionSubpageHome, via
+          the Outlet context below) shows every page; this bar is just the
+          way back up to it. Hidden on the chooser page itself, and hidden
+          under a nested group's own subtree so exactly one back-bar is ever
+          on screen (see GROUP_SUBPAGE/nestedPaths above). */}
+      {showBackBar && (
+        <Link to={prefix} className="mb-4 flex items-center gap-1 text-sm font-medium text-brand-600 md:hidden">
+          <span aria-hidden>‹</span> {section?.label}
+        </Link>
       )}
 
-      <Outlet />
+      <Outlet
+        context={{
+          items: tabs.map((t) => ({ key: t.key, label: t.label, to: t.subpageTo ?? t.to, badge: t.badge })),
+          firstPath: tabs[0]?.to,
+          style: SECTION_STYLE[sectionKey],
+        }}
+      />
     </div>
   )
 }

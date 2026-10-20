@@ -15,6 +15,12 @@ const SetPasswordPage = lazy(() => import('../modules/auth/SetPasswordPage'))
 // just below (first login shouldn't download layouts nobody's visited yet).
 const MobileSectionHome = lazy(() => import('../components/layout/MobileSectionHome'))
 const SectionTabLayout = lazy(() => import('../components/layout/SectionTabLayout'))
+// Jeff, 2026-10-21 (mobile nav redesign, level 2): "按鈕比較清楚看到所有子
+// 分頁" — the same button-card chooser pattern as MobileSectionHome, one
+// level down, for the 5-7 pages WITHIN a section. One component shared by
+// every SectionTabLayout/DashboardLayout/TrainingCentreLayout chooser route
+// below — each passes its own list down via <Outlet context={...}/>.
+const SectionSubpageHome = lazy(() => import('../components/layout/SectionSubpageHome'))
 
 const FormulaPage = lazy(() => import('../modules/operations-training/formula/FormulaPage'))
 const ShopTrainingPage = lazy(() => import('../modules/operations-training/shop-training/ShopTrainingPage'))
@@ -117,12 +123,13 @@ export default function AppRoutes() {
         <Route path="/home" element={<MobileSectionHome />} />
 
         <Route element={<SectionTabLayout sectionKey="operations_training" />}>
+          <Route path="/operations-training" element={<SectionSubpageHome />} />
           <Route path="/operations-training/formula" element={guarded('operations_training.formula', <FormulaPage />)} />
           <Route path="/operations-training/shop-training" element={guarded('operations_training.shop_training', <ShopTrainingPage />)} />
         </Route>
 
         <Route path="/dashboard" element={<DashboardLayout />}>
-          <Route index element={<Navigate to="bulletin" replace />} />
+          <Route index element={<SectionSubpageHome />} />
           <Route path="bulletin" element={guarded('dashboard.bulletin', <BulletinPage />)} />
           <Route path="message" element={guarded('dashboard.message', <MessagePage />)} />
           <Route path="study-log" element={guarded('dashboard.study_log', <StudyLogPage />)} />
@@ -136,6 +143,7 @@ export default function AppRoutes() {
         <Route path="/support/submit-request" element={guarded('support.submit_request', <SupportPage />)} />
 
         <Route element={<SectionTabLayout sectionKey="shop_management" />}>
+          <Route path="/shop-management" element={<SectionSubpageHome />} />
           <Route path="/shop-management/learning-tracker" element={guarded('shop_management.learning_tracker', <LearningTrackerPage />)} />
           <Route path="/shop-management/staff-information" element={guarded('shop_management.staff_information', <StaffListPage />)} />
 
@@ -149,6 +157,7 @@ export default function AppRoutes() {
               pattern AppShell's own wrapping Route uses), so nesting one
               inside the other doesn't change any child's absolute path. */}
           <Route element={<TrainingCentreLayout />}>
+            <Route path="/shop-management/training-centre" element={<SectionSubpageHome />} />
             <Route path="/shop-management/quiz-bank" element={guarded('shop_management.quiz_bank', <TrainingCentreQuizBankPage />)} />
             <Route
               path="/shop-management/shop-training-database"
@@ -165,6 +174,7 @@ export default function AppRoutes() {
         </Route>
 
         <Route element={<SectionTabLayout sectionKey="roster_hub" />}>
+          <Route path="/roster-hub" element={<SectionSubpageHome />} />
           <Route path="/roster-hub/my-roster" element={guarded('roster_hub.my_roster', <MyRosterPage />)} />
           <Route path="/roster-hub/my-availability" element={guarded('roster_hub.my_availability', <MyAvailabilityPage />)} />
           <Route path="/roster-hub/manage-roster" element={guarded('roster_hub.manage_roster', <ManageRosterPage />)} />
@@ -174,12 +184,14 @@ export default function AppRoutes() {
         </Route>
 
         <Route element={<SectionTabLayout sectionKey="audit" />}>
+          <Route path="/audit" element={<SectionSubpageHome />} />
           <Route path="/audit/review" element={guarded('audit.review', <AuditReviewPage />)} />
           <Route path="/audit/history" element={guarded('audit.history', <AuditHistoryPage />)} />
           <Route path="/audit/settings" element={guarded('audit.settings', <AuditSettingsPage />)} />
         </Route>
 
         <Route element={<SectionTabLayout sectionKey="admin_center" />}>
+          <Route path="/admin-center" element={<SectionSubpageHome />} />
           <Route path="/admin-center/formula-database" element={guarded('admin_center.formula_database', <FormulaDatabasePage />)} />
           <Route path="/admin-center/quiz-bank" element={guarded('admin_center.quiz_bank', <AdminQuizBankPage />)} />
           <Route path="/admin-center/file-repository" element={guarded('admin_center.file_repository', <FileRepositoryPage />)} />
@@ -206,6 +218,7 @@ export default function AppRoutes() {
             carries no path of its own, same nesting pattern as Shop
             Management's TrainingCentreLayout inside SectionTabLayout. */}
         <Route element={<SectionTabLayout sectionKey="developer_tools" />}>
+          <Route path="/developer-tools" element={<SectionSubpageHome />} />
           <Route
             path="/developer-tools/payroll"
             element={guarded('developer_tools.payroll', <RequireTwoFactor><PayrollPage /></RequireTwoFactor>)}

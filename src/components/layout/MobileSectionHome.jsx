@@ -4,6 +4,7 @@ import { SECTIONS, canAccessPage } from '../../lib/permissions'
 import { orderedSectionEntries, logicalPageEntries } from '../../lib/sidebarOrder'
 import { useAuditPending } from '../../lib/useAuditPending'
 import { badgeForKeys } from '../../lib/navBadges'
+import { SECTION_STYLE } from '../../lib/sectionStyle'
 import NavBadge from '../ui/NavBadge'
 
 // Jeff, 2026-10-19 (mobile nav redesign, point 1): mobile's new main-nav
@@ -19,16 +20,9 @@ import NavBadge from '../ui/NavBadge'
 // section you move between its own pages via SectionTabLayout's top tabs;
 // crossing to a DIFFERENT section means tapping back to this screen first,
 // per Jeff, 2026-10-19 ("要去其他分頁再到上一層").
-const SECTION_STYLE = {
-  operations_training: { icon: '📖', bg: 'linear-gradient(135deg,#14b8a6,#0d9488)' },
-  dashboard: { icon: '🏠', bg: 'linear-gradient(135deg,#fb923c,#f97316)' },
-  support: { icon: '🙋', bg: 'linear-gradient(135deg,#64748b,#475569)' },
-  shop_management: { icon: '🏪', bg: 'linear-gradient(135deg,#0ea5e9,#0284c7)' },
-  roster_hub: { icon: '📅', bg: 'linear-gradient(135deg,#22c55e,#16a34a)' },
-  audit: { icon: '📋', bg: 'linear-gradient(135deg,#f43f5e,#e11d48)' },
-  admin_center: { icon: '⚙️', bg: 'linear-gradient(135deg,#a855f7,#9333ea)' },
-  developer_tools: { icon: '🔧', bg: 'linear-gradient(135deg,#1f2937,#111827)' },
-}
+// Jeff, 2026-10-21: the color/icon recipe itself moved to lib/sectionStyle.js
+// (imported above) so SectionSubpageHome.jsx — the same button-card recipe,
+// one level down — can reuse it without breaking Fast Refresh here.
 
 // First path this person can reach within one section, in that section's
 // own Sidebar order — same logic as sidebarOrder.js's firstAccessiblePagePath,
@@ -72,11 +66,19 @@ export default function MobileSectionHome() {
           ? e.pages.filter((p) => canAccessPage(effectivePages, `${sectionKey}.${p}`)).map((p) => `${sectionKey}.${p}`)
           : [`${sectionKey}.${e.key}`]
       )
+      // Jeff, 2026-10-21 (mobile nav redesign, level 2): a section with more
+      // than one reachable page now lands on ITS OWN button-card chooser
+      // (SectionSubpageHome, at this section's own bare path) instead of
+      // jumping straight into the first page — same reasoning as this
+      // screen itself, one level up. A section with exactly one reachable
+      // page skips the (otherwise 1-card, pointless) chooser and still
+      // links straight to it.
+      const prefix = `/${sectionKey.replace(/_/g, '-')}`
       return {
         key: sectionKey,
         label: SECTIONS[sectionKey]?.label ?? sectionKey,
         count: reachable.length,
-        to: firstPathInSection(sectionKey, reachable, effectivePages),
+        to: reachable.length > 1 ? prefix : firstPathInSection(sectionKey, reachable, effectivePages),
         style: SECTION_STYLE[sectionKey],
         badge: badgeForKeys(fullKeys, signals),
       }

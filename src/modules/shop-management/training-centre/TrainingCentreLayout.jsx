@@ -1,6 +1,10 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../../../lib/AuthContext'
 import { canAccessPage } from '../../../lib/permissions'
+import { useAuditPending } from '../../../lib/useAuditPending'
+import { badgeForKeys } from '../../../lib/navBadges'
+import NavBadge from '../../../components/ui/NavBadge'
+import { SECTION_STYLE } from '../../../lib/sectionStyle'
 
 // Jeff, 2026-09: Quiz Bank + Shop Training Database merged into "Training
 // Centre", then (same day) moved from being its own top-level section into
@@ -17,6 +21,8 @@ import { canAccessPage } from '../../../lib/permissions'
 // AuthContext.jsx (verifyTrainingCode/needsTrainingCode, both removed) and
 // LoginPage.jsx/RequireAuth.jsx (the extra sign-in step they used to gate
 // training-role accounts behind).
+const PREFIX = '/shop-management/training-centre'
+
 const TABS = [
   { key: 'shop_management.quiz_bank', to: '/shop-management/quiz-bank', label: 'Branch Quiz Bank' },
   { key: 'shop_management.shop_training_database', to: '/shop-management/shop-training-database', label: 'Shop Training Database' },
@@ -28,26 +34,26 @@ const TABS = [
 ]
 
 export default function TrainingCentreLayout() {
-  const { effectivePages } = useAuth()
+  const { effectivePages, profile, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies } = useAuth()
+  const { pathname } = useLocation()
+  // Jeff, 2026-10-21 (point 7, carried down here same as every other nav
+  // surface — navBadges.jsx): none of this group's 3 pages has a signal
+  // wired up to it yet, so every badge below is a silent no-op today —
+  // future-proofed the same way DashboardLayout.jsx's full signal set is,
+  // rather than leaving this one layout unable to show a badge at all.
+  const auditPending = useAuditPending(profile, effectivePages)
+  const signals = { rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, auditPending }
+
+  const accessibleTabs = TABS.filter((t) => canAccessPage(effectivePages, t.key))
+  const isChooser = pathname === PREFIX
 
   return (
     <div>
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Training Centre</h1>
 
-      {/* Jeff, 2026-09-29: "手機板的shop training database介面要好操作一
-          點，都超出螢幕了" — three tab labels this long (esp. "Shop Training
-          Database") don't fit a phone width. That round's fix made the bar
-          itself scroll horizontally (overflow-x-auto + shrink-0/
-          whitespace-nowrap, a swipeable tab strip) — but Jeff, 2026-10-02:
-          "手機板training centre要選分頁時會超出頁面，必須往旁邊滑" says
-          needing that sideways swipe at all is itself the problem. Switched
-          to flex-wrap instead: each tab is still one unbroken label (no
-          whitespace-nowrap needed for that — a flex item just wraps as a
-          whole onto the next line), but now the BAR wraps onto a second
-          line on a narrow phone rather than requiring any horizontal
-          scrolling to reach a tab. */}
-      <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-100">
-        {TABS.filter((t) => canAccessPage(effectivePages, t.key)).map((t) => (
+      {/* Desktop: unchanged pill row. */}
+      <div className="mb-5 hidden flex-wrap gap-1 border-b border-brand-100 md:flex">
+        {accessibleTabs.map((t) => (
           <NavLink
             key={t.key}
             to={t.to}
@@ -58,11 +64,32 @@ export default function TrainingCentreLayout() {
             }
           >
             {t.label}
+            <NavBadge badge={badgeForKeys([t.key], signals)} />
           </NavLink>
         ))}
       </div>
 
-      <Outlet />
+      {/* Jeff, 2026-10-21 (mobile nav redesign, level 2): one back-bar,
+          never stacked with Shop Management's own — "為什麼一定要顯示shop
+          management?...在所有第二層子分頁按紐頁再顯示shop management". On
+          this chooser itself (SectionSubpageHome via the Outlet context
+          below), go up to Shop Management; on any leaf page here, go up to
+          this chooser instead — SectionTabLayout.jsx's own back-bar already
+          steps aside for every path this component owns. */}
+      <Link
+        to={isChooser ? '/shop-management' : PREFIX}
+        className="mb-4 flex items-center gap-1 text-sm font-medium text-brand-600 md:hidden"
+      >
+        <span aria-hidden>‹</span> {isChooser ? 'Shop Management' : 'Training Centre'}
+      </Link>
+
+      <Outlet
+        context={{
+          items: accessibleTabs.map((t) => ({ key: t.key, label: t.label, to: t.to, badge: badgeForKeys([t.key], signals) })),
+          firstPath: accessibleTabs[0]?.to,
+          style: SECTION_STYLE.shop_management,
+        }}
+      />
     </div>
   )
 }

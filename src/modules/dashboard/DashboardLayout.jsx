@@ -1,24 +1,28 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext'
-import { canAccessPage } from '../../lib/permissions'
+import { SECTIONS, canAccessPage } from '../../lib/permissions'
 import { supabase } from '../../lib/supabaseClient'
 import { currentTitle } from '../../lib/trainingJourney'
 import { badgeForKeys } from '../../lib/navBadges'
 import NavBadge from '../../components/ui/NavBadge'
+import { SECTION_STYLE } from '../../lib/sectionStyle'
 
 const TABS = [
   { key: 'dashboard.bulletin', to: '/dashboard/bulletin', label: 'Bulletin Board' },
   { key: 'dashboard.message', to: '/dashboard/message', label: 'Message' },
   { key: 'dashboard.study_log', to: '/dashboard/study-log', label: 'Study Log' },
-  // Jeff, 2026-10-21: shortened from "Time & Attendance" — the full label
-  // wrapped this tab bar to 3 lines on mobile.
-  { key: 'dashboard.time_attendance', to: '/dashboard/time-attendance', label: 'Attendance' },
+  // Jeff, 2026-10-21: back to the full label — the old mobile tab row this
+  // was shortened for (2026-10-21) is gone, replaced by a button-card
+  // chooser + a one-line back-bar (mobile nav redesign, level 2). Desktop's
+  // pill row below had the room for the full label all along.
+  { key: 'dashboard.time_attendance', to: '/dashboard/time-attendance', label: 'Time & Attendance' },
   { key: 'dashboard.my_information', to: '/dashboard/my-information', label: 'My Information' },
 ]
 
 export default function DashboardLayout() {
   const { profile, effectivePages, unreadMessageCount, hasBulletinUpdates } = useAuth()
+  const { pathname } = useLocation()
   // Jeff, 2026-10-20 (point 7): same "something's new" lookup the new
   // mobile nav surfaces use (navBadges.jsx) — brings this tab bar's Message
   // count up to parity with a Bulletin Board dot too (Sidebar.jsx already
@@ -53,6 +57,8 @@ export default function DashboardLayout() {
   const titlePhaseNumber = profile?.has_master_title ? 4 : profile?.training_journey_phase ?? 0
   const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
 
+  const accessibleTabs = TABS.filter((t) => canAccessPage(effectivePages, t.key))
+
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold text-gray-900">
@@ -69,14 +75,9 @@ export default function DashboardLayout() {
         )}
       </h1>
 
-      {/* Jeff, 2026-10-19: "my information選不到無法進去" — on a narrow
-          phone these 5 tabs overflow the row with no wrap, pushing My
-          Information (the last one) off-screen and out of reach. Same
-          flex-wrap fix TrainingCentreLayout.jsx already got for the same
-          overflow problem (2026-09-29/2026-10-02): the bar wraps onto a
-          second line on a narrow screen instead of clipping a tab. */}
-      <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-100">
-        {TABS.filter((t) => canAccessPage(effectivePages, t.key)).map((t) => (
+      {/* Desktop: unchanged pill row, every page at once. */}
+      <div className="mb-5 hidden flex-wrap gap-1 border-b border-brand-100 md:flex">
+        {accessibleTabs.map((t) => (
           <NavLink
             key={t.key}
             to={t.to}
@@ -96,7 +97,24 @@ export default function DashboardLayout() {
         ))}
       </div>
 
-      <Outlet />
+      {/* Jeff, 2026-10-21 (mobile nav redesign, level 2): a slim back-bar
+          instead of the old mobile tab row — hidden on the chooser page
+          itself ("/dashboard", SectionSubpageHome via the Outlet context
+          below), same pattern every other section's layout now uses
+          (SectionTabLayout.jsx). */}
+      {pathname !== '/dashboard' && (
+        <Link to="/dashboard" className="mb-4 flex items-center gap-1 text-sm font-medium text-brand-600 md:hidden">
+          <span aria-hidden>‹</span> {SECTIONS.dashboard?.label}
+        </Link>
+      )}
+
+      <Outlet
+        context={{
+          items: accessibleTabs.map((t) => ({ key: t.key, label: t.label, to: t.to, badge: badgeForKeys([t.key], navSignals) })),
+          firstPath: accessibleTabs[0]?.to,
+          style: SECTION_STYLE.dashboard,
+        }}
+      />
     </div>
   )
 }
