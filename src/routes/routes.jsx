@@ -192,18 +192,29 @@ export default function AppRoutes() {
           />
         </Route>
 
-        {/* Jeff, 2026-10-19: on top of the page_key check guarded() already
-            does (still developer-only — see permissions.js), these two
-            also require a second factor (Supabase Auth TOTP MFA) before
-            rendering — see RequireTwoFactor's own comment for why. */}
-        <Route
-          path="/developer-tools/payroll"
-          element={guarded('developer_tools.payroll', <RequireTwoFactor><PayrollPage /></RequireTwoFactor>)}
-        />
-        <Route
-          path="/developer-tools/bk"
-          element={guarded('developer_tools.bk', <RequireTwoFactor><BkPage /></RequireTwoFactor>)}
-        />
+        {/* Jeff, 2026-10-20: "手機板的BK頁面看不到，developer進去只有payroll
+            頁面" — Developer Tools was the one section the mobile nav
+            redesign (2026-10-19) left un-wrapped (reasoned at the time that
+            2 niche, developer-only pages didn't need a tab bar), but that
+            meant mobile had no way at all to get from Payroll to BK — the
+            desktop sidebar still listed both, mobile's new section-grid
+            only ever lands on the first page in a section. Wrapped in
+            SectionTabLayout like every other multi-page section now; with
+            only 2 tabs it renders as plain pills (DROPDOWN_THRESHOLD is 5),
+            not a dropdown. RequireTwoFactor still gates each page
+            individually underneath — unaffected by this wrapper, which
+            carries no path of its own, same nesting pattern as Shop
+            Management's TrainingCentreLayout inside SectionTabLayout. */}
+        <Route element={<SectionTabLayout sectionKey="developer_tools" />}>
+          <Route
+            path="/developer-tools/payroll"
+            element={guarded('developer_tools.payroll', <RequireTwoFactor><PayrollPage /></RequireTwoFactor>)}
+          />
+          <Route
+            path="/developer-tools/bk"
+            element={guarded('developer_tools.bk', <RequireTwoFactor><BkPage /></RequireTwoFactor>)}
+          />
+        </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
