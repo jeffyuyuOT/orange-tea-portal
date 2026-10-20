@@ -122,20 +122,23 @@ export default function StoreManagementPage() {
     }
     // Jeff, 2026-10-20 (point 4): "disable roster沒勾選的店的staff，則roster
     // tab預設勾選" / confirmed via follow-up: flipping this switch bulk-
-    // overwrites can_view_roster_tab for every profile CURRENTLY at this
-    // store (user_stores) to match — an individual staff member can still
-    // be set differently afterward in User Management (Jeff: "如果有個別
-    // 員工要不一樣可以再去user management去更改勾選"), until the next time
-    // this switch is flipped. A staff member added to the store LATER
-    // starts from the plain column default (true) until this switch is
-    // next toggled or someone unchecks it for them directly — a known,
+    // overwrites can_view_roster_tab for every user_stores row AT THIS
+    // STORE to match — an individual staff member can still be set
+    // differently afterward in User Management (Jeff: "如果有個別員工要不
+    // 一樣可以再去user management去更改勾選"), until the next time this
+    // switch is flipped. Reworked 2026-10-20 (same day) from an earlier
+    // single profiles.can_view_roster_tab bulk-update, after Jeff flagged
+    // that a global flag can't represent two different per-store truths for
+    // a staff member on two stores — now a plain per-(profile,store)
+    // update scoped to this store's own user_stores rows, matching the
+    // existing roster_display_name/hidden_from_roster pattern, so a
+    // multi-store person's OTHER store membership is untouched. A staff
+    // member added to this store LATER starts from the plain column
+    // default (true) until this switch is next toggled or someone
+    // unchecks it for them directly in User Management — a known,
     // accepted gap rather than wiring every staff-add code path to this.
     if (disableRosterChanged) {
-      const { data: memberRows } = await supabase.from('user_stores').select('profile_id').eq('store_id', savedStore.id)
-      const profileIds = Array.from(new Set((memberRows ?? []).map((m) => m.profile_id).filter(Boolean)))
-      if (profileIds.length) {
-        await supabase.from('profiles').update({ can_view_roster_tab: !payload.disable_roster }).in('id', profileIds)
-      }
+      await supabase.from('user_stores').update({ can_view_roster_tab: !payload.disable_roster }).eq('store_id', savedStore.id)
     }
     // Apply each document type's pick (or removal) against store_document_links.
     // A pasted link (if present) wins over a File Repository file pick —

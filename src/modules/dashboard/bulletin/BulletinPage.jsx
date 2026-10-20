@@ -122,13 +122,19 @@ async function notifyManagersOfTrainingHours(newlyCrossed, storeId, sender) {
 export default function BulletinPage() {
   const { currentStoreId, profile, refreshBulletinUpdates } = useAuth()
   // Jeff, 2026-10-20 (point 3): "有勾選的話才能看到bulletin的roaster
-  // tab，沒勾選的話就看不到" — a new per-profile permission
-  // (profiles.can_view_roster_tab, User Management > My Dashboard), default
-  // true for everyone who already existed before this column did. When
-  // off, the Roster filter button disappears entirely and roster weeks are
-  // left out of the feed altogether (not just hidden behind the filter) —
-  // see rosterItems below.
-  const canViewRosterTab = profile?.can_view_roster_tab !== false
+  // tab，沒勾選的話就看不到" — a per-profile, per-STORE permission
+  // (user_stores.can_view_roster_tab, User Management > My Dashboard — one
+  // checkbox per store this person belongs to). Reworked same day from an
+  // earlier single account-wide profiles.can_view_roster_tab after Jeff
+  // flagged the multi-store conflict (a person on two stores needing this
+  // set differently on each) — this now reads whichever store's row
+  // matches currentStoreId, not one global value. Defaults true when no
+  // user_stores row exists at all (admin/developer have none — see
+  // notifyManagersOfTrainingHours's comment above). When off, the Roster
+  // filter button disappears entirely and roster weeks are left out of the
+  // feed altogether (not just hidden behind the filter) — see rosterItems
+  // below. Fetched fresh in load() below, per currentStoreId.
+  const [canViewRosterTab, setCanViewRosterTab] = useState(true)
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
   const [importantOnly, setImportantOnly] = useState(false) // only meaningful while filter === 'announcement'
   const [loading, setLoading] = useState(true)
@@ -166,7 +172,7 @@ export default function BulletinPage() {
 
     const oneMonthAgo = addMonths(new Date(), -1).toISOString()
 
-    const [{ data: announcementRows }, { data: importantAnnouncementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }, { data: announcementReadRows }] = await Promise.all([
+    const [{ data: announcementRows }, { data: importantAnnouncementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }, { data: announcementReadRows }, { data: rosterTabRow }] = await Promise.all([
       supabase
         .from('announcements')
         .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
@@ -216,7 +222,14 @@ export default function BulletinPage() {
       // timestamp (migration 0056) — same New/Update pattern as the Roster
       // tab above, just keyed by announcement_id instead of roster period.
       supabase.from('announcement_reads').select('announcement_id, read_at').eq('profile_id', profile.id),
+      // This person's OWN user_stores row at currentStoreId — may not exist
+      // at all (admin/developer), in which case the per-store permission
+      // simply defaults true (see canViewRosterTabNow below).
+      supabase.from('user_stores').select('can_view_roster_tab').eq('profile_id', profile.id).eq('store_id', currentStoreId).maybeSingle(),
     ])
+
+    const canViewRosterTabNow = rosterTabRow?.can_view_roster_tab !== false
+    setCanViewRosterTab(canViewRosterTabNow)
 
     const reminderMonths = settingsRow?.reminder_period_months ?? 3
 
@@ -396,7 +409,7 @@ export default function BulletinPage() {
     // been visited.
     const periodViewedAt = new Map((periodViewRows ?? []).map((r) => [r.roster_period_id, r.viewed_at]))
 
-    const rosterItems = !canViewRosterTab ? [] : (rosterRows ?? []).map((r) => {
+    const rosterItems = !canViewRosterTabNow ? [] : (rosterRows ?? []).map((r) => {
       const creatorName = r.created_by_name || (r.creator ? `${r.creator.first_name ?? ''} ${r.creator.last_name ?? ''}`.trim() : '')
       const latestChange = periodLatestChange.get(r.id)
       const viewedAt = periodViewedAt.get(r.id)

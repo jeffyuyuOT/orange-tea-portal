@@ -80,22 +80,26 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // already see this block unconditionally in StaffDetailModal.jsx, so
   // this checkbox only matters for shop_manager). Defaults off.
   const [canViewStaffConfidential, setCanViewStaffConfidential] = useState(user.can_view_staff_confidential ?? false)
-  // Jeff, 2026-10-20 (point 3): "user maangement裡分頁權限my dash board裡
-  //新增roster tab勾選，有勾選的話才能看到bulletin的roaster tab" — same
-  // plain-column pattern as canViewStaffConfidential above (a capability
-  // WITHIN Bulletin Board, not a page of its own), rendered inside My
-  // Dashboard's page list rather than as its own section. Defaults true
-  // (everyone keeps seeing it unless explicitly turned off) — see point 4:
-  // Store Management's new "Disable roster" switch bulk-sets this for
-  // every current staff member at a store when flipped; this checkbox is
-  // how an individual gets set differently afterward.
-  const [canViewRosterTab, setCanViewRosterTab] = useState(user.can_view_roster_tab ?? true)
   const [overrides, setOverrides] = useState({}) // page_key -> boolean (explicit override) or undefined
   // Store(s) this person shows up on the roster for, beyond their primary
   // Store above — e.g. an admin who only actually works a couple of
   // stores, not every store the way `role: admin` used to imply for roster
   // purposes. Backed by user_stores (see migration 0027).
   const [extraStoreIds, setExtraStoreIds] = useState([])
+  // Jeff, 2026-10-20 (point 3), reworked same day to per-store: "user
+  // maangement裡分頁權限my dash board裡新增roster tab勾選，有勾選的話才能
+  // 看到bulletin的roaster tab" — originally a single account-wide
+  // profiles.can_view_roster_tab checkbox; Jeff flagged that a person on
+  // two stores with conflicting "Disable roster" store settings couldn't
+  // be represented by one global value, so this is now one checkbox PER
+  // store the person belongs to (user_stores.can_view_roster_tab), same
+  // shape as roster_display_name/hidden_from_roster. Keyed by store_id;
+  // fetched alongside extraStoreIds below. A store with no row yet (just
+  // checked under "also belong to", not saved) defaults true. Store
+  // Management's "Disable roster" switch bulk-sets this for every current
+  // member of that store — these checkboxes are how an individual gets set
+  // differently afterward, independently per store.
+  const [rosterTabByStore, setRosterTabByStore] = useState({})
   // Jeff, 2026-09: "Join store activity" — one flag for the whole person
   // (not per store), governing whether Store above AND every "also belong
   // to" store below treat them as a full active participant (schedulable,
@@ -150,16 +154,25 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       })
     supabase
       .from('user_stores')
-      .select('store_id')
+      .select('store_id, can_view_roster_tab')
       .eq('profile_id', user.id)
       .then(({ data }) => {
         setExtraStoreIds((data ?? []).map((r) => r.store_id).filter((id) => id !== (user.primary_store_id ?? '')))
+        const rosterTabMap = {}
+        ;(data ?? []).forEach((r) => {
+          rosterTabMap[r.store_id] = r.can_view_roster_tab !== false
+        })
+        setRosterTabByStore(rosterTabMap)
         setLoadedParts((n) => n + 1)
       })
   }, [user.id, user.primary_store_id])
 
   function toggleExtraStore(id) {
     setExtraStoreIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  function toggleRosterTab(id) {
+    setRosterTabByStore((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }))
   }
 
   const effective = getEffectivePages(
@@ -224,7 +237,6 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         cash_in_hand: cashInHand,
         can_edit_attendance_logs: canEditAttendanceLogs,
         can_view_staff_confidential: canViewStaffConfidential,
-        can_view_roster_tab: canViewRosterTab,
         join_store_activity: joinStoreActivity,
         bypass_exam: bypassExamEffective,
       })
@@ -271,9 +283,28 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     if (toAdd.length) {
       const { error: storeError } = await supabase
         .from('user_stores')
-        .insert(toAdd.map((id) => ({ profile_id: user.id, store_id: id, hidden_from_roster: true })))
+        .insert(toAdd.map((id) => ({ profile_id: user.id, store_id: id, hidden_from_roster: true, can_view_roster_tab: rosterTabByStore[id] ?? true })))
       if (storeError) {
         alert(`Save failed while updating stores: ${storeError.message}`)
+        setSaving(false)
+        return
+      }
+    }
+    // A store the person KEEPS (not newly added, not removed) may still
+    // have had its own Roster tab checkbox changed above — write those
+    // separately so a kept row's roster_display_name/roster_order/
+    // hidden_from_roster survive untouched (toAdd's insert above already
+    // covers the brand-new rows).
+    const toUpdateRosterTab = storeIds.filter((id) => existingIds.has(id))
+    if (toUpdateRosterTab.length) {
+      const results = await Promise.all(
+        toUpdateRosterTab.map((id) =>
+          supabase.from('user_stores').update({ can_view_roster_tab: rosterTabByStore[id] ?? true }).eq('profile_id', user.id).eq('store_id', id)
+        )
+      )
+      const rosterTabErr = results.find((r) => r.error)?.error
+      if (rosterTabErr) {
+        alert(`Save failed while updating stores: ${rosterTabErr.message}`)
         setSaving(false)
         return
       }
@@ -404,6 +435,28 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         </div>
       )}
 
+      {Array.from(new Set([storeId, ...extraStoreIds].filter(Boolean))).length > 0 && (
+        <div className="mb-5">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-xs font-medium text-gray-500">Roster tab (Bulletin Board) — per store</span>
+            <InfoTip label="Roster tab">
+              {'Unchecked for a store: the Roster filter/feed disappears from this person\'s Bulletin Board entirely while they\'re at that store. \nStore Management\'s "Disable roster" switch bulk-sets this for everyone currently at that store — these checkboxes are how an individual gets set differently afterward, independently per store (e.g. on for one store, off for another).'}
+            </InfoTip>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {Array.from(new Set([storeId, ...extraStoreIds].filter(Boolean))).map((id) => {
+              const storeName = accessibleStores.find((s) => s.id === id)?.name ?? '—'
+              return (
+                <label key={id} className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <input type="checkbox" checked={rosterTabByStore[id] ?? true} onChange={() => toggleRosterTab(id)} />
+                  {storeName}
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {confirmRemove && (
         <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           Remove {firstName || user.email} from active staff? This sets them inactive rather than
@@ -480,15 +533,6 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                     Staff confidential
                   </label>
                 </>
-              )}
-              {sectionKey === 'dashboard' && (
-                <label className="flex items-center gap-1.5 text-sm text-gray-600">
-                  <input type="checkbox" checked={canViewRosterTab} onChange={(e) => setCanViewRosterTab(e.target.checked)} />
-                  Roster tab
-                  <InfoTip label="Roster tab">
-                    {'Unchecked: the Roster filter/feed disappears from this person\'s Bulletin Board entirely. \nStore Management\'s "Disable roster" switch bulk-sets this for everyone currently at that store — this checkbox is how one person gets set differently afterward.'}
-                  </InfoTip>
-                </label>
               )}
             </div>
           </div>
