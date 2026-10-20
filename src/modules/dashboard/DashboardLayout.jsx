@@ -57,6 +57,13 @@ export default function DashboardLayout() {
   const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
 
   const accessibleTabs = TABS.filter((t) => canAccessPage(effectivePages, t.key))
+  // Jeff, 2026-10-21 (follow-up): "員工預設進去app會直接進clock in/out頁面，
+  // 這樣會不容易看到其他分頁有提示...在返回的圖示上加小紅點" — staff land
+  // straight on Time & Attendance (see AppShell.jsx's sign-in redirect), so
+  // this back-bar is the first thing they'd see with something new in
+  // another Dashboard page — same aggregate-badge reasoning as
+  // SectionTabLayout.jsx's own back-bar.
+  const anyBadge = badgeForKeys(accessibleTabs.map((t) => t.key), navSignals)
 
   return (
     <div>
@@ -104,6 +111,7 @@ export default function DashboardLayout() {
       {pathname !== '/dashboard' && (
         <Link to="/dashboard" className="mb-4 flex items-center gap-1 text-sm font-medium text-brand-600 md:hidden">
           <span aria-hidden>‹</span> {SECTIONS.dashboard?.label}
+          <NavBadge badge={anyBadge} />
         </Link>
       )}
 

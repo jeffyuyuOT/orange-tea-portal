@@ -571,25 +571,18 @@ export function AuthProvider({ children }) {
   // if it fails twice in a row, the message at least tells them what
   // actually happened instead of surfacing the raw "Failed to fetch" text.
   const signIn = useCallback(async (email, password) => {
-    // Jeff, 2026-10-17: remembers "this is a real password sign-in" so AppShell can
-    // send staff to Time & Attendance even when the address bar was left on some
-    // other page (e.g. /dashboard/bulletin) from before they signed out.
-    try {
-      sessionStorage.setItem('ot_just_signed_in', '1')
-    } catch {
-      /* private mode etc. — the redirect just won't happen */
-    }
+    // Jeff, 2026-10-17: used to flag "this is a real password sign-in" here
+    // so AppShell could send staff straight to Time & Attendance regardless
+    // of what page the address bar was left on. That redirect was removed
+    // 2026-10-21 (AppShell.jsx/routes.jsx — "不要預設在clock in out的頁面，
+    // 因為其實最上面有相機快捷"), so the flag this used to set had no reader
+    // left and was dropped along with it.
     let { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error && isNetworkError(error)) {
       await new Promise((resolve) => setTimeout(resolve, 1500))
       ;({ error } = await supabase.auth.signInWithPassword({ email, password }))
     }
     if (error) {
-      try {
-        sessionStorage.removeItem('ot_just_signed_in')
-      } catch {
-        /* ignore */
-      }
       if (isNetworkError(error)) {
         throw new Error('Could not reach the server. Please check your internet connection and try again.')
       }

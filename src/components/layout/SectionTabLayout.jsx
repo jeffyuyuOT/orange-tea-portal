@@ -118,6 +118,12 @@ export default function SectionTabLayout({ sectionKey }) {
   const nestedPaths = tabs.filter((t) => t.subpageTo).flatMap((t) => t.matchPaths)
   const inNestedSubtree = nestedPaths.includes(pathname)
   const showBackBar = pathname !== prefix && !inNestedSubtree
+  // Jeff, 2026-10-21 (follow-up): "員工預設進去app會直接進clock in/out頁面，
+  // 這樣會不容易看到其他分頁有提示...在返回的圖示上加小紅點" — with the chooser
+  // grid one tap away behind this back-bar instead of visible tabs, the
+  // back-bar needs its own "something in here" signal, same reasoning as
+  // the old dropdown toggle's own aggregate badge before it (now gone).
+  const anyBadge = badgeForKeys(tabs.flatMap((t) => t.fullKeys), signals)
 
   function renderPill(t) {
     return (
@@ -146,6 +152,7 @@ export default function SectionTabLayout({ sectionKey }) {
       {showBackBar && (
         <Link to={prefix} className="mb-4 flex items-center gap-1 text-sm font-medium text-brand-600 md:hidden">
           <span aria-hidden>‹</span> {section?.label}
+          <NavBadge badge={anyBadge} />
         </Link>
       )}
 

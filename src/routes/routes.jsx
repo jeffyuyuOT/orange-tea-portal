@@ -90,13 +90,18 @@ function guarded(pageKey, element) {
 // in, so landing here after login always matches whatever's first in the
 // Sidebar, not a separate hardcoded order that could drift from it.
 function RootRedirect() {
-  const { effectivePages, sidebarOrder, profile } = useAuth()
-  // Jeff, 2026-10-17: front-line staff mostly open the app just to clock in/out,
-  // so they land on Time & Attendance instead of the first Sidebar page (usually
-  // Bulletin, which loads a lot more). Every other role keeps the old behaviour.
-  if (profile?.role === 'staff' && effectivePages.has('dashboard.time_attendance')) {
-    return <Navigate to="/dashboard/time-attendance" replace />
-  }
+  const { effectivePages, sidebarOrder } = useAuth()
+  // Jeff, 2026-10-17: front-line staff used to land on Time & Attendance
+  // instead of the first Sidebar page, since they mostly open the app just
+  // to clock in/out. Jeff, 2026-10-21 (follow-up): reverted — "不要預設在
+  // clock in out的頁面，因為其實最上面有相機快捷" (the header's camera-icon
+  // quick-scan button, AppShell.jsx, already covers that without needing a
+  // special landing page), and always skipping straight past their first
+  // Sidebar page meant staff could easily miss an update sitting there
+  // (Bulletin Board, most often) — see this file's own 2026-10-20 history on
+  // the opposite problem that caused for Developer Tools. Every role now
+  // lands the same way.
+  //
   // No accessible page at all (e.g. a brand-new account with no role wired
   // up yet) — send them somewhere that at least renders instead of looping.
   return <Navigate to={firstAccessiblePagePath(effectivePages, sidebarOrder) ?? '/dashboard'} replace />

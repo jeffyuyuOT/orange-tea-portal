@@ -45,6 +45,11 @@ export default function TrainingCentreLayout() {
 
   const accessibleTabs = TABS.filter((t) => canAccessPage(effectivePages, t.key))
   const isChooser = pathname === PREFIX
+  // Jeff, 2026-10-21 (follow-up, same reasoning as SectionTabLayout.jsx's
+  // own back-bar): an aggregate badge for whichever back-bar is showing —
+  // always a no-op today since none of this group's 3 keys have a signal
+  // wired up yet (see the comment above), same as every other badge here.
+  const anyBadge = badgeForKeys(accessibleTabs.map((t) => t.key), signals)
 
   return (
     <div>
@@ -80,6 +85,7 @@ export default function TrainingCentreLayout() {
         className="mb-4 flex items-center gap-1 text-sm font-medium text-brand-600 md:hidden"
       >
         <span aria-hidden>‹</span> {isChooser ? 'Shop Management' : 'Training Centre'}
+        <NavBadge badge={anyBadge} />
       </Link>
 
       <Outlet

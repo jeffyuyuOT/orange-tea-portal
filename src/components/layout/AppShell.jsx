@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
+import NavBadge from '../ui/NavBadge'
 import { useAuth } from '../../lib/AuthContext'
 import { ROLE_LABELS, NON_PICKABLE_STAFF_ROLES, canAccessPage } from '../../lib/permissions'
 import { useClockInOut } from '../../lib/useClockInOut'
 import { getWorkedMinutesByProfile } from '../../lib/attendance'
 import { trainingHoursBandInfo, trainingHoursReminderTitle } from '../../lib/trainingHoursReminder'
+import { logicalPageEntries, orderedSectionEntries } from '../../lib/sidebarOrder'
+import { useAuditPending } from '../../lib/useAuditPending'
+import { badgeForKeys } from '../../lib/navBadges'
 import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
 import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
 import Modal from '../ui/Modal'
@@ -23,27 +27,20 @@ export default function AppShell() {
     rosterUpdates,
     hasFormulaUpdates,
     hasBulletinUpdates,
+    hasTimeDiscrepancies,
+    sidebarOrder,
     refreshProfile,
   } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  // Jeff, 2026-10-17: right after a real password sign-in, front-line staff land on
-  // Time & Attendance wherever the address bar happened to be (RootRedirect only
-  // covers "/"). Once per sign-in; refreshes and later navigation are untouched,
-  // and every other role keeps its normal landing page.
-  useEffect(() => {
-    if (!profile?.id) return
-    let justSignedIn = false
-    try {
-      justSignedIn = sessionStorage.getItem('ot_just_signed_in') === '1'
-      if (justSignedIn) sessionStorage.removeItem('ot_just_signed_in')
-    } catch {
-      /* ignore */
-    }
-    if (justSignedIn && profile.role === 'staff' && canAccessPage(effectivePages, 'dashboard.time_attendance')) {
-      navigate('/dashboard/time-attendance', { replace: true })
-    }
-  }, [profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Jeff, 2026-10-17: used to redirect front-line staff straight to Time &
+  // Attendance right after a real password sign-in (RootRedirect, routes.jsx,
+  // only covers landing on "/"). Jeff, 2026-10-21 (follow-up): removed —
+  // "不要預設在clock in out的頁面，因為其實最上面有相機快捷" (the header's
+  // camera-icon quick-scan button below already covers a fast clock-in/out
+  // without a special landing page), and it meant staff could easily sign
+  // in and never see an update sitting on their normal first page. See
+  // routes.jsx's RootRedirect for the other half of this same revert.
   // Jeff, 2026-10-02: "桌面捷徑有辦法有訊息提示嗎" — a badge/dot on the
   // installed-app icon itself (desktop taskbar / Android home screen) via
   // the Badging API (navigator.setAppBadge / clearAppBadge). Confirmed this
@@ -79,6 +76,31 @@ export default function AppShell() {
   // above.
   const badgeCount =
     unreadMessageCount + (rosterUpdates.myRoster ? 1 : 0) + (hasFormulaUpdates ? 1 : 0) + (hasBulletinUpdates ? 1 : 0)
+  // Jeff, 2026-10-21 (follow-up): "員工預設進去app會直接進clock in/out頁面，
+  // 這樣會不容易看到其他分頁有提示...在返回的圖示上加小紅點" — a staff login
+  // lands straight on Time & Attendance (see the sign-in effect above), so
+  // they may never see the section grid (/home) or even My Dashboard's own
+  // chooser where an update would otherwise be visible. This is the same
+  // problem one level up from what each layout's own back-bar badge solves
+  // (SectionTabLayout.jsx/DashboardLayout.jsx/TrainingCentreLayout.jsx,
+  // right below) — the "▦ go to sections" header button is the only way
+  // back to EVERY section, not just the current one, so it gets its own
+  // "something's new, somewhere" dot: the same badgeForKeys lookup every
+  // other nav surface uses, run across literally every page this person can
+  // reach (not a hand-picked subset like badgeCount above), so a future
+  // signal added to navBadges.js shows up here automatically too.
+  const auditPending = useAuditPending(profile, effectivePages)
+  const anywhereSignals = { rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, auditPending }
+  const anywhereFullKeys = orderedSectionEntries(sidebarOrder).flatMap(([sectionKey]) =>
+    logicalPageEntries(sectionKey, sidebarOrder).flatMap((entry) =>
+      entry.type === 'group'
+        ? entry.pages.filter((p) => canAccessPage(effectivePages, `${sectionKey}.${p}`)).map((p) => `${sectionKey}.${p}`)
+        : canAccessPage(effectivePages, `${sectionKey}.${entry.key}`)
+          ? [`${sectionKey}.${entry.key}`]
+          : []
+    )
+  )
+  const anywhereBadge = badgeForKeys(anywhereFullKeys, anywhereSignals)
   useEffect(() => {
     if (!('setAppBadge' in navigator)) return
     if (badgeCount > 0) {
@@ -273,11 +295,12 @@ export default function AppShell() {
                 // its permanent <aside> sidebar covers the same job already.
                 <button
                   onClick={() => navigate('/home')}
-                  className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
+                  className="relative shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
                   aria-label="Go to sections"
                   title="Sections"
                 >
                   ▦
+                  <NavBadge badge={anywhereBadge} corner />
                 </button>
               )}
               {isAdminCenter ? <span className="text-sm font-medium text-brand-700">All Stores</span> : <StoreSwitcher />}
