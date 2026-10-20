@@ -160,7 +160,14 @@ function UpdateItemList({ items, onOpenItem }) {
           className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50"
         >
           <span className="flex items-center gap-2">
-            <span className="font-medium text-gray-800">{item.name_en}</span>
+            {/* Jeff, 2026-10-21: list page only ever had a pronounce button
+                next to the Chinese name — the English one lived only on the
+                item's own Formula detail page (FormulaItemDetail.jsx). Added
+                here to match, same lang="en-AU" as that page uses. */}
+            <span className="flex items-center gap-1 font-medium text-gray-800">
+              {item.name_en}
+              <PronounceButton text={item.name_en} lang="en-AU" />
+            </span>
             {item.name_zh && (
               <span className="flex items-center gap-1 text-sm text-brand-600 font-zh">
                 {item.name_zh}
@@ -309,7 +316,10 @@ function ItemList({ groupKey, categoryId, topTen, mustKnow, storeId, onBack, bac
               className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-brand-50"
             >
               <span className="flex items-center gap-2">
-                <span className="font-medium text-gray-800">{item.name_en}</span>
+                <span className="flex items-center gap-1 font-medium text-gray-800">
+                  {item.name_en}
+                  <PronounceButton text={item.name_en} lang="en-AU" />
+                </span>
                 {item.name_zh && (
                   <span className="flex items-center gap-1 text-sm text-brand-600 font-zh">
                     {item.name_zh}
