@@ -80,6 +80,16 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // already see this block unconditionally in StaffDetailModal.jsx, so
   // this checkbox only matters for shop_manager). Defaults off.
   const [canViewStaffConfidential, setCanViewStaffConfidential] = useState(user.can_view_staff_confidential ?? false)
+  // Jeff, 2026-10-20 (point 3): "user maangement裡分頁權限my dash board裡
+  //新增roster tab勾選，有勾選的話才能看到bulletin的roaster tab" — same
+  // plain-column pattern as canViewStaffConfidential above (a capability
+  // WITHIN Bulletin Board, not a page of its own), rendered inside My
+  // Dashboard's page list rather than as its own section. Defaults true
+  // (everyone keeps seeing it unless explicitly turned off) — see point 4:
+  // Store Management's new "Disable roster" switch bulk-sets this for
+  // every current staff member at a store when flipped; this checkbox is
+  // how an individual gets set differently afterward.
+  const [canViewRosterTab, setCanViewRosterTab] = useState(user.can_view_roster_tab ?? true)
   const [overrides, setOverrides] = useState({}) // page_key -> boolean (explicit override) or undefined
   // Store(s) this person shows up on the roster for, beyond their primary
   // Store above — e.g. an admin who only actually works a couple of
@@ -214,6 +224,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
         cash_in_hand: cashInHand,
         can_edit_attendance_logs: canEditAttendanceLogs,
         can_view_staff_confidential: canViewStaffConfidential,
+        can_view_roster_tab: canViewRosterTab,
         join_store_activity: joinStoreActivity,
         bypass_exam: bypassExamEffective,
       })
@@ -469,6 +480,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                     Staff confidential
                   </label>
                 </>
+              )}
+              {sectionKey === 'dashboard' && (
+                <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <input type="checkbox" checked={canViewRosterTab} onChange={(e) => setCanViewRosterTab(e.target.checked)} />
+                  Roster tab
+                  <InfoTip label="Roster tab">
+                    {'Unchecked: the Roster filter/feed disappears from this person\'s Bulletin Board entirely. \nStore Management\'s "Disable roster" switch bulk-sets this for everyone currently at that store — this checkbox is how one person gets set differently afterward.'}
+                  </InfoTip>
+                </label>
               )}
             </div>
           </div>

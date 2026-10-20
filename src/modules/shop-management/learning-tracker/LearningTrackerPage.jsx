@@ -7,8 +7,7 @@ import { rosterDisplayName } from '../../../lib/excelRoster'
 import { NON_PICKABLE_STAFF_ROLES } from '../../../lib/permissions'
 import { getWorkedMinutesByProfile } from '../../../lib/attendance'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
-import { currentTitle } from '../../../lib/trainingJourney'
-import { trainingHoursBandInfo, trainingHoursReminderTitle } from '../../../lib/trainingHoursReminder'
+import { currentTitle, phaseFillFractions, highestFilledPhase } from '../../../lib/trainingJourney'
 import StaffStudyDetail from './StaffStudyDetail'
 
 // Jeff, 2026-09: past this many hours worked, still unqualified, the hours
@@ -137,13 +136,27 @@ export default function LearningTrackerPage() {
             const titlePhaseNumber = s.has_master_title ? 4 : s.training_journey_phase ?? 0
             const titleColor = phases.find((p) => p.phase_number === titlePhaseNumber)?.text_color
             // Jeff, 2026-10-16: "員工training journey如果Phase超過工作時數，
-            // 在learning tracker的員工清單title後面會加一個警示圖案" — same
-            // 50h-band crossing the login popup/manager Message already fire
-            // on (trainingHoursReminder.js), surfaced here too as a quick
-            // visual flag right on the staff list, not just in those two
-            // other places. Same !qualified gate as the hours badge above —
-            // once qualified there's no more "behind schedule" to warn about.
-            const hoursInfo = !s.qualified ? trainingHoursBandInfo(hours) : null
+            // 在learning tracker的員工清單title後面會加一個警示圖案" — this is
+            // tied to the staff member's actual PHASE progress, not the
+            // generic "worked N hours, still hasn't passed Formal Quiz"
+            // signal (that one already has its own surfaces — the login
+            // popup and manager Message, trainingHoursReminder.js — and is
+            // unrelated to Phase 1-3's own admin-set `hours_required`
+            // quotas, Phase Setting's same cumulative hours-fill bars
+            // TrainingJourneyPage.jsx's phase cards use).
+            //
+            // Jeff, 2026-10-20 (point 5): "是在該員工有phase已超過時數才會
+            // 顯示" — a completed phase shouldn't still count, so this warns
+            // only when cumulative hours worked have filled PAST the phase
+            // this person is actually still sitting on — i.e. by the normal
+            // pace they should already be further along (passed that next
+            // Level-Up Exam, or Formal Quiz once past Phase 3) than they
+            // actually are. Someone cruising through on pace (filled phase
+            // === their own current phase) gets no warning even past 50h.
+            const currentPhase = s.training_journey_phase ?? 0
+            const filledPhase = phases.length ? highestFilledPhase(phaseFillFractions(phases, hours)) : 0
+            const phaseOverdue = !s.qualified && filledPhase > currentPhase ? filledPhase : null
+            const phaseOverdueLabel = phaseOverdue && (phases.find((p) => p.phase_number === currentPhase)?.label ?? 'Trainee')
             return (
               <button
                 key={s.id}
@@ -166,8 +179,12 @@ export default function LearningTrackerPage() {
                       {title}
                     </span>
                   )}
-                  {hoursInfo && (
-                    <span title={trainingHoursReminderTitle(hoursInfo, { isSelf: false, name: rosterDisplayName(s) })}>⚠️</span>
+                  {phaseOverdue && (
+                    <span
+                      title={`${rosterDisplayName(s)} has worked past Phase ${phaseOverdue}'s target hours while still on Phase ${currentPhase} (${phaseOverdueLabel})`}
+                    >
+                      ⚠️
+                    </span>
                   )}
                 </span>
                 <span className="text-gray-300">›</span>

@@ -25,7 +25,7 @@ export default function StoreManagementPage() {
   const [stores, setStores] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null) // null closed, {} = new, store = edit
-  const [form, setForm] = useState({ name: '', code: '', is_active: true, audit_enabled: false })
+  const [form, setForm] = useState({ name: '', code: '', is_active: true, audit_enabled: false, disable_roster: false })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // Every File Repository file (grouped by category for the picker below)
@@ -66,14 +66,20 @@ export default function StoreManagementPage() {
   }, [])
 
   function openNew() {
-    setForm({ name: '', code: '', is_active: true, audit_enabled: false })
+    setForm({ name: '', code: '', is_active: true, audit_enabled: false, disable_roster: false })
     setDocLinks({})
     setError('')
     setEditing({})
   }
 
   async function openEdit(store) {
-    setForm({ name: store.name, code: store.code, is_active: store.is_active, audit_enabled: !!store.audit_enabled })
+    setForm({
+      name: store.name,
+      code: store.code,
+      is_active: store.is_active,
+      audit_enabled: !!store.audit_enabled,
+      disable_roster: !!store.disable_roster,
+    })
     setError('')
     setEditing(store)
     const { data } = await supabase
@@ -92,7 +98,20 @@ export default function StoreManagementPage() {
     }
     setSaving(true)
     setError('')
-    const payload = { name: form.name.trim(), code: form.code.trim(), is_active: form.is_active, audit_enabled: form.audit_enabled }
+    const payload = {
+      name: form.name.trim(),
+      code: form.code.trim(),
+      is_active: form.is_active,
+      audit_enabled: form.audit_enabled,
+      disable_roster: form.disable_roster,
+    }
+    // Jeff, 2026-10-20 (point 4): whether disable_roster actually CHANGED on
+    // an existing store — a brand-new store has no staff yet (nothing to
+    // bulk-update), and saving a store with the flag untouched shouldn't
+    // silently re-stamp everyone's individual Roster tab setting back to
+    // the store default every time an unrelated field (name, doc links) is
+    // edited.
+    const disableRosterChanged = !!editing.id && !!editing.disable_roster !== payload.disable_roster
     const { data: savedStore, error: err } = editing.id
       ? await supabase.from('stores').update(payload).eq('id', editing.id).select().single()
       : await supabase.from('stores').insert(payload).select().single()
@@ -100,6 +119,23 @@ export default function StoreManagementPage() {
       setSaving(false)
       setError(err.message)
       return
+    }
+    // Jeff, 2026-10-20 (point 4): "disable roster沒勾選的店的staff，則roster
+    // tab預設勾選" / confirmed via follow-up: flipping this switch bulk-
+    // overwrites can_view_roster_tab for every profile CURRENTLY at this
+    // store (user_stores) to match — an individual staff member can still
+    // be set differently afterward in User Management (Jeff: "如果有個別
+    // 員工要不一樣可以再去user management去更改勾選"), until the next time
+    // this switch is flipped. A staff member added to the store LATER
+    // starts from the plain column default (true) until this switch is
+    // next toggled or someone unchecks it for them directly — a known,
+    // accepted gap rather than wiring every staff-add code path to this.
+    if (disableRosterChanged) {
+      const { data: memberRows } = await supabase.from('user_stores').select('profile_id').eq('store_id', savedStore.id)
+      const profileIds = Array.from(new Set((memberRows ?? []).map((m) => m.profile_id).filter(Boolean)))
+      if (profileIds.length) {
+        await supabase.from('profiles').update({ can_view_roster_tab: !payload.disable_roster }).in('id', profileIds)
+      }
     }
     // Apply each document type's pick (or removal) against store_document_links.
     // A pasted link (if present) wins over a File Repository file pick —
@@ -228,6 +264,21 @@ export default function StoreManagementPage() {
               Audit
               <span className="block text-xs text-gray-400">
                 Shop managers of this store get the Audit tab, and the store appears in Audit&apos;s store switcher.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={form.disable_roster}
+              onChange={(e) => setForm({ ...form, disable_roster: e.target.checked })}
+            />
+            <span>
+              Disable roster
+              <span className="block text-xs text-gray-400">
+                Turns off every current staff member&apos;s Roster tab (Bulletin Board) by default for this store.
+                Individual staff can still be set differently afterward in User Management.
               </span>
             </span>
           </label>

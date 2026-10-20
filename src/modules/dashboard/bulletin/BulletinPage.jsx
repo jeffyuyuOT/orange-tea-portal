@@ -121,6 +121,14 @@ async function notifyManagersOfTrainingHours(newlyCrossed, storeId, sender) {
 // importantOnly/toggleImportant below.
 export default function BulletinPage() {
   const { currentStoreId, profile, refreshBulletinUpdates } = useAuth()
+  // Jeff, 2026-10-20 (point 3): "有勾選的話才能看到bulletin的roaster
+  // tab，沒勾選的話就看不到" — a new per-profile permission
+  // (profiles.can_view_roster_tab, User Management > My Dashboard), default
+  // true for everyone who already existed before this column did. When
+  // off, the Roster filter button disappears entirely and roster weeks are
+  // left out of the feed altogether (not just hidden behind the filter) —
+  // see rosterItems below.
+  const canViewRosterTab = profile?.can_view_roster_tab !== false
   const [filter, setFilter] = useState(null) // null = all, or 'roster' | 'announcement'
   const [importantOnly, setImportantOnly] = useState(false) // only meaningful while filter === 'announcement'
   const [loading, setLoading] = useState(true)
@@ -388,7 +396,7 @@ export default function BulletinPage() {
     // been visited.
     const periodViewedAt = new Map((periodViewRows ?? []).map((r) => [r.roster_period_id, r.viewed_at]))
 
-    const rosterItems = (rosterRows ?? []).map((r) => {
+    const rosterItems = !canViewRosterTab ? [] : (rosterRows ?? []).map((r) => {
       const creatorName = r.created_by_name || (r.creator ? `${r.creator.first_name ?? ''} ${r.creator.last_name ?? ''}`.trim() : '')
       const latestChange = periodLatestChange.get(r.id)
       const viewedAt = periodViewedAt.get(r.id)
@@ -514,7 +522,7 @@ export default function BulletinPage() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-brand-50 p-1">
-          {FILTERS.map((f) => (
+          {FILTERS.filter((f) => f.key !== 'roster' || canViewRosterTab).map((f) => (
             <div key={f.key} className="flex items-center">
               <button
                 onClick={() => toggleFilter(f.key)}

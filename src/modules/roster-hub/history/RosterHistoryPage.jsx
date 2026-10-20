@@ -11,6 +11,7 @@ import { exportRosterGrid, rosterExportFilename, timeToDecimal, rosterDisplayNam
 import { NON_ROSTER_STAFF_ROLES } from '../../../lib/permissions'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import MultiStoreExportModal from './MultiStoreExportModal'
+import RosterSummaryModal from './RosterSummaryModal'
 
 const MONTH_OPTIONS = [
   { value: '01', label: 'January' },
@@ -42,6 +43,9 @@ export default function RosterHistoryPage() {
   // shifts for it, a draft just gets a plain "are you sure".
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  // Jeff, 2026-10-20 (point 1): per-employee weekday/weekend/public-holiday
+  // hours breakdown for one saved period — see RosterSummaryModal.jsx.
+  const [summaryTarget, setSummaryTarget] = useState(null)
   // Jeff, 2026-10-04: "bulletin的roaster會停留一個月即會移除。但在roster hub
   // history的會保留。history新增年份跟月份篩選" — Bulletin's feed already
   // only ever shows roster postings from the last month (BulletinPage.jsx's
@@ -236,6 +240,9 @@ export default function RosterHistoryPage() {
                 <div className="text-xs text-gray-400">Saved {new Date(p.updated_at ?? p.created_at).toLocaleString()}</div>
               </div>
               <div className="flex shrink-0 gap-2">
+                <Button variant="secondary" onClick={() => setSummaryTarget(p)}>
+                  📊 Summary
+                </Button>
                 <Button variant="secondary" onClick={() => navigate('/roster-hub/manage-roster', { state: { loadPeriodId: p.id } })}>
                   Load
                 </Button>
@@ -252,6 +259,8 @@ export default function RosterHistoryPage() {
       )}
 
       {showMultiExport && <MultiStoreExportModal onClose={() => setShowMultiExport(false)} />}
+
+      {summaryTarget && <RosterSummaryModal period={summaryTarget} storeName={storeName} onClose={() => setSummaryTarget(null)} />}
 
       {/* Jeff, 2026-10-03: a submitted (already-published) week gets the
           strong ⚠️ warning copy — staff may have already seen their shifts

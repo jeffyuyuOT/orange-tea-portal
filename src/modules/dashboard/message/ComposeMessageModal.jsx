@@ -63,13 +63,16 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
   const [senderDisplayName, setSenderDisplayName] = useState(nameOf(senderProfile))
   const [sending, setSending] = useState(false)
   const [sendToAll, setSendToAll] = useState(false)
+  // Jeff, 2026-10-20 (point 2): "search" just narrows which rows show in the
+  // name list below — it never changes the "All" checkbox's own meaning.
+  const [search, setSearch] = useState('')
   const canBroadcast = senderProfile.role === 'developer' && !initial?.inReplyTo
 
   useEffect(() => {
     if (!storeId) return
     supabase
       .from('user_stores')
-      .select('profile_id, roster_display_name, profiles(id, first_name, last_name, email, role, is_active)')
+      .select('profile_id, roster_display_name, profiles(id, first_name, last_name, email, role, is_active, join_store_activity)')
       .eq('store_id', storeId)
       .then(({ data }) => {
         const byId = new Map()
@@ -91,6 +94,23 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
   function toggleRecipient(id) {
     setRecipientIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
+
+  // Jeff, 2026-10-20 (point 2): "message寄件者最上面有一個all，選了就會勾選
+  // 此分店所有人(只有join store activity有出現在寄件者名單的)，這個跟admin
+  // 寄公告信的all不一樣" — a plain "select everyone already in this list"
+  // convenience, open to anyone composing a message (not canBroadcast's
+  // developer-only, every-store "📢 All", which this is deliberately
+  // different from). Scoped to whichever of the same-store candidates have
+  // Join store activity checked — someone view-only at this store (that
+  // flag off) is still pickable individually, just not swept in by this.
+  const selectAllEligible = candidates.filter((c) => c.join_store_activity !== false)
+  const allSelected = selectAllEligible.length > 0 && selectAllEligible.every((c) => recipientIds.includes(c.id))
+  function toggleSelectAll(checked) {
+    const eligibleIds = new Set(selectAllEligible.map((c) => c.id))
+    setRecipientIds((prev) => (checked ? Array.from(new Set([...prev, ...eligibleIds])) : prev.filter((id) => !eligibleIds.has(id))))
+  }
+
+  const filteredCandidates = candidates.filter((c) => nameOf(c).toLowerCase().includes(search.trim().toLowerCase()))
 
   async function send() {
     if (!subject.trim() || (!sendToAll && !recipientIds.length)) return
@@ -157,7 +177,27 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
     >
       <div className="space-y-3">
         <div>
-          <span className="mb-1 block text-xs font-medium text-gray-500">To</span>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="block text-xs font-medium text-gray-500">To</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search names…"
+              disabled={sendToAll}
+              className="w-36 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand-400 focus:outline-none disabled:opacity-40"
+            />
+          </div>
+          <label
+            className={`mb-1.5 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm font-medium text-gray-700 ${sendToAll ? 'opacity-40' : ''}`}
+          >
+            <input
+              type="checkbox"
+              checked={allSelected}
+              disabled={sendToAll || !selectAllEligible.length}
+              onChange={(e) => toggleSelectAll(e.target.checked)}
+            />
+            All — everyone at this store (who has Join store activity checked)
+          </label>
           {canBroadcast && (
             <label className="mb-1.5 flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 text-sm font-medium text-brand-700">
               <input type="checkbox" checked={sendToAll} onChange={(e) => setSendToAll(e.target.checked)} />
@@ -165,7 +205,7 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
             </label>
           )}
           <div className={`max-h-40 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 ${sendToAll ? 'opacity-40' : ''}`}>
-            {candidates.map((c) => (
+            {filteredCandidates.map((c) => (
               <label key={c.id} className="flex items-center gap-2 text-sm text-gray-700">
                 <input
                   type="checkbox"
@@ -177,6 +217,7 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
               </label>
             ))}
             {!candidates.length && <p className="text-xs text-gray-400">No one else eligible to message at this store.</p>}
+            {!!candidates.length && !filteredCandidates.length && <p className="text-xs text-gray-400">No match for "{search}".</p>}
           </div>
         </div>
         <input
