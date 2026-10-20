@@ -227,6 +227,18 @@ export default function RosterEntryGrid({
   }
 
   function removeRow(row) {
+    // Jeff, 2026-10-21: "manage roaste時按x要有警示窗跳出說將此員工從roaster
+    // 移除並確認，要不然很容易會誤觸就移除了" — the X was one accidental tap
+    // away from persistently hiding a real staff/pending member (see the
+    // comment below on what that actually does). Only gated for that
+    // persisted case — clearing an ad-hoc/manual row's hours was never
+    // destructive in the same way (nothing to restore), matching the
+    // "Remove from roster..." vs "Clear this row's hours" distinction the
+    // title already draws just below.
+    const isPersisted = row.kind === 'staff' || row.kind === 'pending'
+    if (isPersisted && !window.confirm(`將 ${row.name || '此員工'} 從本週排班移除？\n之後可從 Roster Hub > Setting > Roster Staff Order 恢復。`)) {
+      return
+    }
     setEntries((prev) => prev.filter((e) => !matches(row, e)))
     setManualRows((prev) => prev.filter((m) => m.key !== row.key))
     // Staff/Pending rows are auto-populated every time this store's roster
@@ -236,7 +248,7 @@ export default function RosterEntryGrid({
     // flagged hidden_from_roster — see ManageRosterPage's persistHideStaff)
     // across every week, not only this one — restoring them is done from
     // Roster Hub > Setting > Roster Staff Order, not from here.
-    if ((row.kind === 'staff' || row.kind === 'pending') && onHideStaff) onHideStaff(row)
+    if (isPersisted && onHideStaff) onHideStaff(row)
   }
 
   function rowTotals(row) {

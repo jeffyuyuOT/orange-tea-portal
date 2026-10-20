@@ -119,6 +119,14 @@ export default function AppShell() {
   // app is opened or comes back into view is the simplest fix that matches
   // what someone expects: having it open and looking at it already means
   // they've seen whatever it was about.
+  // Jeff, 2026-10-21 (second follow-up): "而且現在訊息都讀完了，app圖示的
+  // 數字提醒還是未清除" — open/visible alone wasn't enough: reading
+  // everything while the app stays in the foreground (never backgrounded,
+  // so visibilitychange never fires again) left the old notifications
+  // sitting in the shade with nothing to clear them. Depending on
+  // badgeCount too means the moment it drops back to 0 — same signal that
+  // already clears the in-app dots — this also re-sweeps the shade, with no
+  // need to leave and come back first.
   useEffect(() => {
     if (!isPushSupported()) return
     function clearShownNotifications() {
@@ -133,7 +141,7 @@ export default function AppShell() {
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [])
+  }, [badgeCount])
   // Jeff, 2026-10-21: "還是做完整的 Web Push，這樣員工使用起來才知道有訊息
   // 可以點進去看" — a toggle buried in My Information (MyInformationPage.jsx
   // has the full on/off control) won't get found organically, so this is a
@@ -144,6 +152,16 @@ export default function AppShell() {
   const [showPushNudge, setShowPushNudge] = useState(false)
   useEffect(() => {
     if (!profile?.id || !isPushSupported() || isIosNonStandalone()) return
+    // Jeff, 2026-10-21: "確認一下2d maker跟accountant不會收到推播通知" —
+    // this banner wasn't gated by role at all, so an accountant (a real
+    // person, unlike the device-account qr_code_maker) could tap it and
+    // start getting push despite having no access to Bulletin Board/My
+    // Information in the first place (permissions.js). None of
+    // NON_PICKABLE_STAFF_ROLES (training/qr_code_maker/accountant) should
+    // ever be offered push — the announcement trigger now also excludes
+    // them at the source (migration 0132) as defense in depth, but this is
+    // what stops a subscription row from being created for them at all.
+    if (NON_PICKABLE_STAFF_ROLES.includes(profile.role)) return
     if (typeof Notification === 'undefined' || Notification.permission !== 'default') return
     let dismissed = false
     try {
@@ -152,7 +170,7 @@ export default function AppShell() {
       /* ignore */
     }
     if (!dismissed) setShowPushNudge(true)
-  }, [profile?.id])
+  }, [profile?.id, profile?.role])
   const dismissPushNudge = () => {
     setShowPushNudge(false)
     try {
