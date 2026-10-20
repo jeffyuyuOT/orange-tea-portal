@@ -5,6 +5,7 @@ import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import LeaveLimitsTab from './LeaveLimitsTab'
 import RosterStaffOrderTab from './RosterStaffOrderTab'
+import MessageReminderTab from './MessageReminderTab'
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -72,10 +73,12 @@ function buildTicks(open, close) {
 
 export default function RosterSettingsPage() {
   const { currentStoreId } = useAuth()
-  // Three tabs: Labour allocation (the staffing-rules timeline below,
-  // unchanged), Leave limits, and Roster Staff Order (the order
-  // staff/Pending staff appear in on the Manage Roster grid, plus who's
-  // hidden from it — migration 0059_roster_staff_order_and_hide.sql).
+  // Four tabs: Labour allocation (the staffing-rules timeline below,
+  // unchanged), Leave limits, Roster Staff Order (the order staff/Pending
+  // staff appear in on the Manage Roster grid, plus who's hidden from it —
+  // migration 0059_roster_staff_order_and_hide.sql), and Message reminder
+  // (point 1, 2026-10-21 — which weekday triggers this store's "you haven't
+  // applied next week's availability" reminder, see MessageReminderTab).
   // Display-name editing lives in Shop Management > Staff Information
   // (StaffDetailModal / PendingStaffDetailModal) — it does not have a tab
   // here.
@@ -214,12 +217,17 @@ export default function RosterSettingsPage() {
         <TabButton active={tab === 'staffOrder'} onClick={() => setTab('staffOrder')}>
           Roster Staff Order
         </TabButton>
+        <TabButton active={tab === 'messageReminder'} onClick={() => setTab('messageReminder')}>
+          Message reminder
+        </TabButton>
       </div>
 
       {tab === 'leave' ? (
         <LeaveLimitsTab />
       ) : tab === 'staffOrder' ? (
         <RosterStaffOrderTab />
+      ) : tab === 'messageReminder' ? (
+        <MessageReminderTab />
       ) : (
         <>
           <p className="mb-4 text-sm text-gray-500">

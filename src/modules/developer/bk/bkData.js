@@ -84,6 +84,7 @@ export async function savePaymentType(storeId, form) {
     kind: form.kind,
     parent_id: form.kind === 'sub' ? form.parent_id : null,
     is_locked: !!form.is_locked,
+    can_copy: !!form.can_copy,
     updated_at: new Date().toISOString(),
   }
   if (form.id) {
@@ -359,10 +360,20 @@ export async function deleteStoreDebt(id) {
 // 積欠 > Jeff — 薪水 / 預付 / 預拿
 // ---------------------------------------------------------------------------
 
-export async function loadJeffOwedEntries() {
+// Jeff, 2026-10-21 (point 2): now per-store (migration 0130_bk_owed_jeff_per_store.sql
+// — store_id, every existing row backfilled to Sunnybank since that's what
+// they all were already in practice). `storeId` is required: every caller
+// already has one selected via StoreTabs, same as every other per-store BK
+// tab.
+export async function loadJeffOwedEntries(storeId) {
   return (
     unwrap(
-      await supabase.from('bk_owed_jeff_entries').select('*').order('entry_date', { ascending: false }).order('created_at', { ascending: false })
+      await supabase
+        .from('bk_owed_jeff_entries')
+        .select('*')
+        .eq('store_id', storeId)
+        .order('entry_date', { ascending: false })
+        .order('created_at', { ascending: false })
     ) ?? []
   )
 }
@@ -376,8 +387,10 @@ export async function saveJeffOwedEntry(form) {
     note: form.note?.trim() || null,
     updated_at: new Date().toISOString(),
   }
+  // store_id is fixed at creation — an existing row's store never changes
+  // on edit (same reason `kind`'s <select> is disabled while editing).
   if (form.id) unwrap(await supabase.from('bk_owed_jeff_entries').update(payload).eq('id', form.id))
-  else unwrap(await supabase.from('bk_owed_jeff_entries').insert(payload))
+  else unwrap(await supabase.from('bk_owed_jeff_entries').insert({ ...payload, store_id: form.storeId }))
 }
 
 export async function deleteJeffOwedEntry(id) {
@@ -394,11 +407,23 @@ export async function loadJeffPayrollSalary() {
 
 // Point 5/系統設置: Excel-import backfill for 積欠 > Jeff. `rows` are already
 // deduped by the caller (bkImport.markJeffOwedDuplicates).
-export async function bulkImportJeffOwedRows(rows) {
+// Jeff, 2026-10-21 (point 2): storeId required, same reason as
+// saveJeffOwedEntry above — every row needs a store now (migration
+// 0130_bk_owed_jeff_per_store.sql). The Excel import only ever targets
+// Sunnybank (that's the only store this ledger had data for before the
+// switcher existed), so callers pass Sunnybank's id explicitly.
+export async function bulkImportJeffOwedRows(rows, storeId) {
   if (!rows.length) return
   unwrap(
     await supabase.from('bk_owed_jeff_entries').insert(
-      rows.map((r) => ({ kind: r.kind, entry_date: r.date, description: r.description || null, amount: toNum(r.amount), note: r.note || null }))
+      rows.map((r) => ({
+        kind: r.kind,
+        entry_date: r.date,
+        description: r.description || null,
+        amount: toNum(r.amount),
+        note: r.note || null,
+        store_id: storeId,
+      }))
     )
   )
 }
@@ -456,17 +481,7 @@ export async function bulkImportEmmaClaimRows(importRows) {
       importRows.map((r) => ({
         submitted_at: r.date,
         total_amount: toNum(r.amount),
-        // 入金明細 layout: one detail row per 入金 (with where it went); the old
-        // Date/Amount layout keeps its single synthetic row.
-        rows: r.detail
-          ? r.detail.map((d) => ({
-              entry_id: d.entry_id ?? null,
-              entry_date: d.entry_date,
-              amount: toNum(d.amount),
-              target: d.target ?? null,
-              note: d.note || '（匯入的歷史紀錄）',
-            }))
-          : [{ entry_id: null, entry_date: r.date, amount: toNum(r.amount), note: r.note || '（匯入的歷史紀錄）' }],
+        rows: [{ entry_id: null, entry_date: r.date, amount: toNum(r.amount), note: r.note || '（匯入的歷史紀錄）' }],
       }))
     )
   )

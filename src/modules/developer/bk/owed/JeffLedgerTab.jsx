@@ -4,7 +4,7 @@ import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../../components/ui/LoadingSpinner'
 import { deleteJeffOwedEntry, loadJeffOwedEntries, loadJeffPayrollSalary, saveJeffOwedEntry } from '../bkData'
 import { brisbaneTodayStr, fmtMoney, round2, toNum } from '../bkUtils'
-import { Field, MoneyInput, NoteButton, Notice, inputCls } from '../bkUi'
+import { Field, MoneyInput, NoteButton, Notice, StoreTabs, inputCls } from '../bkUi'
 
 const KINDS = [
   ['salary', '薪水'],
@@ -18,7 +18,18 @@ const KIND_LABEL = Object.fromEntries(KINDS)
 // whatever payroll already computed for Jeff (bk_jeff_payroll_salary — read
 // live, never copied in) — payroll rows show their pay period and can't be
 // edited/deleted here; 加入 goes back to the payroll app for that.
-export default function JeffLedgerTab({ topActive = true }) {
+//
+// Jeff, 2026-10-21 (point 2): "BK的積欠Jeff下要可以切換分店(分店資料跟隨U帳
+// 分店)，目前的系統裡的資料是屬於sunnybank下" — manual entries now carry a
+// store_id (migration 0130_bk_owed_jeff_per_store.sql; every pre-existing row
+// backfilled to Sunnybank). bk_jeff_payroll_salary() itself stays a single
+// company-wide total (never split by store), so per Jeff's own answer when
+// asked how to handle it post-switch ("只在sunnybank顯示") those 薪水 rows —
+// and their contribution to salaryTotal — only show while Sunnybank is the
+// selected store, nowhere else.
+export default function JeffLedgerTab({ stores, topActive = true }) {
+  const sunnybank = stores.find((s) => s.name === 'Sunnybank')
+  const [storeId, setStoreId] = useState(() => sunnybank?.id ?? stores[0]?.id ?? null)
   const [manual, setManual] = useState([])
   const [payroll, setPayroll] = useState([])
   const [loading, setLoading] = useState(false)
@@ -27,11 +38,14 @@ export default function JeffLedgerTab({ topActive = true }) {
   const [editing, setEditing] = useState(null)
   const [note, setNote] = useState(null)
 
+  const isSunnybank = storeId === sunnybank?.id
+
   const reload = useCallback(async () => {
+    if (!storeId) return
     setLoading(true)
     setError('')
     try {
-      const [m, p] = await Promise.all([loadJeffOwedEntries(), loadJeffPayrollSalary()])
+      const [m, p] = await Promise.all([loadJeffOwedEntries(storeId), loadJeffPayrollSalary()])
       setManual(m)
       setPayroll(p)
     } catch (e) {
@@ -39,7 +53,7 @@ export default function JeffLedgerTab({ topActive = true }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [storeId])
 
   useEffect(() => {
     if (topActive) reload()
@@ -58,9 +72,10 @@ export default function JeffLedgerTab({ topActive = true }) {
   const salaryManual = manual.filter((e) => e.kind === 'salary')
   const advancePay = manual.filter((e) => e.kind === 'advance_pay')
   const advanceDraw = manual.filter((e) => e.kind === 'advance_draw')
+  const visiblePayroll = isSunnybank ? payroll : []
 
   const salaryTotal = round2(
-    payroll.reduce((a, p) => a + Number(p.amount), 0) + salaryManual.reduce((a, e) => a + Number(e.amount), 0)
+    visiblePayroll.reduce((a, p) => a + Number(p.amount), 0) + salaryManual.reduce((a, e) => a + Number(e.amount), 0)
   )
   const payTotal = round2(advancePay.reduce((a, e) => a + Number(e.amount), 0))
   const drawTotal = round2(advanceDraw.reduce((a, e) => a + Number(e.amount), 0))
@@ -70,6 +85,8 @@ export default function JeffLedgerTab({ topActive = true }) {
 
   return (
     <div className="space-y-4">
+      <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm">
           Balance（薪水 + 預付 − 預拿）：
@@ -90,7 +107,7 @@ export default function JeffLedgerTab({ topActive = true }) {
           total={salaryTotal}
           empty="還沒有薪水紀錄。"
           rows={[
-            ...payroll.map((p) => ({
+            ...visiblePayroll.map((p) => ({
               key: `p-${p.sheet_id}`,
               date: p.date_to,
               label: `${p.date_from} 到 ${p.date_to}`,
@@ -146,12 +163,13 @@ export default function JeffLedgerTab({ topActive = true }) {
       </div>
 
       <Modal open={adding} onClose={() => setAdding(false)} title="新增">
-        <JeffEntryForm onCancel={() => setAdding(false)} onSaved={async () => { setAdding(false); await reload() }} />
+        <JeffEntryForm storeId={storeId} onCancel={() => setAdding(false)} onSaved={async () => { setAdding(false); await reload() }} />
       </Modal>
       <Modal open={!!editing} onClose={() => setEditing(null)} title="編輯">
         {editing && (
           <JeffEntryForm
             initial={editing}
+            storeId={storeId}
             onCancel={() => setEditing(null)}
             onSaved={async () => {
               setEditing(null)
@@ -216,7 +234,7 @@ function OwedColumn({ title, total, rows, empty, onNote }) {
   )
 }
 
-function JeffEntryForm({ initial = null, onSaved, onCancel }) {
+function JeffEntryForm({ initial = null, storeId, onSaved, onCancel }) {
   const [kind, setKind] = useState(initial?.kind ?? 'salary')
   const [date, setDate] = useState(initial?.entry_date ?? brisbaneTodayStr())
   const [description, setDescription] = useState(initial?.description ?? '')
@@ -231,7 +249,7 @@ function JeffEntryForm({ initial = null, onSaved, onCancel }) {
     if (!description.trim()) return setError('請輸入 description。')
     if (n === null || n <= 0) return setError('請輸入金額（必須大於 0）。')
     try {
-      await saveJeffOwedEntry({ id: initial?.id, kind, entry_date: date, description, amount: n, note })
+      await saveJeffOwedEntry({ id: initial?.id, kind, entry_date: date, description, amount: n, note, storeId })
       onSaved?.()
     } catch (e) {
       setError(e.message)

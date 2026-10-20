@@ -5,35 +5,25 @@ import { Notice, SubTabs, inputCls } from '../bkUi'
 import { listWorkbookSheetNames } from '../bkImport'
 import { loadDividendData } from '../bkDividendData'
 import { exportBkBackup, restoreBkBackup } from '../bkBackup'
-import AutoBackupPanel from './AutoBackupPanel'
 import {
-  downloadBizTemplate,
   downloadDividendTemplate,
   downloadEmmaClaimTemplate,
-  downloadHourTemplate,
   downloadJeffOwedTemplate,
   downloadSfTemplate,
   downloadUAccountTemplate,
-  sheetNameForStore,
 } from '../bkImportTemplates'
 import BackfillGridImport from './BackfillGridImport'
-import BizGridImport from './BizImportRouter' // picks the per-store importer or the yearly-history importer
-import HourGridImport from './HourGridImport'
 import EntriesExcelImport from '../ucash/EntriesExcelImport'
 import DividendExcelImport from '../bonus/DividendExcelImport'
 import JeffOwedExcelImport from './JeffOwedExcelImport'
 import EmmaClaimExcelImport from './EmmaClaimExcelImport'
 import SfMaintenance from '../sales/SfMaintenance'
-import BizStoreManager from './BizStoreManager'
-import HourSettings from './HourSettings'
 import PartySettings from '../bonus/PartySettings'
 
 const SUBTABS = [
   ['import', '匯入'],
   ['backup', '備份'],
   ['sf', 'SF'],
-  ['biz', '營業'],
-  ['hours', '小時統計'],
   ['bonus', '收成'],
 ]
 
@@ -41,8 +31,6 @@ const SUBTABS = [
 // type columns), so it needs the full store list; the others are generic.
 const TEMPLATES = [
   ['SF', (stores) => downloadSfTemplate(stores)],
-  ['營業', (stores, salesStores) => downloadBizTemplate(salesStores)],
-  ['小時統計', (stores, salesStores) => downloadHourTemplate(salesStores)],
   ['U帳', () => downloadUAccountTemplate()],
   ['收成', () => downloadDividendTemplate()],
   ['積欠 Jeff', () => downloadJeffOwedTemplate()],
@@ -54,14 +42,9 @@ const TEMPLATES = [
 const ROUTES = [
   ['jeff', /jeff/i, '積欠 Jeff'],
   ['emma', /emma/i, '積欠 Emma'],
-  ['hours', /小時|hour|(^|[^a-z])hrs?([^a-z]|$)/i, '小時統計'],
-  ['biz', /營業|biz/i, '營業'],
   ['bonus', /收成|dividend|bonus/i, '收成'],
   ['u', /u\s*帳|u\s*account|ucash|分店現金|收支/i, 'U帳'],
-  // Not \bsf\b: JS treats "_" as a word character, so "範本_SF" has no word
-  // boundary before the S. Only ASCII letters count as a neighbour here, which
-  // still lets "_SF", " SF 202607" and "SF202607" match but not "transfer".
-  ['sf', /(^|[^a-z])sf([^a-z]|$)|sales\s*figure/i, 'SF'],
+  ['sf', /\bsf\b|sales\s*figure/i, 'SF'],
 ]
 const ROUTE_LABEL = Object.fromEntries(ROUTES.map(([k, , label]) => [k, label]))
 
@@ -89,7 +72,7 @@ const ENTRIES_SHEET_RE = /收支|entries?/i
 //   are configuration, not day-to-day entry, so they live alongside the rest
 //   of this tab's setup-and-maintenance surfaces instead of cluttering the
 //   tabs people use every day.
-export default function SettingsTab({ stores, salesStores, onStoresChanged, onSalesStoresChanged, onPaymentTypesChanged }) {
+export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesChanged }) {
   const [sub, setSub] = useState('import')
   const [templateChoice, setTemplateChoice] = useState(TEMPLATES[0][0])
   const [file, setFile] = useState(null)
@@ -152,30 +135,9 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
     setError('')
     setImportedMsg('')
     setFile(f)
-    const byName = guessKind(f.name)
-    setKind(byName)
+    setKind(guessKind(f.name))
     setUSheets(null)
     setUPipeline(null)
-    if (!byName) guessKindFromSheets(f)
-  }
-
-  // Fallback when the filename says nothing: look at the sheet names. A U帳
-  // workbook has 分店現金 / 收支 sheets; an SF workbook has one sheet per store.
-  async function guessKindFromSheets(f) {
-    try {
-      const names = await listWorkbookSheetNames(await f.arrayBuffer())
-      let guess = null
-      if (names.some((n) => CASH_SHEET_RE.test(n) || ENTRIES_SHEET_RE.test(n))) {
-        guess = 'u'
-      } else {
-        const storeSheets = new Set((stores ?? []).map((s) => sheetNameForStore(s.name).toLowerCase()))
-        if (names.some((n) => storeSheets.has(String(n).trim().toLowerCase()))) guess = 'sf'
-      }
-      // Ignore the result if the user picked another file or a kind meanwhile.
-      if (guess) setKind((cur) => cur ?? guess)
-    } catch {
-      // Unreadable here; the real importer will report it. Manual chooser stays.
-    }
   }
 
   function reset() {
@@ -186,7 +148,6 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
   }
 
   function imported(count, label) {
-    if (label === '收成') reloadDividendData()
     setImportedMsg(`已匯入 ${count} 筆（${label}）。`)
     reset()
   }
@@ -233,24 +194,12 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
               </select>
               <Button
                 variant="secondary"
-                disabled={(templateChoice === 'SF' && stores.length === 0) || ((templateChoice === '營業' || templateChoice === '小時統計') && salesStores.length === 0)}
-                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores, salesStores)}
+                disabled={templateChoice === 'SF' && stores.length === 0}
+                onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores)}
               >
                 下載範本
               </Button>
             </div>
-            {templateChoice === '營業' && (
-              <div className="text-xs text-gray-500">
-                {salesStores.length === 0 ? '還沒有任何營業分店，無法產生營業範本。' : '營業範本每個營業分店各自一個分頁，欄位：日期、P杯數、POS、CV、Self O、SO杯數。'}
-              </div>
-            )}
-            {templateChoice === '小時統計' && (
-              <div className="text-xs text-gray-500">
-                {salesStores.length === 0
-                  ? '還沒有任何營業分店，無法產生小時統計範本。'
-                  : '小時統計範本每個營業分店各自一個分頁，列是日期、欄是小時（用 系統設置 › 小時統計 設定的時段），數字填 POS 和自動點單已加總的營業額。'}
-              </div>
-            )}
             {templateChoice === 'SF' && (
               <div className="text-xs text-gray-500">
                 {stores.length === 0 ? '還沒有任何分店，無法產生 SF 範本。' : 'SF 範本每個分店各自一個分頁，欄位是該分店目前設定的 payment type。'}
@@ -261,7 +210,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
           <div className="space-y-3 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-sm font-semibold text-brand-900">上傳檔案</div>
             <div className="text-xs text-gray-500">
-              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「營業」「小時統計」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
+              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「U帳」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
             </div>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
               選擇 Excel 檔案
@@ -315,25 +264,6 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
                       onClose={reset}
                       onImported={(count) => imported(count, 'SF')}
                     />
-                  ))}
-
-                {kind === 'biz' &&
-                  (salesStores.length === 0 ? (
-                    <Notice kind="info">還沒有任何營業分店，無法匯入營業。</Notice>
-                  ) : (
-                    <BizGridImport
-                      file={file}
-                      salesStores={salesStores}
-                      onClose={reset}
-                      onImported={(count) => imported(count, '營業')}
-                    />
-                  ))}
-
-                {kind === 'hours' &&
-                  (salesStores.length === 0 ? (
-                    <Notice kind="info">還沒有任何營業分店，無法匯入小時統計。</Notice>
-                  ) : (
-                    <HourGridImport file={file} stores={salesStores} onClose={reset} onImported={(count) => imported(count, '小時統計')} />
                   ))}
 
                 {kind === 'u' &&
@@ -391,7 +321,7 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
                   ))}
 
                 {kind === 'jeff' && (
-                  <JeffOwedExcelImport file={file} onClose={reset} onImported={(count) => imported(count, '積欠 Jeff')} />
+                  <JeffOwedExcelImport file={file} stores={stores} onClose={reset} onImported={(count) => imported(count, '積欠 Jeff')} />
                 )}
 
                 {kind === 'emma' && (
@@ -405,8 +335,6 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
 
       {sub === 'backup' && (
         <div className="max-w-2xl space-y-4">
-          <AutoBackupPanel />
-          <h3 className="pt-2 font-semibold text-brand-900">手動匯出／還原</h3>
           <Notice kind="info">
             BK 的備份跟 OT Portal 整體的備份是分開的：整體備份（系統設定）只涵蓋公式／題庫／訓練內容這類參考資料，刻意不包含排班、出勤這類會持續累積的營運資料；BK 的帳本資料屬於同一類——資料量會持續變大、內容也比較敏感，混進整體備份裡會讓那份備份變大又變敏感，而兩邊真正會用到備份的人也不同（開發者 vs 平常維護整體備份的人）。所以 BK 在這裡有自己獨立的匯出／還原，包含所有 BK 的資料表。
           </Notice>
@@ -463,9 +391,6 @@ export default function SettingsTab({ stores, salesStores, onStoresChanged, onSa
           onStoresChanged={onStoresChanged}
         />
       </div>
-
-      {sub === 'hours' && <HourSettings stores={salesStores} />}
-      {sub === 'biz' && <BizStoreManager salesStores={salesStores} sfStores={stores} onChanged={onSalesStoresChanged} />}
 
       <div className={sub === 'bonus' ? '' : 'hidden'}>
         {!dividendData ? (

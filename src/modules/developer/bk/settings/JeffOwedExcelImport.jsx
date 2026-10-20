@@ -12,12 +12,22 @@ const KIND_LABEL = { salary: '薪水', advance_pay: '預付', advance_draw: '預
 // 系統設置 > 匯入 — 積欠 Jeff. Same direct-to-DB, dedupe-by-default pattern as
 // 收支/收成: an append-only ledger, so duplicates (same 種類 + 日期 + 金額) are
 // always skipped, never force-overwritten.
-export default function JeffOwedExcelImport({ file, onImported, onClose }) {
+//
+// Jeff, 2026-10-21 (point 2): 積欠 Jeff now has a store switcher and every
+// row needs a store_id (migration 0130_bk_owed_jeff_per_store.sql). This
+// Excel import has always only ever carried Sunnybank's data in practice, so
+// it keeps targeting Sunnybank specifically rather than asking which store.
+export default function JeffOwedExcelImport({ file, stores, onImported, onClose }) {
+  const sunnybank = stores.find((s) => s.name === 'Sunnybank')
   const [state, setState] = useState({ loading: true })
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!sunnybank) {
+      setState({ failed: 'BK 分店清單裡沒有「Sunnybank」，無法匯入積欠 Jeff 的紀錄。' })
+      return
+    }
     let cancelled = false
     ;(async () => {
       try {
@@ -27,7 +37,7 @@ export default function JeffOwedExcelImport({ file, onImported, onClose }) {
           if (!cancelled) setState({ result: parsed, sheetName: sheet.name })
           return
         }
-        const existing = await loadJeffOwedEntries()
+        const existing = await loadJeffOwedEntries(sunnybank.id)
         const rows = markJeffOwedDuplicates(parsed.rows, existing)
         if (!cancelled) setState({ result: { ...parsed, rows }, sheetName: sheet.name })
       } catch (e) {
@@ -37,7 +47,7 @@ export default function JeffOwedExcelImport({ file, onImported, onClose }) {
     return () => {
       cancelled = true
     }
-  }, [file])
+  }, [file, sunnybank])
 
   const { result } = state
   const { importable, duplicates, problems } = useMemo(() => {
@@ -53,7 +63,7 @@ export default function JeffOwedExcelImport({ file, onImported, onClose }) {
     setImporting(true)
     setError('')
     try {
-      await bulkImportJeffOwedRows(importable)
+      await bulkImportJeffOwedRows(importable, sunnybank.id)
       onImported?.(importable.length)
     } catch (e) {
       setError(e.message)

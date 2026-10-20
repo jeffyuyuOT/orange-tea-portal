@@ -20,9 +20,20 @@ export default function NavBadge({ badge, corner }) {
       </span>
     )
   }
+  // Jeff, 2026-10-21: asked whether the plain dot should just be bigger, or
+  // switched to a number everywhere like Message already does. Recommended
+  // (and this is) keeping the number only where it's a genuine count — most
+  // of the other signals feeding badgeForKeys() are cheap booleans, not real
+  // counts, so a fake number there would be misleading — and just making the
+  // dot itself bigger and higher-contrast (added a white ring on the corner
+  // variant so it reads clearly against any background it sits on).
   return (
     <span
-      className={corner ? 'absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 shadow' : 'h-1.5 w-1.5 rounded-full bg-red-500'}
+      className={
+        corner
+          ? 'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-red-500 shadow'
+          : 'h-2.5 w-2.5 rounded-full bg-red-500'
+      }
       aria-label="Update"
     />
   )

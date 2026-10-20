@@ -27,7 +27,7 @@ export default function OwedPage({ stores, topActive = true }) {
       <SubTabs tabs={SUB_TABS} value={sub} onChange={select} />
       {visited.has('jeff') && (
         <div className={sub === 'jeff' ? '' : 'hidden'}>
-          <JeffLedgerTab topActive={topActive && sub === 'jeff'} />
+          <JeffLedgerTab stores={stores} topActive={topActive && sub === 'jeff'} />
         </div>
       )}
       {visited.has('emma') && (

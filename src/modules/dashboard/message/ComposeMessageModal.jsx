@@ -187,6 +187,18 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
               className="w-36 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand-400 focus:outline-none disabled:opacity-40"
             />
           </div>
+          {canBroadcast && (
+            <label className="mb-1.5 flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 text-sm font-medium text-brand-700">
+              <input type="checkbox" checked={sendToAll} onChange={(e) => setSendToAll(e.target.checked)} />
+              📢 All — every store, every user (sent as "System")
+            </label>
+          )}
+          {/* Jeff, 2026-10-21 (point 3): dropped the "(who has Join store
+              activity checked)" qualifier from this label — still the exact
+              same eligibility rule underneath (see selectAllEligible above),
+              just no longer spelled out in the checkbox text — and moved
+              below the developer-only broadcast "All" so the two don't read
+              as one same-meaning pair stacked together. */}
           <label
             className={`mb-1.5 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm font-medium text-gray-700 ${sendToAll ? 'opacity-40' : ''}`}
           >
@@ -196,14 +208,8 @@ export default function ComposeMessageModal({ storeId, senderProfile, initial, o
               disabled={sendToAll || !selectAllEligible.length}
               onChange={(e) => toggleSelectAll(e.target.checked)}
             />
-            All — everyone at this store (who has Join store activity checked)
+            All — everyone at this store
           </label>
-          {canBroadcast && (
-            <label className="mb-1.5 flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 text-sm font-medium text-brand-700">
-              <input type="checkbox" checked={sendToAll} onChange={(e) => setSendToAll(e.target.checked)} />
-              📢 All — every store, every user (sent as "System")
-            </label>
-          )}
           <div className={`max-h-40 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 ${sendToAll ? 'opacity-40' : ''}`}>
             {filteredCandidates.map((c) => (
               <label key={c.id} className="flex items-center gap-2 text-sm text-gray-700">
