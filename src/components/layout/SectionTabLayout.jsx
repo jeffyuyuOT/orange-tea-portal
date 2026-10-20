@@ -103,10 +103,21 @@ export default function SectionTabLayout({ sectionKey }) {
       badge: badgeForKeys(t.fullKeys, signals),
     }))
 
-  // Every path a nested group's own layout already owns a back-bar for —
-  // this layout's back-bar steps aside on all of them (see comment above).
+  // Every path a nested group's own layout already owns a back-bar (and
+  // heading) for — this layout steps aside on all of them (see comment
+  // above). Jeff, 2026-10-21 (follow-up): "shop management跟training
+  // centre...不要像現在兩個名字並列在一起" — showing THIS section's own
+  // "Shop Management" heading right above Training Centre's own "Training
+  // Centre" heading read as two unrelated titles stacked together, not a
+  // parent/child relationship. Training Centre's own heading + pill row
+  // (desktop) / back-bar (mobile) already say everything this one would —
+  // Shop Management's desktop pill row (still shown, with the Training
+  // Centre tab highlighted) is enough wayfinding on its own, so the plain
+  // heading just steps aside here too rather than trying to style two
+  // headings into looking like a hierarchy.
   const nestedPaths = tabs.filter((t) => t.subpageTo).flatMap((t) => t.matchPaths)
-  const showBackBar = pathname !== prefix && !nestedPaths.includes(pathname)
+  const inNestedSubtree = nestedPaths.includes(pathname)
+  const showBackBar = pathname !== prefix && !inNestedSubtree
 
   function renderPill(t) {
     return (
@@ -119,7 +130,7 @@ export default function SectionTabLayout({ sectionKey }) {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">{section?.label}</h1>
+      {!inNestedSubtree && <h1 className="mb-1 text-xl font-semibold text-gray-900">{section?.label}</h1>}
 
       {/* Desktop: always the pill row, regardless of tab count — plenty of
           width there, and this matches every other section's existing
