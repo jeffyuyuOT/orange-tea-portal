@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner, { EmptyState } from '../../../../components/ui/LoadingSpinner'
-import { deleteJeffOwedEntry, loadJeffOwedEntries, loadJeffPayrollSalary, saveJeffOwedEntry } from '../bkData'
+import { deleteJeffOwedEntry, loadAllJeffOwedEntries, loadJeffOwedEntries, loadJeffPayrollSalary, saveJeffOwedEntry } from '../bkData'
 import { brisbaneTodayStr, fmtMoney, round2, toNum } from '../bkUtils'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, inputCls } from '../bkUi'
 
@@ -27,9 +27,18 @@ const KIND_LABEL = Object.fromEntries(KINDS)
 // asked how to handle it post-switch ("只在sunnybank顯示") those 薪水 rows —
 // and their contribution to salaryTotal — only show while Sunnybank is the
 // selected store, nowhere else.
+// Jeff, 2026-10-21 (point 3): "積欠Jeff的分店篩選最前面多一個全部分店" —
+// StoreTabs' allowAll puts it first (the shared convention). Viewing 全部分店
+// switches reload() to loadAllJeffOwedEntries() below instead of blocking on
+// "no store selected"; 薪水/payroll still only shows under Sunnybank
+// specifically (isSunnybank below), same existing rule, 全部分店 included.
+// 新增 needs one specific store to attach the new row to, so that button is
+// hidden while viewing 全部分店 (see JSX below) rather than silently writing
+// a null store_id.
 export default function JeffLedgerTab({ stores, topActive = true }) {
   const sunnybank = stores.find((s) => s.name === 'Sunnybank')
   const [storeId, setStoreId] = useState(() => sunnybank?.id ?? stores[0]?.id ?? null)
+  const viewingAll = storeId === null
   const [manual, setManual] = useState([])
   const [payroll, setPayroll] = useState([])
   const [loading, setLoading] = useState(false)
@@ -41,11 +50,13 @@ export default function JeffLedgerTab({ stores, topActive = true }) {
   const isSunnybank = storeId === sunnybank?.id
 
   const reload = useCallback(async () => {
-    if (!storeId) return
     setLoading(true)
     setError('')
     try {
-      const [m, p] = await Promise.all([loadJeffOwedEntries(storeId), loadJeffPayrollSalary()])
+      const [m, p] = await Promise.all([
+        viewingAll ? loadAllJeffOwedEntries() : loadJeffOwedEntries(storeId),
+        loadJeffPayrollSalary(),
+      ])
       setManual(m)
       setPayroll(p)
     } catch (e) {
@@ -53,7 +64,7 @@ export default function JeffLedgerTab({ stores, topActive = true }) {
     } finally {
       setLoading(false)
     }
-  }, [storeId])
+  }, [storeId, viewingAll])
 
   useEffect(() => {
     if (topActive) reload()
@@ -85,14 +96,18 @@ export default function JeffLedgerTab({ stores, topActive = true }) {
 
   return (
     <div className="space-y-4">
-      <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} />
+      <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm">
           Balance（薪水 + 預付 − 預拿）：
           <span className="ml-1 text-lg font-semibold tabular-nums text-brand-900">{fmtMoney(balance)}</span>
         </div>
-        <Button onClick={() => setAdding(true)}>＋ 新增</Button>
+        {viewingAll ? (
+          <span className="text-xs text-gray-400">選擇一個分店才能新增紀錄。</span>
+        ) : (
+          <Button onClick={() => setAdding(true)}>＋ 新增</Button>
+        )}
       </div>
 
       {error && (

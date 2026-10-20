@@ -343,7 +343,19 @@ export function AuthProvider({ children }) {
     // AppShell.jsx. Gating this the same way hasTimeDiscrepancies already
     // is stops that: a role that can't reach the page never contributes to
     // its own badge.
-    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'roster_hub.my_roster')) {
+    //
+    // Jeff, 2026-10-21: "如果user沒有勾join store activity，也不用推送通知跟
+    // 小紅點提示訊息" — join_store_activity (profiles column, used elsewhere
+    // via isActiveStoreMember(), storeVisibility.js) already means "not an
+    // active member of this store" for Manage Roster/Roster Staff Order/etc,
+    // so someone it's off for shouldn't see a "your roster changed" badge
+    // either, for the same reason as the role gate just above.
+    if (
+      !profile?.id ||
+      !currentStoreId ||
+      profile.join_store_activity === false ||
+      !canAccessPage(getEffectivePages(profile, overrides), 'roster_hub.my_roster')
+    ) {
       setRosterUpdates({ myRoster: false })
       return
     }
@@ -391,8 +403,17 @@ export function AuthProvider({ children }) {
   // reload — same trigger points as refreshRosterUpdates/refreshFormulaUpdates.
   const refreshBulletinUpdates = useCallback(async () => {
     // Jeff, 2026-10-02: same gating as refreshRosterUpdates above and for
-    // the same reason — see that comment.
-    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'dashboard.bulletin')) {
+    // the same reason — see that comment. Jeff, 2026-10-21: also same
+    // join_store_activity gate added to refreshRosterUpdates above — see
+    // its comment — since this is the Sidebar dot for exactly the
+    // "店內的發布訊息" (store announcements/roster postings) this flag is
+    // about.
+    if (
+      !profile?.id ||
+      !currentStoreId ||
+      profile.join_store_activity === false ||
+      !canAccessPage(getEffectivePages(profile, overrides), 'dashboard.bulletin')
+    ) {
       setHasBulletinUpdates(false)
       return
     }

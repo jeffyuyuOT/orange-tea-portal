@@ -59,7 +59,11 @@ export default function HoursTab({ stores, topActive = true }) {
   // storeId along the store tabs (全部分店 → each store → back round) and the
   // chart follows.
   const [dayDate, setDayDate] = useState(null)
-  const tabIds = useMemo(() => [null, ...stores.map((s) => s.id)], [stores])
+  // Jeff, 2026-10-21: "小時統計的全部分店放到最後面" — 全部分店 moved to the
+  // end of the StoreTabs row below (allAtEnd), so the ‹ › step order here
+  // follows the same order the tabs are now drawn in, not the old front
+  // position.
+  const tabIds = useMemo(() => [...stores.map((s) => s.id), null], [stores])
   function stepStore(dir) {
     const i = tabIds.indexOf(storeId)
     setStoreId(tabIds[(i + dir + tabIds.length) % tabIds.length])
@@ -110,7 +114,7 @@ export default function HoursTab({ stores, topActive = true }) {
 
   return (
     <div className="space-y-3">
-      <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll />
+      <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll allAtEnd />
       <div className="flex flex-wrap items-center gap-3">
         <YearMonthPicker year={year} month={month} onChange={(v) => (setYear(v.year), setMonth(v.month))} />
         <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定。點日期可看當天的小時分佈圖（可複製圖片／表格）</span>

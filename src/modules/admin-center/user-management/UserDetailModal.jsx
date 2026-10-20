@@ -388,7 +388,25 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       <div className="mb-5 grid grid-cols-3 gap-3">
         <div className="block">
           <label className="mb-1 block text-xs font-medium text-gray-500">Role</label>
-          <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+          <select
+            className="input"
+            value={role}
+            onChange={(e) => {
+              const next = e.target.value
+              setRole(next)
+              // Jeff, 2026-10-21: "2d maker跟accountant可以變成預設join store
+              // activity不勾選，就不會收到任何訊息通知" — these two aren't
+              // people actively watching a store's bulletin/roster (a device
+              // account and an outside bookkeeper), so switching TO one of
+              // them here defaults Join store activity off — same effect as
+              // unchecking it by hand, just one less step, and still a plain
+              // checkbox the admin can re-check afterward if this particular
+              // person is the exception.
+              if (['qr_code_maker', 'accountant'].includes(next) && !['qr_code_maker', 'accountant'].includes(role)) {
+                setJoinStoreActivity(false)
+              }
+            }}
+          >
             {roleSelectOptions(user.role, me?.role).map(([key, label]) => (
               <option key={key} value={key}>
                 {label}
@@ -439,7 +457,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
                 AND every "also belong to" store checked here (see migration
                 0067 / storeVisibility.js's isActiveStoreMember). */}
             <InfoTip label="Join store activity">
-              {'Checked:  full active participant at Manage Roster (including applying for leave/staff availability/listed in Roster Staff Order)/shown in Staff Information/Learning Tracker/Staff Time Logs there. \nUnchecked: View-only access (can switch to the store, but excluded from all rosters and tracking).'}
+              {'Checked:  full active participant at Manage Roster (including applying for leave/staff availability/listed in Roster Staff Order)/shown in Staff Information/Learning Tracker/Staff Time Logs there. \nUnchecked: View-only access (can switch to the store, but excluded from all rosters and tracking), and also stops push notifications and the Bulletin/Roster red-dot for that store — someone this is off for is not expected to be actively watching what gets posted there.'}
             </InfoTip>
           </div>
           <div className="mt-2 flex items-center gap-2">

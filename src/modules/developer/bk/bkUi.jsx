@@ -3,7 +3,11 @@ import { useState } from 'react'
 import { brisbaneToday } from './bkUtils'
 
 // `lead` = [id, label] (or a list of them): extra tabs shown before the stores (e.g. 營業's 手動輸入總頁, 總覽).
-export function StoreTabs({ stores, storeId, onChange, allowAll = false, lead = null, className = '' }) {
+// `allowAll` puts a 全部分店 tab first, before the per-store tabs — the
+// convention every other StoreTabs user follows. Jeff, 2026-10-21: "小時統計
+// 的全部分店放到最後面" — 小時統計 wants it last instead, so `allAtEnd` moves
+// just that tab to the end without disturbing anyone else's order.
+export function StoreTabs({ stores, storeId, onChange, allowAll = false, allAtEnd = false, lead = null, className = '' }) {
   const tab = (id, label) => (
     <button
       key={id ?? 'all'}
@@ -19,8 +23,9 @@ export function StoreTabs({ stores, storeId, onChange, allowAll = false, lead = 
   return (
     <div className={`flex gap-2 overflow-x-auto pb-1 ${className}`}>
       {lead && (Array.isArray(lead[0]) ? lead : [lead]).map(([id, label]) => tab(id, label))}
-      {allowAll && tab(null, '全部分店')}
+      {allowAll && !allAtEnd && tab(null, '全部分店')}
       {stores.map((s) => tab(s.id, s.name))}
+      {allowAll && allAtEnd && tab(null, '全部分店')}
     </div>
   )
 }

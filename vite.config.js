@@ -10,6 +10,18 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Jeff, 2026-10-21: "電腦local版的，按了上面提示開啟推送通知後，提示還是
+      // 在螢幕上" — not a bug in the nudge banner itself: by default
+      // vite-plugin-pwa only builds/registers the service worker in a real
+      // production build, so on `vite dev` (localhost) there is no service
+      // worker at all, and `subscribeToPush`'s `await navigator.serviceWorker
+      // .ready` (webPush.js) just hangs forever — nothing ever throws, so the
+      // banner's dismissPushNudge() (AppShell.jsx) never runs either. This
+      // turns on a real (if simplified) service worker during `vite dev` too,
+      // so push — and the rest of the PWA/offline behavior — can actually be
+      // tested without a full build + deploy each time. Dev-only; the
+      // production build/behavior is unchanged.
+      devOptions: { enabled: true, type: 'module' },
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       workbox: {
         // The developer-only payroll app (public/payroll/index.html) is
