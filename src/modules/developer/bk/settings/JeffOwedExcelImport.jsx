@@ -3,20 +3,22 @@ import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { markJeffOwedDuplicates, parseJeffOwedRows, readWorkbookRows } from '../bkImport'
-import { bulkImportJeffOwedRows, loadJeffOwedEntries } from '../bkData'
+import { bulkImportJeffOwedRows, loadAllJeffOwedEntries } from '../bkData'
 import { fmtMoney } from '../bkUtils'
 import { Notice } from '../bkUi'
 
 const KIND_LABEL = { salary: '薪水', advance_pay: '預付', advance_draw: '預拿' }
 
 // 系統設置 > 匯入 — 積欠 Jeff. Same direct-to-DB, dedupe-by-default pattern as
-// 收支/收成: an append-only ledger, so duplicates (same 種類 + 日期 + 金額) are
-// always skipped, never force-overwritten.
+// 收支/收成: an append-only ledger, so duplicates (same 分店 + 種類 + 日期 + 金額)
+// are always skipped, never force-overwritten.
 //
-// Jeff, 2026-10-21 (point 2): 積欠 Jeff now has a store switcher and every
-// row needs a store_id (migration 0130_bk_owed_jeff_per_store.sql). This
-// Excel import has always only ever carried Sunnybank's data in practice, so
-// it keeps targeting Sunnybank specifically rather than asking which store.
+// Jeff, 2026-10-21 (point 2 follow-up): 積欠 Jeff now has a store switcher and
+// every row needs a store_id (migration 0130_bk_owed_jeff_per_store.sql). The
+// template gained an optional Store/分店 column — a blank cell (or a file from
+// before this column existed) falls back to Sunnybank, but any row can name a
+// different store. Dedup now has to look across every store, not just
+// Sunnybank, since one file can carry rows for more than one.
 export default function JeffOwedExcelImport({ file, stores, onImported, onClose }) {
   const sunnybank = stores.find((s) => s.name === 'Sunnybank')
   const [state, setState] = useState({ loading: true })
@@ -32,12 +34,12 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
     ;(async () => {
       try {
         const sheet = await readWorkbookRows(await file.arrayBuffer())
-        const parsed = parseJeffOwedRows(sheet.rows)
+        const parsed = parseJeffOwedRows(sheet.rows, { stores, defaultStoreId: sunnybank.id })
         if (parsed.error || parsed.rows.length === 0) {
           if (!cancelled) setState({ result: parsed, sheetName: sheet.name })
           return
         }
-        const existing = await loadJeffOwedEntries(sunnybank.id)
+        const existing = await loadAllJeffOwedEntries()
         const rows = markJeffOwedDuplicates(parsed.rows, existing)
         if (!cancelled) setState({ result: { ...parsed, rows }, sheetName: sheet.name })
       } catch (e) {
@@ -47,9 +49,10 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
     return () => {
       cancelled = true
     }
-  }, [file, sunnybank])
+  }, [file, sunnybank, stores])
 
   const { result } = state
+  const storeName = (id) => stores.find((s) => s.id === id)?.name ?? '—'
   const { importable, duplicates, problems } = useMemo(() => {
     const rows = result?.rows ?? []
     return {
@@ -63,7 +66,7 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
     setImporting(true)
     setError('')
     try {
-      await bulkImportJeffOwedRows(importable, sunnybank.id)
+      await bulkImportJeffOwedRows(importable)
       onImported?.(importable.length)
     } catch (e) {
       setError(e.message)
@@ -99,7 +102,7 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
             {state.sheetName ? `（工作表：${state.sheetName}）` : ''}
           </div>
           <Notice kind="info">
-            需要 Date / Type（薪水 / 預付 / 預拿）/ Amount 欄。已經在系統裡的紀錄（種類 + 日期 + 金額都相同）會自動跳過，不會重複匯入。
+            需要 Date / Type（薪水 / 預付 / 預拿）/ Amount 欄；Store 欄可以留白，留白的話算 Sunnybank。已經在系統裡的紀錄（分店 + 種類 + 日期 + 金額都相同）會自動跳過，不會重複匯入。
           </Notice>
 
           {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
@@ -120,6 +123,7 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
                 <thead className="bg-brand-100 text-left text-xs text-gray-700">
                   <tr>
                     <th className="px-3 py-2">日期</th>
+                    <th className="px-3 py-2">分店</th>
                     <th className="px-3 py-2">種類</th>
                     <th className="px-3 py-2">說明</th>
                     <th className="px-3 py-2 text-right">金額</th>
@@ -129,6 +133,7 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
                   {importable.map((r) => (
                     <tr key={r.rowNumber} className="border-t border-gray-100">
                       <td className="whitespace-nowrap px-3 py-2">{r.date}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{storeName(r.storeId)}</td>
                       <td className="px-3 py-2">{KIND_LABEL[r.kind] ?? r.kind}</td>
                       <td className="px-3 py-2">{r.description || ''}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.amount)}</td>

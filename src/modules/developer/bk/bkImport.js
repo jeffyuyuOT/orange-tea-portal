@@ -816,7 +816,13 @@ export function markDividendDuplicates(rows, existingEntries, existingPayouts) {
 }
 
 // 積欠 > Jeff: manual 薪水/預付/預拿 rows (bk_owed_jeff_entries). Not scoped to
-// any store or month.
+// any month.
+// Jeff, 2026-10-21 (point 2 follow-up): "積欠jeff的匯入template不用註明分店
+// 嗎" — now per-store (migration 0130_bk_owed_jeff_per_store.sql), so the
+// template gained a Store/分店 column. Same forgiving pattern as
+// parseLedgerRows' Store column: optional — a blank cell (or the whole
+// column missing, for old template files from before this column existed)
+// falls back to `defaultStoreId`, but any row can name a different store.
 const JEFF_OWED_KIND_ALIASES = [
   ['salary', ['薪水', 'salary']],
   ['advance_pay', ['預付', 'advance_pay', 'advance pay']],
@@ -829,13 +835,14 @@ function parseJeffOwedKindCell(v) {
 }
 const JEFF_OWED_HEADER_MAP = [
   ['date', ['date', '日期', '日']],
+  ['store', ['store', '分店']],
   ['kind', ['type', 'kind', '種類', '類型']],
   ['desc', ['description', 'desc', '說明', '敘述']],
   ['amount', ['amount', '金額']],
   ['note', ['note', '附註', '備註']],
 ]
 
-export function parseJeffOwedRows(rows) {
+export function parseJeffOwedRows(rows, { stores, defaultStoreId }) {
   const headerIdx = findHeaderRow(rows)
   if (headerIdx < 0) return { error: '找不到標題列：檔案需要有「Date」或「日期」欄。', rows: [], mapped: [], ignored: [] }
   const headers = rows[headerIdx]
@@ -877,17 +884,24 @@ export function parseJeffOwedRows(rows) {
       out.push({ rowNumber, date, kind, problem: '金額必須是大於 0 的數字' })
       continue
     }
+    const storeNameCell = col.store !== undefined ? row[col.store] : null
+    const store = storeNameCell ? findStoreByName(stores, storeNameCell) : stores.find((s) => s.id === defaultStoreId)
+    if (!store) {
+      out.push({ rowNumber, date, kind, problem: `找不到分店：「${storeNameCell ?? ''}」` })
+      continue
+    }
     const description = col.desc !== undefined ? String(row[col.desc] ?? '').trim() : ''
     const note = col.note !== undefined ? String(row[col.note] ?? '').trim() : ''
-    out.push({ rowNumber, date, kind, amount: amtRes.value, description, note })
+    out.push({ rowNumber, date, kind, amount: amtRes.value, description, note, storeId: store.id })
   }
   return { rows: out, mapped, ignored }
 }
 
-// `existing` = bkData.loadJeffOwedEntries() rows.
+// `existing` = bkData.loadAllJeffOwedEntries() rows (every store — a single
+// file can now import rows into more than one).
 export function markJeffOwedDuplicates(rows, existing) {
-  const seen = new Set(existing.map((e) => `${e.kind}|${e.entry_date}|${Number(e.amount)}`))
-  return rows.map((r) => (r.problem ? r : { ...r, duplicate: seen.has(`${r.kind}|${r.date}|${r.amount}`) }))
+  const seen = new Set(existing.map((e) => `${e.store_id}|${e.kind}|${e.entry_date}|${Number(e.amount)}`))
+  return rows.map((r) => (r.problem ? r : { ...r, duplicate: seen.has(`${r.storeId}|${r.kind}|${r.date}|${r.amount}`) }))
 }
 
 // 積欠 > Emma: historical bonus claims (bk_owed_emma_claims). A claim normally

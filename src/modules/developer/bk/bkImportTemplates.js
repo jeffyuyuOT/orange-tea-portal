@@ -110,9 +110,9 @@ export async function downloadJeffOwedTemplate() {
   const wb = await buildTemplate([
     {
       name: '積欠Jeff',
-      note: 'Type 填 薪水 / 預付 / 預拿。薪水如果本來就是從 payroll 計算表自動抓的，這裡只用來補登不在那張表裡的薪水。',
-      headers: ['Date', 'Type', 'Description', 'Amount', 'Note'],
-      example: ['2026-10-05', '預付', '出差墊款', 500, ''],
+      note: 'Type 填 薪水 / 預付 / 預拿。薪水如果本來就是從 payroll 計算表自動抓的，這裡只用來補登不在那張表裡的薪水。Store 可以留白，留白的話會算到 Sunnybank。',
+      headers: ['Date', 'Store', 'Type', 'Description', 'Amount', 'Note'],
+      example: ['2026-10-05', 'Sunnybank', '預付', '出差墊款', 500, ''],
     },
   ])
   await download(wb, 'BK匯入範本_積欠Jeff.xlsx')

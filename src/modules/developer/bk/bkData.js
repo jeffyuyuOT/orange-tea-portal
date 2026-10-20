@@ -378,6 +378,16 @@ export async function loadJeffOwedEntries(storeId) {
   )
 }
 
+// Jeff, 2026-10-21 (point 2 follow-up): "積欠jeff的匯入template不用註明分店
+// 嗎" — the Excel import now accepts any store per row (Store/分店 column,
+// bkImport.js's parseJeffOwedRows), not just Sunnybank, so its dedupe check
+// needs every store's existing rows to compare against — unlike
+// loadJeffOwedEntries(storeId) above, which the UI tab uses and is
+// deliberately scoped to one store at a time.
+export async function loadAllJeffOwedEntries() {
+  return unwrap(await supabase.from('bk_owed_jeff_entries').select('*')) ?? []
+}
+
 export async function saveJeffOwedEntry(form) {
   const payload = {
     kind: form.kind,
@@ -407,12 +417,14 @@ export async function loadJeffPayrollSalary() {
 
 // Point 5/系統設置: Excel-import backfill for 積欠 > Jeff. `rows` are already
 // deduped by the caller (bkImport.markJeffOwedDuplicates).
-// Jeff, 2026-10-21 (point 2): storeId required, same reason as
-// saveJeffOwedEntry above — every row needs a store now (migration
-// 0130_bk_owed_jeff_per_store.sql). The Excel import only ever targets
-// Sunnybank (that's the only store this ledger had data for before the
-// switcher existed), so callers pass Sunnybank's id explicitly.
-export async function bulkImportJeffOwedRows(rows, storeId) {
+// Jeff, 2026-10-21 (point 2): every row needs a store now (migration
+// 0130_bk_owed_jeff_per_store.sql).
+// Jeff, 2026-10-21 (point 2 follow-up): "積欠jeff的匯入template不用註明分店
+// 嗎" — each row now carries its OWN storeId (bkImport.parseJeffOwedRows
+// resolves it per row from the file's Store/分店 column, defaulting to
+// Sunnybank when that column/cell is blank — same forgiving pattern as
+// parseLedgerRows), rather than one storeId shared by the whole file.
+export async function bulkImportJeffOwedRows(rows) {
   if (!rows.length) return
   unwrap(
     await supabase.from('bk_owed_jeff_entries').insert(
@@ -422,7 +434,7 @@ export async function bulkImportJeffOwedRows(rows, storeId) {
         description: r.description || null,
         amount: toNum(r.amount),
         note: r.note || null,
-        store_id: storeId,
+        store_id: r.storeId,
       }))
     )
   )
