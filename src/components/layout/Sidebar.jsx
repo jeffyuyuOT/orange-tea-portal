@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { supabase } from '../../lib/supabaseClient'
 import { canAccessSection, canAccessPage } from '../../lib/permissions'
 import { orderedSectionEntries, logicalPageEntries } from '../../lib/sidebarOrder'
 import { useAuth } from '../../lib/AuthContext'
+import { useAuditPending } from '../../lib/useAuditPending'
 import Badge from '../ui/Badge'
 
 // The link list itself, shared between the permanent desktop sidebar below
@@ -28,32 +27,11 @@ export function SidebarNavLinks({ onNavigate }) {
   const { pathname } = useLocation()
 
   // Jeff, 2026-10-18: red dot on Audit > Review for a shop manager when an
-  // audit at one of their stores is waiting for their signature. Only queried for
-  // someone who actually has the page AND is a shop manager — everyone else
-  // (staff, training, …) never touches audit data at login.
-  const [auditPending, setAuditPending] = useState(false)
-  const watchAudit = profile?.role === 'shop_manager' && canAccessPage(effectivePages, 'audit.review')
-  useEffect(() => {
-    if (!watchAudit) {
-      setAuditPending(false)
-      return undefined
-    }
-    let cancelled = false
-    const check = () =>
-      supabase
-        .from('audit_reports')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending_confirmation')
-        .then(({ count }) => {
-          if (!cancelled) setAuditPending((count ?? 0) > 0)
-        })
-    check()
-    window.addEventListener('audit-changed', check)
-    return () => {
-      cancelled = true
-      window.removeEventListener('audit-changed', check)
-    }
-  }, [watchAudit, pathname])
+  // audit at one of their stores is waiting for their signature — see
+  // useAuditPending.js (extracted 2026-10-20 so SectionTabLayout/
+  // MobileSectionHome can show the same signal without a second copy of
+  // this query).
+  const auditPending = useAuditPending(profile, effectivePages)
 
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">

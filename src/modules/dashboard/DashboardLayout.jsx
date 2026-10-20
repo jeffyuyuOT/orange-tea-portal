@@ -4,7 +4,8 @@ import { useAuth } from '../../lib/AuthContext'
 import { canAccessPage } from '../../lib/permissions'
 import { supabase } from '../../lib/supabaseClient'
 import { currentTitle } from '../../lib/trainingJourney'
-import Badge from '../../components/ui/Badge'
+import { badgeForKeys } from '../../lib/navBadges'
+import NavBadge from '../../components/ui/NavBadge'
 
 const TABS = [
   { key: 'dashboard.bulletin', to: '/dashboard/bulletin', label: 'Bulletin Board' },
@@ -15,7 +16,12 @@ const TABS = [
 ]
 
 export default function DashboardLayout() {
-  const { profile, effectivePages, unreadMessageCount } = useAuth()
+  const { profile, effectivePages, unreadMessageCount, hasBulletinUpdates } = useAuth()
+  // Jeff, 2026-10-20 (point 7): same "something's new" lookup the new
+  // mobile nav surfaces use (navBadges.jsx) — brings this tab bar's Message
+  // count up to parity with a Bulletin Board dot too (Sidebar.jsx already
+  // showed one next to Bulletin; this tab bar only ever had Message's).
+  const navSignals = { hasBulletinUpdates, unreadMessageCount }
 
   // Jeff, 2026-10-02 (Training Journey spec, point 6): the current Training
   // Journey title shown right next to the greeting. Phases barely ever
@@ -79,11 +85,11 @@ export default function DashboardLayout() {
             }
           >
             {t.label}
-            {/* Jeff, 2026-09: circled unread count, not just a dot — see
-                AuthContext.jsx's unreadMessageCount (message_recipients
-                with read_at null, across every store, not just the one
-                currently switched to — Message is personal scope now). */}
-            {t.key === 'dashboard.message' && unreadMessageCount > 0 && <Badge color="red">{unreadMessageCount}</Badge>}
+            {/* Jeff, 2026-09: circled unread count for Message (not just a
+                dot — see AuthContext.jsx's unreadMessageCount), a plain dot
+                for Bulletin Board — same badgeForKeys lookup every nav
+                surface now shares (navBadges.jsx). */}
+            <NavBadge badge={badgeForKeys([t.key], navSignals)} />
           </NavLink>
         ))}
       </div>

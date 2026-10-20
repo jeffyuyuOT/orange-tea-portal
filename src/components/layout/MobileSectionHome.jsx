@@ -2,6 +2,9 @@ import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext'
 import { SECTIONS, canAccessPage } from '../../lib/permissions'
 import { orderedSectionEntries, logicalPageEntries } from '../../lib/sidebarOrder'
+import { useAuditPending } from '../../lib/useAuditPending'
+import { badgeForKeys } from '../../lib/navBadges'
+import NavBadge from '../ui/NavBadge'
 
 // Jeff, 2026-10-19 (mobile nav redesign, point 1): mobile's new main-nav
 // screen — one colored button per accessible section, reached via the
@@ -44,7 +47,16 @@ function firstPathInSection(sectionKey, entries, effectivePages) {
 }
 
 export default function MobileSectionHome() {
-  const { effectivePages, sidebarOrder } = useAuth()
+  const { effectivePages, sidebarOrder, profile, rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies } =
+    useAuth()
+  // Jeff, 2026-10-20 (point 7): "分頁按鈕右上角要顯示數字提示，這樣user才知道
+  // 裡面有提示訊息要按進去看" — a section block here is the FIRST tap on
+  // mobile, so it needs its own "something in here" badge just as much as
+  // the per-page tabs do (SectionTabLayout) — otherwise there's no way to
+  // know a section has an update without opening it first. See
+  // navBadges.jsx for the shared lookup every nav surface uses.
+  const auditPending = useAuditPending(profile, effectivePages)
+  const signals = { rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, auditPending }
 
   const sections = orderedSectionEntries(sidebarOrder)
     .map(([sectionKey]) => {
@@ -55,12 +67,18 @@ export default function MobileSectionHome() {
           : canAccessPage(effectivePages, `${sectionKey}.${e.key}`)
       )
       if (!reachable.length) return null
+      const fullKeys = reachable.flatMap((e) =>
+        e.type === 'group'
+          ? e.pages.filter((p) => canAccessPage(effectivePages, `${sectionKey}.${p}`)).map((p) => `${sectionKey}.${p}`)
+          : [`${sectionKey}.${e.key}`]
+      )
       return {
         key: sectionKey,
         label: SECTIONS[sectionKey]?.label ?? sectionKey,
         count: reachable.length,
         to: firstPathInSection(sectionKey, reachable, effectivePages),
         style: SECTION_STYLE[sectionKey],
+        badge: badgeForKeys(fullKeys, signals),
       }
     })
     .filter(Boolean)
@@ -77,7 +95,7 @@ export default function MobileSectionHome() {
         <Link
           key={s.key}
           to={s.to}
-          className="flex min-h-[92px] flex-col rounded-2xl p-4 text-white shadow-sm"
+          className="relative flex min-h-[92px] flex-col rounded-2xl p-4 text-white shadow-sm"
           style={{ background: s.style?.bg ?? 'linear-gradient(135deg,#9ca3af,#6b7280)' }}
         >
           <span className="text-xl opacity-90" aria-hidden>
@@ -97,6 +115,7 @@ export default function MobileSectionHome() {
               {s.count} page{s.count > 1 ? 's' : ''}
             </div>
           </div>
+          <NavBadge badge={s.badge} corner />
         </Link>
       ))}
     </div>
