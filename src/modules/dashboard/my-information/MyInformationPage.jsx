@@ -48,6 +48,39 @@ export default function MyInformationPage() {
     setPushState(await getPushPermissionState())
   }
 
+  // Jeff, 2026-10-21 (debug only — see button below): "強制關閉還是圖示還是
+  // 存在提示" — the existing auto-clear (AppShell.jsx) isn't clearing the
+  // Android app-icon badge even across a full force-close + reopen, so
+  // before guessing at another fix blind, this surfaces exactly what's
+  // actually true on THIS device/browser in one tap: whether the Badging
+  // API exists here at all, how many push notifications the service worker
+  // currently thinks are shown, and what happens when both are cleared the
+  // same way AppShell.jsx already tries to. Temporary — remove once the
+  // real fix lands.
+  async function handleDebugClearBadge() {
+    const lines = []
+    const hasBadging = 'setAppBadge' in navigator
+    lines.push(`Badging API supported: ${hasBadging}`)
+    if (hasBadging) {
+      try {
+        await navigator.clearAppBadge()
+        lines.push('clearAppBadge(): ok')
+      } catch (e) {
+        lines.push(`clearAppBadge() threw: ${e.message}`)
+      }
+    }
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const list = await reg.getNotifications()
+      lines.push(`shown notifications found: ${list.length}`)
+      list.forEach((n) => n.close())
+      lines.push(list.length ? 'closed all of them' : '(nothing to close)')
+    } catch (e) {
+      lines.push(`getNotifications() threw: ${e.message}`)
+    }
+    alert(lines.join('\n'))
+  }
+
   useEffect(() => {
     if (profile) {
       setForm({
@@ -203,6 +236,10 @@ export default function MyInformationPage() {
               {pushState === 'working' ? '處理中…' : pushState === 'on' ? '🔕 關閉推播通知' : '🔔 開啟推播通知'}
             </Button>
           )}
+          {/* Debug only, see handleDebugClearBadge above — temporary until the app-icon-badge issue is actually fixed. */}
+          <Button variant="secondary" onClick={handleDebugClearBadge}>
+            🔧 診斷/清除圖示提示
+          </Button>
         </div>
       </section>
 

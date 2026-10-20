@@ -319,11 +319,30 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     // separately so a kept row's roster_display_name/roster_order/
     // hidden_from_roster survive untouched (toAdd's insert above already
     // covers the brand-new rows).
+    //
+    // Jeff, 2026-10-21: "之前不是有做過如果是新員工或者是重新join store
+    // activity的user會先放在not shown on the roaster裡" — the new-store-row
+    // case above already does this (hidden_from_roster: true on insert);
+    // re-joining never did, for a KEPT row whose join_store_activity just
+    // flipped false→true (this field lives on profiles, not user_stores, so
+    // toggling it alone never touched any user_stores row at all — see the
+    // comment above the profiles update). Same reasoning as a brand-new
+    // person: someone who's been sitting out shouldn't silently reappear on
+    // the active roster the moment the box is re-checked — a manager still
+    // has to deliberately bring them back via Roster Staff Order.
+    const justRejoined = user.join_store_activity === false && joinStoreActivity === true
     const toUpdateRosterTab = storeIds.filter((id) => existingIds.has(id))
     if (toUpdateRosterTab.length) {
       const results = await Promise.all(
         toUpdateRosterTab.map((id) =>
-          supabase.from('user_stores').update({ can_view_roster_tab: rosterTabByStore[id] ?? defaultRosterTabFor(id) }).eq('profile_id', user.id).eq('store_id', id)
+          supabase
+            .from('user_stores')
+            .update({
+              can_view_roster_tab: rosterTabByStore[id] ?? defaultRosterTabFor(id),
+              ...(justRejoined ? { hidden_from_roster: true } : null),
+            })
+            .eq('profile_id', user.id)
+            .eq('store_id', id)
         )
       )
       const rosterTabErr = results.find((r) => r.error)?.error
