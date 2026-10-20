@@ -23,7 +23,12 @@ export const SECTIONS = {
       // is never store-filtered the way Bulletin Board is.
       message: 'Message',
       study_log: 'Study Log',
-      time_attendance: 'Time & Attendance',
+      // Jeff, 2026-10-21: shortened from "Time & Attendance" to match
+      // DashboardLayout.jsx's mobile tab bar label (its own separate
+      // hardcoded TABS array, changed first) — this is the one
+      // Sidebar.jsx's desktop nav actually reads (via sidebarOrder.js),
+      // so the mobile-only fix there didn't touch the desktop sidebar.
+      time_attendance: 'Attendance',
       my_information: 'My Information',
     },
   },
