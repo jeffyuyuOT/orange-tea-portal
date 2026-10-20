@@ -132,6 +132,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // Fresh Audit flags straight from the DB — accessibleStores is loaded at
   // login, so it goes stale after Audit is ticked in Store Management.
   const [auditStoreIds, setAuditStoreIds] = useState(null)
+  // Jeff, 2026-10-20: same freshness concern as auditStoreIds above, needed
+  // for the Roster tab checkboxes' default — a store NEWLY checked under
+  // "also belong to" (not yet in user_stores at all) has no saved
+  // can_view_roster_tab value yet, so its checkbox must default to match
+  // that store's own "Disable roster" setting (Store Management), not a
+  // blind `true`. Caught live: adding Underwood (disable_roster on) to a
+  // profile showed the new Roster tab checkbox ticked, when it should
+  // start unticked to match Underwood's own default for everyone else.
+  const [disableRosterStoreIds, setDisableRosterStoreIds] = useState(null)
   const [loadedParts, setLoadedParts] = useState(0) // overrides + user_stores both read (2)
   useEffect(() => {
     supabase
@@ -139,7 +148,22 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       .select('id')
       .eq('audit_enabled', true)
       .then(({ data }) => setAuditStoreIds(new Set((data ?? []).map((r) => r.id))))
+    supabase
+      .from('stores')
+      .select('id')
+      .eq('disable_roster', true)
+      .then(({ data }) => setDisableRosterStoreIds(new Set((data ?? []).map((r) => r.id))))
   }, [])
+
+  // The default a store's Roster tab checkbox should show/save when this
+  // person has no saved user_stores row for it yet (brand new membership) —
+  // mirrors what Store Management's "Disable roster" bulk-toggle would set
+  // for an existing member of that store. Optimistically true until
+  // disableRosterStoreIds loads (near-instant; same tradeoff auditAvailable
+  // below makes before auditReady).
+  function defaultRosterTabFor(id) {
+    return disableRosterStoreIds ? !disableRosterStoreIds.has(id) : true
+  }
 
   useEffect(() => {
     supabase
@@ -172,7 +196,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   }
 
   function toggleRosterTab(id) {
-    setRosterTabByStore((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }))
+    setRosterTabByStore((prev) => ({ ...prev, [id]: !(prev[id] ?? defaultRosterTabFor(id)) }))
   }
 
   const effective = getEffectivePages(
@@ -283,7 +307,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     if (toAdd.length) {
       const { error: storeError } = await supabase
         .from('user_stores')
-        .insert(toAdd.map((id) => ({ profile_id: user.id, store_id: id, hidden_from_roster: true, can_view_roster_tab: rosterTabByStore[id] ?? true })))
+        .insert(toAdd.map((id) => ({ profile_id: user.id, store_id: id, hidden_from_roster: true, can_view_roster_tab: rosterTabByStore[id] ?? defaultRosterTabFor(id) })))
       if (storeError) {
         alert(`Save failed while updating stores: ${storeError.message}`)
         setSaving(false)
@@ -299,7 +323,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     if (toUpdateRosterTab.length) {
       const results = await Promise.all(
         toUpdateRosterTab.map((id) =>
-          supabase.from('user_stores').update({ can_view_roster_tab: rosterTabByStore[id] ?? true }).eq('profile_id', user.id).eq('store_id', id)
+          supabase.from('user_stores').update({ can_view_roster_tab: rosterTabByStore[id] ?? defaultRosterTabFor(id) }).eq('profile_id', user.id).eq('store_id', id)
         )
       )
       const rosterTabErr = results.find((r) => r.error)?.error
@@ -448,7 +472,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
               const storeName = accessibleStores.find((s) => s.id === id)?.name ?? '—'
               return (
                 <label key={id} className="flex items-center gap-1.5 text-sm text-gray-600">
-                  <input type="checkbox" checked={rosterTabByStore[id] ?? true} onChange={() => toggleRosterTab(id)} />
+                  <input type="checkbox" checked={rosterTabByStore[id] ?? defaultRosterTabFor(id)} onChange={() => toggleRosterTab(id)} />
                   {storeName}
                 </label>
               )
