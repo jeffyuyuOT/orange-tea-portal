@@ -6,7 +6,6 @@ import { supabase } from '../../lib/supabaseClient'
 import { currentTitle } from '../../lib/trainingJourney'
 import { badgeForKeys } from '../../lib/navBadges'
 import NavBadge from '../../components/ui/NavBadge'
-import { SECTION_STYLE } from '../../lib/sectionStyle'
 
 const TABS = [
   { key: 'dashboard.bulletin', to: '/dashboard/bulletin', label: 'Bulletin Board' },
@@ -112,7 +111,6 @@ export default function DashboardLayout() {
         context={{
           items: accessibleTabs.map((t) => ({ key: t.key, label: t.label, to: t.to, badge: badgeForKeys([t.key], navSignals) })),
           firstPath: accessibleTabs[0]?.to,
-          style: SECTION_STYLE.dashboard,
         }}
       />
     </div>

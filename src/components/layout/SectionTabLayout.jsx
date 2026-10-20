@@ -5,7 +5,6 @@ import { logicalPageEntries } from '../../lib/sidebarOrder'
 import { useAuditPending } from '../../lib/useAuditPending'
 import { badgeForKeys } from '../../lib/navBadges'
 import NavBadge from '../ui/NavBadge'
-import { SECTION_STYLE } from '../../lib/sectionStyle'
 
 // Jeff, 2026-10-19 (mobile nav redesign, point 2): a shared top tab bar +
 // <Outlet/> for every multi-page section, generalizing the pattern
@@ -143,7 +142,6 @@ export default function SectionTabLayout({ sectionKey }) {
         context={{
           items: tabs.map((t) => ({ key: t.key, label: t.label, to: t.subpageTo ?? t.to, badge: t.badge })),
           firstPath: tabs[0]?.to,
-          style: SECTION_STYLE[sectionKey],
         }}
       />
     </div>

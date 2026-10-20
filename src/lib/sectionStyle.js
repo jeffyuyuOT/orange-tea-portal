@@ -17,3 +17,20 @@ export const SECTION_STYLE = {
   admin_center: { icon: '⚙️', bg: 'linear-gradient(135deg,#a855f7,#9333ea)' },
   developer_tools: { icon: '🔧', bg: 'linear-gradient(135deg,#1f2937,#111827)' },
 }
+
+// Jeff, 2026-10-21: "子分頁的按鈕可以用不同顏色區分，比較好看" — unlike
+// MobileSectionHome's grid (one color per SECTION, from SECTION_STYLE
+// above), SectionSubpageHome's grid is several pages WITHIN one section, so
+// there's no natural "this page's own color" to reach for — cycled by
+// position instead. 8 colors covers every section today (Admin Center, the
+// biggest, has 7 logical rows) with room to spare.
+export const SUBPAGE_PALETTE = [
+  'linear-gradient(135deg,#14b8a6,#0d9488)', // teal
+  'linear-gradient(135deg,#fb923c,#f97316)', // orange
+  'linear-gradient(135deg,#0ea5e9,#0284c7)', // sky
+  'linear-gradient(135deg,#22c55e,#16a34a)', // green
+  'linear-gradient(135deg,#a855f7,#9333ea)', // purple
+  'linear-gradient(135deg,#f43f5e,#e11d48)', // rose
+  'linear-gradient(135deg,#eab308,#ca8a04)', // amber
+  'linear-gradient(135deg,#64748b,#475569)', // slate
+]

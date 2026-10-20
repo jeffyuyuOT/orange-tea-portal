@@ -4,7 +4,6 @@ import { canAccessPage } from '../../../lib/permissions'
 import { useAuditPending } from '../../../lib/useAuditPending'
 import { badgeForKeys } from '../../../lib/navBadges'
 import NavBadge from '../../../components/ui/NavBadge'
-import { SECTION_STYLE } from '../../../lib/sectionStyle'
 
 // Jeff, 2026-09: Quiz Bank + Shop Training Database merged into "Training
 // Centre", then (same day) moved from being its own top-level section into
@@ -87,7 +86,6 @@ export default function TrainingCentreLayout() {
         context={{
           items: accessibleTabs.map((t) => ({ key: t.key, label: t.label, to: t.to, badge: badgeForKeys([t.key], signals) })),
           firstPath: accessibleTabs[0]?.to,
-          style: SECTION_STYLE.shop_management,
         }}
       />
     </div>

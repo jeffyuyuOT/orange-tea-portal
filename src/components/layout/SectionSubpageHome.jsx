@@ -1,4 +1,5 @@
 import { Link, Navigate, useOutletContext } from 'react-router-dom'
+import { SUBPAGE_PALETTE } from '../../lib/sectionStyle'
 import NavBadge from '../ui/NavBadge'
 
 // Jeff, 2026-10-21 (mobile nav redesign, level 2): "手機版的主分頁下常常會有
@@ -12,13 +13,18 @@ import NavBadge from '../ui/NavBadge'
 // per card is the same `badgeForKeys` lookup every tab/pill already used —
 // the whole point per Jeff was not losing that when tabs went away.
 //
+// Jeff (follow-up): "子分頁的按鈕可以用不同顏色區分，比較好看" — each card
+// cycles through SUBPAGE_PALETTE (lib/sectionStyle.js) by position instead
+// of all sharing one section color, same spirit as MobileSectionHome's
+// per-section colors one level up.
+//
 // Desktop never sees this screen — the pill row right above it (rendered by
 // whichever layout owns this Outlet) already shows every page at once, so
 // this redirects straight past itself there. One shared component for every
 // section/group rather than six near-identical ones: each parent layout
-// just hands down its own { items, firstPath, style } via Outlet context.
+// just hands down its own { items, firstPath } via Outlet context.
 export default function SectionSubpageHome() {
-  const { items, firstPath, style } = useOutletContext() ?? {}
+  const { items, firstPath } = useOutletContext() ?? {}
 
   if (!items || items.length === 0) return <Navigate to="/" replace />
 
@@ -29,12 +35,12 @@ export default function SectionSubpageHome() {
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {items.map((item) => (
+      {items.map((item, i) => (
         <Link
           key={item.key}
           to={item.to}
           className="relative flex min-h-[72px] flex-col justify-center rounded-2xl p-4 text-white shadow-sm"
-          style={{ background: style?.bg ?? 'linear-gradient(135deg,#9ca3af,#6b7280)' }}
+          style={{ background: SUBPAGE_PALETTE[i % SUBPAGE_PALETTE.length] }}
         >
           <div className="text-sm font-semibold leading-snug">{item.label}</div>
           <NavBadge badge={item.badge} corner />

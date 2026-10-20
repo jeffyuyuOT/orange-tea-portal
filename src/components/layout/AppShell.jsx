@@ -45,16 +45,23 @@ export default function AppShell() {
     }
   }, [profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // Jeff, 2026-10-02: "桌面捷徑有辦法有訊息提示嗎" — a badge/dot on the
-  // installed-app icon itself (desktop taskbar / Android home screen). This
-  // is the Badging API (navigator.setAppBadge / clearAppBadge) — NOT real
-  // push notifications (a popup alert when the app isn't even open), which
-  // would need a service worker push handler, VAPID keys and a backend
-  // trigger this project doesn't have. Badging only works on an installed
-  // PWA icon, and only on Chrome/Edge-family browsers (desktop + Android) —
-  // iOS has no equivalent for a home-screen web app, same platform gap as
-  // the 2026-10-01 "shortcuts" discussion. `'setAppBadge' in navigator`
-  // guards every other browser/OS combo (a normal browser tab, Safari,
-  // etc.) to a harmless no-op.
+  // installed-app icon itself (desktop taskbar / Android home screen) via
+  // the Badging API (navigator.setAppBadge / clearAppBadge). Confirmed this
+  // session (2026-10-21): Android Chrome doesn't actually implement this API
+  // at all — `'setAppBadge' in navigator` is false there, so this effect is
+  // a silent no-op on every Android phone and only ever did anything on
+  // desktop Chrome/Edge. iOS has no equivalent for a home-screen web app
+  // either, same platform gap as the 2026-10-01 "shortcuts" discussion.
+  // `'setAppBadge' in navigator` guards every unsupported browser/OS combo
+  // to a harmless no-op.
+  //
+  // Android's own icon badge instead comes entirely from real Web Push
+  // (lib/webPush.js, public/push-sw.js, added 2026-10-21) — the OS badges
+  // the icon whenever there's an active notification `showNotification()`
+  // left in the notification shade, a completely separate mechanism from
+  // this Badging API code and from anything tracked in AuthContext. See the
+  // "clear shown push notifications" effect further down, which is what
+  // actually clears THAT badge.
   //
   // Jeff, 2026-10-02 (later): "改成紅底加數字...提示除了之前說的new
   // message，還包括my roster更新，formula update，跟bulletin的新提示消息"
@@ -80,6 +87,31 @@ export default function AppShell() {
       navigator.clearAppBadge().catch(() => {})
     }
   }, [badgeCount])
+  // Jeff, 2026-10-21 (follow-up): "訊息讀取後，dashboard跟message的提示消失，
+  // 但手機圖示的數字提醒還存在" — reading a message/bulletin in the app
+  // updates AuthContext (clears the in-app dot/count instantly, via
+  // badgeCount above) but does nothing to the actual push notification
+  // push-sw.js already showed — that's what the OS icon badge is really
+  // counting (see the comment above), and it has its own separate
+  // lifecycle. Closing every notification this app has shown whenever the
+  // app is opened or comes back into view is the simplest fix that matches
+  // what someone expects: having it open and looking at it already means
+  // they've seen whatever it was about.
+  useEffect(() => {
+    if (!isPushSupported()) return
+    function clearShownNotifications() {
+      navigator.serviceWorker.ready
+        .then((reg) => reg.getNotifications())
+        .then((list) => list.forEach((n) => n.close()))
+        .catch(() => {})
+    }
+    clearShownNotifications()
+    function onVisible() {
+      if (document.visibilityState === 'visible') clearShownNotifications()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
   // Jeff, 2026-10-21: "還是做完整的 Web Push，這樣員工使用起來才知道有訊息
   // 可以點進去看" — a toggle buried in My Information (MyInformationPage.jsx
   // has the full on/off control) won't get found organically, so this is a
