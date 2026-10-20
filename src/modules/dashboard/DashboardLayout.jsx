@@ -11,7 +11,9 @@ const TABS = [
   { key: 'dashboard.bulletin', to: '/dashboard/bulletin', label: 'Bulletin Board' },
   { key: 'dashboard.message', to: '/dashboard/message', label: 'Message' },
   { key: 'dashboard.study_log', to: '/dashboard/study-log', label: 'Study Log' },
-  { key: 'dashboard.time_attendance', to: '/dashboard/time-attendance', label: 'Time & Attendance' },
+  // Jeff, 2026-10-21: shortened from "Time & Attendance" — the full label
+  // wrapped this tab bar to 3 lines on mobile.
+  { key: 'dashboard.time_attendance', to: '/dashboard/time-attendance', label: 'Attendance' },
   { key: 'dashboard.my_information', to: '/dashboard/my-information', label: 'My Information' },
 ]
 
