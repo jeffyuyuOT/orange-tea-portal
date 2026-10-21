@@ -19,6 +19,15 @@ import JeffOwedExcelImport from './JeffOwedExcelImport'
 import EmmaClaimExcelImport from './EmmaClaimExcelImport'
 import SfMaintenance from '../sales/SfMaintenance'
 import PartySettings from '../bonus/PartySettings'
+// Jeff, 2026-10-21: "BK的自動備份功能怎麼不見了" — this panel (folder picker,
+// enable toggle, 立即測試備份, the 備份紀錄 table) was built 2026-10-14
+// alongside the bk_backup_settings/bk_backup_log tables, but never actually
+// got imported/rendered here — it only ever existed as an unused file.
+// BackupGuard (mounted in BkPage.jsx, unaffected by this) is what actually
+// RUNS the nightly 22:30 backup and the missed-backup popup, so the backups
+// themselves were never broken — Jeff just had no way to see or change the
+// folder/toggle/log, since this was the only screen that ever showed them.
+import AutoBackupPanel from './AutoBackupPanel'
 
 const SUBTABS = [
   ['import', '匯入'],
@@ -334,7 +343,11 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
       )}
 
       {sub === 'backup' && (
-        <div className="max-w-2xl space-y-4">
+        <div className="max-w-2xl space-y-6">
+          <AutoBackupPanel />
+
+          <div className="space-y-4 border-t border-brand-100 pt-6">
+          <div className="text-sm font-semibold text-brand-900">手動備份／還原</div>
           <Notice kind="info">
             BK 的備份跟 OT Portal 整體的備份是分開的：整體備份（系統設定）只涵蓋公式／題庫／訓練內容這類參考資料，刻意不包含排班、出勤這類會持續累積的營運資料；BK 的帳本資料屬於同一類——資料量會持續變大、內容也比較敏感，混進整體備份裡會讓那份備份變大又變敏感，而兩邊真正會用到備份的人也不同（開發者 vs 平常維護整體備份的人）。所以 BK 在這裡有自己獨立的匯出／還原，包含所有 BK 的資料表。
           </Notice>
@@ -379,6 +392,7 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
               </table>
             </div>
           )}
+          </div>
         </div>
       )}
 
