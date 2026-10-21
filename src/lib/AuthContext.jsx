@@ -554,10 +554,8 @@ export function AuthProvider({ children }) {
     return () => clearTimeout(t)
   }, [profile?.id])
 
-  useEffect(() => {
-    if (!badgesReady) return
-    let cancelled = false
-    ;(async () => {
+  const refreshAllBadges = useCallback(
+    async (isCancelled = () => false) => {
       for (const refresh of [
         refreshUnreadMessages,
         refreshBulletinUpdates,
@@ -565,18 +563,48 @@ export function AuthProvider({ children }) {
         refreshFormulaUpdates,
         refreshTimeDiscrepancies,
       ]) {
-        if (cancelled) return
+        if (isCancelled()) return
         try {
           await refresh()
         } catch (err) {
           console.error('Badge refresh failed:', err)
         }
       }
-    })()
+    },
+    [refreshUnreadMessages, refreshBulletinUpdates, refreshRosterUpdates, refreshFormulaUpdates, refreshTimeDiscrepancies]
+  )
+
+  useEffect(() => {
+    if (!badgesReady) return
+    let cancelled = false
+    refreshAllBadges(() => cancelled)
     return () => {
       cancelled = true
     }
-  }, [badgesReady, refreshUnreadMessages, refreshBulletinUpdates, refreshRosterUpdates, refreshFormulaUpdates, refreshTimeDiscrepancies])
+  }, [badgesReady, refreshAllBadges])
+
+  // Jeff, 2026-10-21 (follow-up): "進app後my dashboard跟message沒有提醒，要
+  // 離開app再打開這些按鍵才會有提醒出現" — the five badges above only ever
+  // recompute once per login (badgesReady above, ~2.5s after the profile
+  // arrives) or when a page explicitly calls its own refresh() right after
+  // marking something read. Nothing re-ran them just from bringing an
+  // already-open session back to the foreground, so a push that arrived
+  // while the app was backgrounded (or closed, then reopened into the same
+  // still-alive session) left every badge showing whatever was true before
+  // — until a full close+reopen happened to remount AuthProvider from
+  // scratch and rerun the whole cascade. Re-running it on visibilitychange
+  // closes that gap without needing a full relaunch — same trigger
+  // AppShell.jsx's push-notification-clearing effect already uses, just for
+  // the opposite direction (making a new badge APPEAR promptly, not making a
+  // stale one disappear).
+  useEffect(() => {
+    if (!profile?.id) return
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshAllBadges()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [profile?.id, refreshAllBadges])
 
   // Jeff, 2026-10-16: two different people (both on mobile data, different
   // carriers/devices, same day) hit a raw "Failed to fetch" on the sign-in
