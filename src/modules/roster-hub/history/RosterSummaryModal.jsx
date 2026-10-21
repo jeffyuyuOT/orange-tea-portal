@@ -25,6 +25,55 @@ import { timeToDecimal, dayHours, rosterDisplayName } from '../../../lib/excelRo
 // been set up in Payroll yet (no matching row) just gets no public-holiday
 // bucket — every non-weekend day counts as a plain weekday, same as before
 // Payroll existed.
+//
+// Jeff, 2026-10-21: "12/24(Christmas' Eve)號晚上6點以後也是public holiday"
+// — in Queensland, Christmas Eve is only a PART-day public holiday (6pm to
+// midnight); the morning/afternoon is a plain weekday (or weekend, in the
+// rare year it falls on one). That's a fixed calendar rule, not something
+// that varies per store or needs entering in Payroll's date list like a
+// whole-day holiday does, so it's handled here directly rather than
+// extending that list's data shape. A shift that spans 6pm on the 24th gets
+// SPLIT proportionally (net of its break) between its normal bucket and
+// Public Holiday, rather than the whole shift landing in one bucket or the
+// other. If a store's Payroll settings also explicitly list 12/24 as a
+// (whole-day) holiday, that takes precedence — same as any other listed
+// date — since an admin who did that clearly means the whole day.
+const CHRISTMAS_EVE_PUBLIC_HOLIDAY_FROM_HOUR = 18 // 6pm
+
+function isChristmasEve(workDate) {
+  return /-12-24$/.test(workDate)
+}
+
+// Returns { weekday, weekend, publicHoliday } for ONE shift, summing to its
+// own dayHours() total (modulo floating-point rounding).
+function bucketsForEntry(e, isWholeDayPublicHoliday) {
+  const start = timeToDecimal(e.start_time)
+  const end = timeToDecimal(e.end_time)
+  const total = dayHours({ startTime: start, endTime: end, breakHours: e.break_half_hours })
+  const buckets = { weekday: 0, weekend: 0, publicHoliday: 0 }
+  if (!total) return buckets
+  const dow = new Date(`${e.work_date}T00:00:00`).getDay() // 0=Sun..6=Sat
+  const plainKey = dow === 0 || dow === 6 ? 'weekend' : 'weekday'
+
+  if (isWholeDayPublicHoliday) {
+    buckets.publicHoliday = total
+    return buckets
+  }
+  const rawTotal = Number(end) - Number(start)
+  if (!isChristmasEve(e.work_date) || !(rawTotal > 0)) {
+    buckets[plainKey] = total
+    return buckets
+  }
+  // Net worked hours on each side of 6pm, proportional to how much of the
+  // RAW (pre-break) shift fell on each side — the break itself has no
+  // recorded clock time, so this is the fairest split available.
+  const rawAfterCutoff = Math.max(0, end - Math.max(start, CHRISTMAS_EVE_PUBLIC_HOLIDAY_FROM_HOUR))
+  const afterShare = Math.min(1, rawAfterCutoff / rawTotal)
+  buckets.publicHoliday = total * afterShare
+  buckets[plainKey] = total * (1 - afterShare)
+  return buckets
+}
+
 export default function RosterSummaryModal({ period, storeName, onClose }) {
   const { currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -55,14 +104,15 @@ export default function RosterSummaryModal({ period, storeName, onClose }) {
 
       const totals = new Map() // profile_id (or raw name) -> { name, weekday, weekend, publicHoliday }
       ;(entries ?? []).forEach((e) => {
-        const hours = dayHours({ startTime: timeToDecimal(e.start_time), endTime: timeToDecimal(e.end_time), breakHours: e.break_half_hours })
-        if (!hours) return
+        const buckets = bucketsForEntry(e, publicHolidays.has(e.work_date))
+        if (!buckets.weekday && !buckets.weekend && !buckets.publicHoliday) return
         const key = e.profile_id ?? `raw:${e.staff_name_raw}`
         const name = e.profile_id ? nameByProfile.get(e.profile_id) ?? '(removed staff)' : e.staff_name_raw || 'Unknown'
         if (!totals.has(key)) totals.set(key, { name, weekday: 0, weekend: 0, publicHoliday: 0 })
-        const dow = new Date(`${e.work_date}T00:00:00`).getDay() // 0=Sun..6=Sat
-        const bucket = publicHolidays.has(e.work_date) ? 'publicHoliday' : dow === 0 || dow === 6 ? 'weekend' : 'weekday'
-        totals.get(key)[bucket] += hours
+        const row = totals.get(key)
+        row.weekday += buckets.weekday
+        row.weekend += buckets.weekend
+        row.publicHoliday += buckets.publicHoliday
       })
 
       setRows(Array.from(totals.values()).sort((a, b) => a.name.localeCompare(b.name)))

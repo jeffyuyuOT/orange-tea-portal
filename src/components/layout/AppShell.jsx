@@ -16,6 +16,7 @@ import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFee
 import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
 import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
+import { watchForUpdate, applyUpdate } from '../../lib/swUpdate'
 
 export default function AppShell() {
   const {
@@ -184,6 +185,25 @@ export default function AppShell() {
     }
     dismissPushNudge()
   }
+
+  // Jeff, 2026-10-21 (further follow-up): "有辦法登入時如果發現新版本，先讓
+  // 其正常登入進去，再banner提示有新版本請確認更新...或者是有辦法做到員工
+  // 離開app那一瞬間，系統背後自己做更新?" — registerType is now 'prompt'
+  // (vite.config.js/swUpdate.js), so a newly-found update sits waiting
+  // instead of forcing itself through. This banner covers someone who taps
+  // it; the effect right below covers "離開app那一瞬間" — the moment this
+  // tab is backgrounded, apply it automatically so most people never even
+  // see the banner at all (by the time they're back, it's already current).
+  const [updateReady, setUpdateReady] = useState(false)
+  useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
+  useEffect(() => {
+    if (!updateReady) return
+    function onHidden() {
+      if (document.visibilityState === 'hidden') applyUpdate()
+    }
+    document.addEventListener('visibilitychange', onHidden)
+    return () => document.removeEventListener('visibilitychange', onHidden)
+  }, [updateReady])
   // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
   // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
   // ANY page, not just after navigating into My Dashboard > Time & Attendance
@@ -349,6 +369,14 @@ export default function AppShell() {
               </button>
             </div>
           </header>
+          {updateReady && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
+              <span className="text-brand-800">🔄 A new version is ready.</span>
+              <button onClick={() => applyUpdate()} className="shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">
+                Update now
+              </button>
+            </div>
+          )}
           {showPushNudge && (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
               <span className="text-brand-800">🔔 Turn on push notifications so you don't miss new messages, announcements, and roster updates.</span>

@@ -4,6 +4,20 @@
 // precache/runtimeCaching/navigateFallback rule there untouched. Plain JS,
 // no bundler, no imports — nothing here needs one.
 
+// Jeff, 2026-10-21 (further follow-up): vite.config.js's registerType is now
+// 'prompt' (workbox.skipWaiting: false) — a newly-installed version of this
+// worker sits in `waiting` until something explicitly tells it to take
+// over, instead of activating itself the instant it's found. src/lib/
+// swUpdate.js is that "something": it posts this exact message once it's
+// actually safe to update (AppShell.jsx's banner, or the tab going to the
+// background). Added here rather than in the main generateSW config since
+// everything else in this file already extends the generated SW the same
+// way (importScripts), so every precache/runtimeCaching rule stays exactly
+// as workbox generated it.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
+})
+
 self.addEventListener('push', (event) => {
   let data = {}
   try {

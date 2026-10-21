@@ -150,6 +150,26 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
         onChange={(e) => {
           const v = digitsOnly(e.target.value)
           setMinute(v)
+          // Jeff, 2026-10-21: "輸入分的時候，原本輸入的小時都會跳掉" — a
+          // single in-progress minute digit (e.g. typing "3" on the way to
+          // "30") used to still call commit() every keystroke, which (per
+          // commit()'s own `nextMinute.length < 2` check) unconditionally
+          // reported back an EMPTY time the instant it didn't yet look like
+          // a complete 2-digit minute — even with hour already filled in.
+          // On a blank new row that's harmless (the parent's value was
+          // already '', so nothing visibly changes), but EDITING an
+          // existing punch means `value` was a real "HH:mm" string; that ''
+          // round-tripped straight back down into the resync effect above,
+          // which (seeing a real value had just turned falsy) wiped
+          // hour/minute/am-pm back to blank entirely, mid-keystroke, before
+          // the second digit could ever be typed. Skip calling commit()
+          // here while the minute is still a lone digit AND hour already
+          // has something in it — wait for the second digit (or blur,
+          // below) instead of blanking what's already there. A genuinely
+          // blank new row (hour also empty) keeps committing '' immediately
+          // on every keystroke exactly as before — there's nothing there to
+          // lose.
+          if (v.length < 2 && hour !== '') return
           commit(hour, v, ampm)
         }}
         onBlur={() => {
@@ -160,6 +180,15 @@ export default function TypedTimeInput({ value, onChange, disabled, className = 
             const padded = minute.padStart(2, '0')
             setMinute(padded)
             commit(hour, padded, ampm)
+          } else if (minute.length === 0 && value) {
+            // Cleared without typing a replacement — onChange above never
+            // committed that (nothing was ever reported to the parent), so
+            // the box would otherwise be left looking blank even though
+            // what's actually saved is still the old time. Restore the
+            // display to match it rather than leave that mismatch sitting
+            // there until some other field happens to force a resync.
+            const [, m] = value.split(':').map(Number)
+            setMinute(String(m).padStart(2, '0'))
           }
         }}
       />

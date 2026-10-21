@@ -39,35 +39,29 @@ if (isAuthEmailLink) {
 
 // Jeff, 2026-10-02: "下載到手機後...swipe起來不會重新整理...有時候軟體
 // update後沒辦法即時呈現,必須uninstall再install才有辦法" — the generated
-// service worker (vite-plugin-pwa, registerType: 'autoUpdate') already
-// self.skipWaiting()s and clientsClaim()s the instant a newer version is
-// found (see vite.config.js / the built sw.js), which hands control of
-// this page over to the new worker — but nothing was ever listening for
-// that handover, so the page just kept running on whatever JS it already
-// had loaded in memory until the next *genuinely fresh* network load.
-// "Swipe up" to dismiss an installed home-screen app (especially on iOS)
-// usually just suspends it rather than tearing it down, so that fresh load
-// often never happened — only a full uninstall/reinstall reliably forced
-// one. `controllerchange` fires exactly once, the moment a different
-// service worker actually takes over an already-open page — reloading
-// right then is what makes an update actually show up on its own. See
-// src/lib/pwaUpdate.js for the companion manual "check now" button
-// (My Information > App) for when the browser hasn't even noticed a newer
-// version exists yet.
-// Jeff, 2026-10-21: Sophie's "一直轉圈圈進不去" kept happening specifically
-// around times Jeff was actively pushing new builds — and that's not a
-// coincidence. The browser only actually checks for a newer sw.js on a
-// genuinely fresh page load (see pwaUpdate.js), which is the SAME load
-// AuthContext.jsx's sign-in/session-restore is also running on. Reloading
-// the instant controllerchange fires — which is what this used to do
-// unconditionally — can tear that request down mid-flight (not just make it
-// slow; the page itself is gone), so even its own network-blip retry never
-// gets a chance to run. See criticalSection.js: AuthContext.jsx now brackets
-// that flow so this can tell whether it's actually safe to reload. If it's
-// not, this waits for it to clear instead of forcing the reload through —
-// with a generous timeout fallback so a future bug that forgets to call
-// endCriticalSection can never mean an available update just silently never
-// applies.
+// service worker hands control of this page over to a newer version once
+// one is found and told to activate (see vite.config.js / swUpdate.js for
+// when/how that now happens) — but nothing was ever listening for that
+// handover, so the page just kept running on whatever JS it already had
+// loaded in memory until the next *genuinely fresh* network load. "Swipe
+// up" to dismiss an installed home-screen app (especially on iOS) usually
+// just suspends it rather than tearing it down, so that fresh load often
+// never happened — only a full uninstall/reinstall reliably forced one.
+// `controllerchange` fires exactly once, the moment a different service
+// worker actually takes over an already-open page — reloading right then
+// is what makes an update actually show up on its own. See
+// src/lib/pwaUpdate.js for the companion manual "check now" button (My
+// Information > App), and src/lib/swUpdate.js/AppShell.jsx for the "update
+// available" banner / background auto-apply.
+//
+// Jeff, 2026-10-21 (further follow-up): registerType is now 'prompt' (see
+// vite.config.js/swUpdate.js), so controllerchange can only ever fire as a
+// result of OUR OWN explicit applyUpdate() call now — never spontaneously
+// mid-login the way it could when a build happened to land at exactly the
+// wrong moment. The criticalSection check below is kept anyway as a plain
+// backstop (defense in depth costs nothing here), with a generous timeout
+// fallback so a future bug that forgets to call endCriticalSection can
+// never mean an already-applied update just silently never shows up.
 if ('serviceWorker' in navigator) {
   let reloadedForUpdate = false
   navigator.serviceWorker.addEventListener('controllerchange', () => {

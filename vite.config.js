@@ -9,7 +9,20 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // Jeff, 2026-10-21 (further follow-up): was 'autoUpdate' — the
+      // generated service worker self.skipWaiting()'d (and clientsClaim()'d)
+      // the INSTANT it found a new build, handing control to it mid-session
+      // with no say from the page at all. See src/lib/swUpdate.js for the
+      // full story: that could tear a login/session-restore down mid-flight,
+      // and there was no way to defer it to a less disruptive moment even
+      // for an ordinary already-signed-in session. 'prompt' makes workbox
+      // generate the SW WITHOUT the automatic skipWaiting — it installs and
+      // sits in `registration.waiting` until swUpdate.js explicitly tells it
+      // to take over (postMessage('SKIP_WAITING'), handled in push-sw.js).
+      // skipWaiting/clientsClaim below are spelled out explicitly rather
+      // than left to registerType's own implicit mapping, so this behavior
+      // doesn't silently change on a future vite-plugin-pwa upgrade.
+      registerType: 'prompt',
       // Jeff, 2026-10-21: "電腦local版的，按了上面提示開啟推送通知後，提示還是
       // 在螢幕上" — not a bug in the nudge banner itself: by default
       // vite-plugin-pwa only builds/registers the service worker in a real
@@ -24,6 +37,13 @@ export default defineConfig({
       devOptions: { enabled: true, type: 'module' },
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       workbox: {
+        // See the registerType comment above — a new SW installs and waits
+        // for swUpdate.js's explicit go-ahead instead of activating itself.
+        // clientsClaim stays true so that once it DOES activate (after that
+        // go-ahead), it immediately takes over every open tab in one step,
+        // same as before — only the "when" changed, not the handover itself.
+        skipWaiting: false,
+        clientsClaim: true,
         // The developer-only payroll app (public/payroll/index.html) is
         // reachable to anyone who knows the URL (its real access control is
         // the payroll_* tables' RLS, not this route), but there's no reason
