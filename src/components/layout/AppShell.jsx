@@ -115,32 +115,28 @@ export default function AppShell() {
   // badgeCount above) but does nothing to the actual push notification
   // push-sw.js already showed — that's what the OS icon badge is really
   // counting (see the comment above), and it has its own separate
-  // lifecycle. Closing every notification this app has shown whenever the
-  // app is opened or comes back into view is the simplest fix that matches
-  // what someone expects: having it open and looking at it already means
-  // they've seen whatever it was about.
-  // Jeff, 2026-10-21 (second follow-up): "而且現在訊息都讀完了，app圖示的
-  // 數字提醒還是未清除" — open/visible alone wasn't enough: reading
-  // everything while the app stays in the foreground (never backgrounded,
-  // so visibilitychange never fires again) left the old notifications
-  // sitting in the shade with nothing to clear them. Depending on
-  // badgeCount too means the moment it drops back to 0 — same signal that
-  // already clears the in-app dots — this also re-sweeps the shade, with no
-  // need to leave and come back first.
+  // lifecycle. Closing it once badgeCount is actually back to 0 keeps the
+  // two in sync.
+  // Jeff, 2026-10-21 (correction): "應該不是打開手機就清掉桌面圖示，而是應該
+  // 造成提示的訊息閱讀了，桌面圖示提醒才會清掉" — an earlier version of this
+  // cleared the shown notification unconditionally on every app open/
+  // foreground, regardless of whether badgeCount was still > 0 (reasoning at
+  // the time: "having it open already means they've seen it" — Jeff's own
+  // call then, reversed now). That let the icon go blank before the message
+  // was actually read, which could hide a push someone only glanced past.
+  // Now the icon only ever gets cleared in step with badgeCount reaching 0 —
+  // the same real "have you actually read this" signal the in-app dots use,
+  // not just "was the app opened". AuthContext's own visibilitychange
+  // refresh (added the same day) is what keeps badgeCount itself current
+  // without needing a full close+reopen, so this effect no longer needs its
+  // own visibilitychange listener — it only has to react when badgeCount
+  // changes, however that change happened.
   useEffect(() => {
-    if (!isPushSupported()) return
-    function clearShownNotifications() {
-      navigator.serviceWorker.ready
-        .then((reg) => reg.getNotifications())
-        .then((list) => list.forEach((n) => n.close()))
-        .catch(() => {})
-    }
-    clearShownNotifications()
-    function onVisible() {
-      if (document.visibilityState === 'visible') clearShownNotifications()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
+    if (!isPushSupported() || badgeCount > 0) return
+    navigator.serviceWorker.ready
+      .then((reg) => reg.getNotifications())
+      .then((list) => list.forEach((n) => n.close()))
+      .catch(() => {})
   }, [badgeCount])
   // Jeff, 2026-10-21: "還是做完整的 Web Push，這樣員工使用起來才知道有訊息
   // 可以點進去看" — a toggle buried in My Information (MyInformationPage.jsx
