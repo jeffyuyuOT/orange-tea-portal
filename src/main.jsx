@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
+import { isCriticalSectionActive, onCriticalSectionClear } from './lib/criticalSection'
 
 // Supabase's "Invite user" / "Reset password" email links land wherever
 // the project's Site URL points (often just "/"), carrying either
@@ -53,11 +54,34 @@ if (isAuthEmailLink) {
 // src/lib/pwaUpdate.js for the companion manual "check now" button
 // (My Information > App) for when the browser hasn't even noticed a newer
 // version exists yet.
+// Jeff, 2026-10-21: Sophie's "一直轉圈圈進不去" kept happening specifically
+// around times Jeff was actively pushing new builds — and that's not a
+// coincidence. The browser only actually checks for a newer sw.js on a
+// genuinely fresh page load (see pwaUpdate.js), which is the SAME load
+// AuthContext.jsx's sign-in/session-restore is also running on. Reloading
+// the instant controllerchange fires — which is what this used to do
+// unconditionally — can tear that request down mid-flight (not just make it
+// slow; the page itself is gone), so even its own network-blip retry never
+// gets a chance to run. See criticalSection.js: AuthContext.jsx now brackets
+// that flow so this can tell whether it's actually safe to reload. If it's
+// not, this waits for it to clear instead of forcing the reload through —
+// with a generous timeout fallback so a future bug that forgets to call
+// endCriticalSection can never mean an available update just silently never
+// applies.
 if ('serviceWorker' in navigator) {
   let reloadedForUpdate = false
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (reloadedForUpdate) return
     reloadedForUpdate = true
-    window.location.reload()
+    const doReload = () => window.location.reload()
+    if (!isCriticalSectionActive()) {
+      doReload()
+      return
+    }
+    const timeout = setTimeout(doReload, 20000)
+    onCriticalSectionClear(() => {
+      clearTimeout(timeout)
+      doReload()
+    })
   })
 }

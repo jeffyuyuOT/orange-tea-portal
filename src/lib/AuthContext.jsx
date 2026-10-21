@@ -5,6 +5,7 @@ import { getEffectivePages, canAccessPage } from './permissions'
 import { getUnseenFormulaItems } from './formulaUpdates'
 import { getStaffTimeDiscrepancies, isUnreadDiscrepancy, hasVisibleDiscrepancy } from './timeDiscrepancy'
 import { DEFAULT_SIDEBAR_ORDER, fetchSidebarOrder } from './sidebarOrder'
+import { beginCriticalSection, endCriticalSection } from './criticalSection'
 
 const AuthContext = createContext(null)
 
@@ -248,27 +249,43 @@ export function AuthProvider({ children }) {
     // same as any other network hiccup, instead of being stuck with no retry
     // button at all.
     async function restoreSession() {
-      let result
+      // Jeff, 2026-10-21 (further follow-up): the browser only actually
+      // checks for a newer sw.js on a genuinely fresh page load (see
+      // pwaUpdate.js) — the SAME load this whole function runs on. If a
+      // build went out since her last visit, main.jsx's controllerchange
+      // listener can `window.location.reload()` the page out from under
+      // this very request, aborting it outright (not just a slow network —
+      // the page itself is gone), which would make even the retry above
+      // never get a chance to run and look exactly like a reload loop that
+      // never finishes signing in. Bracketing this whole flow (and signIn()
+      // below) in begin/endCriticalSection (criticalSection.js) tells
+      // main.jsx to hold that reload until this is done.
+      beginCriticalSection()
       try {
-        result = await supabase.auth.getSession()
-      } catch (err) {
-        if (isNetworkError(err)) {
-          await new Promise((resolve) => setTimeout(resolve, 1500))
-          try {
-            result = await supabase.auth.getSession()
-          } catch (retryErr) {
-            console.error('getSession retry also failed:', retryErr)
+        let result
+        try {
+          result = await supabase.auth.getSession()
+        } catch (err) {
+          if (isNetworkError(err)) {
+            await new Promise((resolve) => setTimeout(resolve, 1500))
+            try {
+              result = await supabase.auth.getSession()
+            } catch (retryErr) {
+              console.error('getSession retry also failed:', retryErr)
+              result = { data: { session: null } }
+            }
+          } else {
+            console.error('getSession failed:', err)
             result = { data: { session: null } }
           }
-        } else {
-          console.error('getSession failed:', err)
-          result = { data: { session: null } }
         }
+        if (!mounted) return
+        setSession(result.data.session)
+        if (result.data.session?.user) await loadProfileData(result.data.session.user.id)
+        if (mounted) setLoading(false)
+      } finally {
+        endCriticalSection()
       }
-      if (!mounted) return
-      setSession(result.data.session)
-      if (result.data.session?.user) await loadProfileData(result.data.session.user.id)
-      if (mounted) setLoading(false)
     }
     restoreSession()
 
@@ -689,16 +706,26 @@ export function AuthProvider({ children }) {
     // 2026-10-21 (AppShell.jsx/routes.jsx — "不要預設在clock in out的頁面，
     // 因為其實最上面有相機快捷"), so the flag this used to set had no reader
     // left and was dropped along with it.
-    let { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error && isNetworkError(error)) {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      ;({ error } = await supabase.auth.signInWithPassword({ email, password }))
-    }
-    if (error) {
-      if (isNetworkError(error)) {
-        throw new Error('Could not reach the server. Please check your internet connection and try again.')
+    //
+    // Jeff, 2026-10-21 (further follow-up): same reasoning as the
+    // restoreSession() effect above — bracket the whole sign-in attempt in
+    // begin/endCriticalSection so a service-worker update discovered on this
+    // same page load can't force a reload mid-attempt.
+    beginCriticalSection()
+    try {
+      let { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error && isNetworkError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        ;({ error } = await supabase.auth.signInWithPassword({ email, password }))
       }
-      throw error
+      if (error) {
+        if (isNetworkError(error)) {
+          throw new Error('Could not reach the server. Please check your internet connection and try again.')
+        }
+        throw error
+      }
+    } finally {
+      endCriticalSection()
     }
   }, [])
 
