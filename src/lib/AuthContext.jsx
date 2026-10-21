@@ -128,7 +128,19 @@ export function AuthProvider({ children }) {
   // actually reach that page — a plain staff account has no business
   // querying other people's punches/roster just to light up a badge it'll
   // never see anyway.
-  const [hasTimeDiscrepancies, setHasTimeDiscrepancies] = useState(false)
+  // Jeff, 2026-10-21: "切換分店不會馬上顯示小紅點...操作快的時候會以為沒有又
+  // 換到下面一家" — this used to only ever hold ONE store's answer
+  // (whichever was currentStoreId when refreshTimeDiscrepancies last ran),
+  // so switching stores always had a real gap between "just switched" and
+  // "the async recompute finished" where the dot hadn't shown up yet even
+  // when that store genuinely had one. Now holds every accessible store's
+  // answer at once (store_id -> boolean) so StoreSwitcher can show the dot
+  // on a store BEFORE switching to it — nothing to wait for. hasTimeDiscrepancies
+  // below is just this map read at currentStoreId, kept as its own value so
+  // every existing reader (Sidebar, AppShell's anywhere-dot, navBadges.js)
+  // is unaffected.
+  const [storeTimeDiscrepancies, setStoreTimeDiscrepancies] = useState({})
+  const hasTimeDiscrepancies = storeTimeDiscrepancies[currentStoreId] ?? false
   // Shared Sidebar section/page order (migration 0055) — global, not tied
   // to who's logged in, so it's fetched once independently of profile/store
   // rather than inside loadProfileData. Starts as SECTIONS' own literal
@@ -593,32 +605,38 @@ export function AuthProvider({ children }) {
     setUnreadMessageCount(count ?? 0)
   }, [profile, overrides])
 
-  // Recomputes the Staff Time Logs red dot for the current person + store.
-  // Called on login/store-switch, and again by StaffTimeLogsPage right
-  // after it marks a staff member's discrepancy seen (time_discrepancy_views
-  // upsert), so the dot updates without a full page reload — same trigger
-  // shape as refreshBulletinUpdates/refreshFormulaUpdates above.
+  // Recomputes the Staff Time Logs red dot for EVERY accessible store at
+  // once (see storeTimeDiscrepancies' own comment above for why — this used
+  // to take a single storeId and only ever answer for currentStoreId).
+  // Called on login, on visibility-foreground, and again by
+  // StaffTimeLogsPage right after it marks a staff member's discrepancy
+  // seen (time_discrepancy_views upsert) — same trigger shape as
+  // refreshBulletinUpdates/refreshFormulaUpdates above, just no longer
+  // store-switch-specific since every store's answer is already known
+  // ahead of time.
   const refreshTimeDiscrepancies = useCallback(async () => {
-    if (!profile?.id || !currentStoreId || !canAccessPage(getEffectivePages(profile, overrides), 'shop_management.staff_time_logs')) {
-      setHasTimeDiscrepancies(false)
+    if (!profile?.id || !canAccessPage(getEffectivePages(profile, overrides), 'shop_management.staff_time_logs') || !accessibleStores.length) {
+      setStoreTimeDiscrepancies({})
       return
     }
-    const { data: staffRows } = await supabase.from('user_stores').select('profile_id').eq('store_id', currentStoreId)
-    const profileIds = Array.from(new Set((staffRows ?? []).map((r) => r.profile_id).filter(Boolean)))
-    if (!profileIds.length) {
-      setHasTimeDiscrepancies(false)
-      return
-    }
-    const [discrepancies, { data: viewRows }] = await Promise.all([
-      getStaffTimeDiscrepancies(currentStoreId, profileIds),
-      supabase.from('time_discrepancy_views').select('subject_profile_id, viewed_at').eq('viewer_id', profile.id).in('subject_profile_id', profileIds),
-    ])
-    const viewedAtBySubject = new Map((viewRows ?? []).map((r) => [r.subject_profile_id, r.viewed_at]))
-    const hasUnread = Object.entries(discrepancies).some(
-      ([subjectId, d]) => hasVisibleDiscrepancy(d) && isUnreadDiscrepancy(d, viewedAtBySubject.get(subjectId))
+    const entries = await Promise.all(
+      accessibleStores.map(async (store) => {
+        const { data: staffRows } = await supabase.from('user_stores').select('profile_id').eq('store_id', store.id)
+        const profileIds = Array.from(new Set((staffRows ?? []).map((r) => r.profile_id).filter(Boolean)))
+        if (!profileIds.length) return [store.id, false]
+        const [discrepancies, { data: viewRows }] = await Promise.all([
+          getStaffTimeDiscrepancies(store.id, profileIds),
+          supabase.from('time_discrepancy_views').select('subject_profile_id, viewed_at').eq('viewer_id', profile.id).in('subject_profile_id', profileIds),
+        ])
+        const viewedAtBySubject = new Map((viewRows ?? []).map((r) => [r.subject_profile_id, r.viewed_at]))
+        const hasUnread = Object.entries(discrepancies).some(
+          ([subjectId, d]) => hasVisibleDiscrepancy(d) && isUnreadDiscrepancy(d, viewedAtBySubject.get(subjectId))
+        )
+        return [store.id, hasUnread]
+      })
     )
-    setHasTimeDiscrepancies(hasUnread)
-  }, [profile, overrides, currentStoreId])
+    setStoreTimeDiscrepancies(Object.fromEntries(entries))
+  }, [profile, overrides, accessibleStores])
 
   // Jeff, 2026-10-17: these five "something new" badges used to all fire the
   // moment the profile arrived — about a dozen queries at once, competing with
@@ -656,6 +674,29 @@ export function AuthProvider({ children }) {
     [refreshUnreadMessages, refreshBulletinUpdates, refreshRosterUpdates, refreshFormulaUpdates, refreshTimeDiscrepancies]
   )
 
+  // Jeff, 2026-10-21: the store-switch effect below used to just call
+  // refreshAllBadges() — fine back when every one of the five badges was
+  // scoped to currentStoreId, but now that refreshTimeDiscrepancies answers
+  // for every accessible store at once (storeTimeDiscrepancies' own comment
+  // above) it has nothing new to learn from a pure store switch, and
+  // refreshUnreadMessages was never store-scoped to begin with (see its own
+  // comment). Re-running either on every switch would just repeat the same
+  // all-store/all-messages query for no new information. This subset keeps
+  // only the badges that genuinely depend on currentStoreId.
+  const refreshStoreScopedBadges = useCallback(
+    async (isCancelled = () => false) => {
+      for (const refresh of [refreshBulletinUpdates, refreshRosterUpdates, refreshFormulaUpdates]) {
+        if (isCancelled()) return
+        try {
+          await refresh()
+        } catch (err) {
+          console.error('Badge refresh failed:', err)
+        }
+      }
+    },
+    [refreshBulletinUpdates, refreshRosterUpdates, refreshFormulaUpdates]
+  )
+
   useEffect(() => {
     if (!badgesReady) return
     let cancelled = false
@@ -690,14 +731,17 @@ export function AuthProvider({ children }) {
 
   // Jeff, 2026-10-21 (further follow-up): "切到Sunnybank還是顯示Toowong的
   // staff time logs提示" — refreshRosterUpdates/refreshFormulaUpdates/
-  // refreshBulletinUpdates/refreshTimeDiscrepancies are each computed for
-  // `currentStoreId` only (see their own comments), but nothing actually
-  // re-ran them when currentStoreId itself changed — StoreSwitcher.jsx just
-  // calls setCurrentStoreId and nothing else, so every one of those dots
-  // kept showing whatever was true for the PREVIOUS store until the next
-  // login or app-foreground refresh happened to land on the new one. This
-  // re-runs the same refreshAllBadges() cascade right when the store
-  // actually changes, so each dot always reflects the store being viewed.
+  // refreshBulletinUpdates are each computed for `currentStoreId` only (see
+  // their own comments), but nothing actually re-ran them when
+  // currentStoreId itself changed — StoreSwitcher.jsx just calls
+  // setCurrentStoreId and nothing else, so every one of those dots kept
+  // showing whatever was true for the PREVIOUS store until the next login
+  // or app-foreground refresh happened to land on the new one. This re-runs
+  // refreshStoreScopedBadges() right when the store actually changes, so
+  // each dot always reflects the store being viewed. (Staff Time Logs'
+  // own red dot used to be in this same cascade too, but as of the
+  // storeTimeDiscrepancies rework above it no longer needs a store-switch
+  // trigger at all — see refreshStoreScopedBadges' own comment.)
   //
   // Deliberately only fires on a store change WITHIN the same login (the
   // ref's profileId matches), not on the very first render for a newly
@@ -714,9 +758,9 @@ export function AuthProvider({ children }) {
     const storeChanged = last.storeId !== currentStoreId
     lastBadgeStoreRef.current = { profileId: profile?.id ?? null, storeId: currentStoreId }
     if (sameProfile && storeChanged && profile?.id && currentStoreId) {
-      refreshAllBadges()
+      refreshStoreScopedBadges()
     }
-  }, [profile?.id, currentStoreId, refreshAllBadges])
+  }, [profile?.id, currentStoreId, refreshStoreScopedBadges])
 
   // Jeff, 2026-10-16: two different people (both on mobile data, different
   // carriers/devices, same day) hit a raw "Failed to fetch" on the sign-in
@@ -816,6 +860,7 @@ export function AuthProvider({ children }) {
     unreadMessageCount,
     refreshUnreadMessages,
     hasTimeDiscrepancies,
+    storeTimeDiscrepancies,
     refreshTimeDiscrepancies,
     sidebarOrder,
     refreshSidebarOrder,
