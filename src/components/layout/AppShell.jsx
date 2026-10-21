@@ -190,20 +190,36 @@ export default function AppShell() {
   // 其正常登入進去，再banner提示有新版本請確認更新...或者是有辦法做到員工
   // 離開app那一瞬間，系統背後自己做更新?" — registerType is now 'prompt'
   // (vite.config.js/swUpdate.js), so a newly-found update sits waiting
-  // instead of forcing itself through. This banner covers someone who taps
-  // it; the effect right below covers "離開app那一瞬間" — the moment this
-  // tab is backgrounded, apply it automatically so most people never even
-  // see the banner at all (by the time they're back, it's already current).
-  const [updateReady, setUpdateReady] = useState(false)
-  useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
+  // instead of forcing itself through.
+  //
+  // Jeff, 2026-10-21 (yet another follow-up): "如果跳出時會自動更新，感覺
+  // 畫面上方的小提示...是不是就不需要" — right: this app's actual usage
+  // (phones get locked, store computers get shut down normally — Jeff
+  // confirmed) is already covered without it. Locking a phone screen fires
+  // 'visibilitychange' → 'hidden' on both iOS/Android while the tab is
+  // still open, which the effect below catches directly. A normal computer
+  // shutdown (or just closing the browser) goes further: once every
+  // tab/window this service worker controls is gone, there's nothing left
+  // for the OLD worker to keep controlling, so the browser activates the
+  // waiting one entirely on its own — no code of ours even needs to run
+  // for that case. The one device this wouldn't reach is a screen left
+  // open and in the foreground all day, never locked or closed (a tablet
+  // mounted as a standing kiosk) — no store runs one that way, so the
+  // visible banner + manual "Update now" button were dropped; this effect
+  // (silently applying the moment a tab IS backgrounded) is kept as the
+  // one case worth covering proactively rather than waiting for a full
+  // close.
   useEffect(() => {
-    if (!updateReady) return
+    const cancelWatch = watchForUpdate(() => {})
     function onHidden() {
       if (document.visibilityState === 'hidden') applyUpdate()
     }
     document.addEventListener('visibilitychange', onHidden)
-    return () => document.removeEventListener('visibilitychange', onHidden)
-  }, [updateReady])
+    return () => {
+      cancelWatch()
+      document.removeEventListener('visibilitychange', onHidden)
+    }
+  }, [])
   // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
   // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
   // ANY page, not just after navigating into My Dashboard > Time & Attendance
@@ -369,14 +385,6 @@ export default function AppShell() {
               </button>
             </div>
           </header>
-          {updateReady && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
-              <span className="text-brand-800">🔄 A new version is ready.</span>
-              <button onClick={() => applyUpdate()} className="shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">
-                Update now
-              </button>
-            </div>
-          )}
           {showPushNudge && (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
               <span className="text-brand-800">🔔 Turn on push notifications so you don't miss new messages, announcements, and roster updates.</span>

@@ -14,9 +14,33 @@ const AuthContext = createContext(null)
 // for why this distinction matters. supabase-js names it
 // AuthRetryableFetchError; the underlying browser error is just a plain
 // "Failed to fetch" TypeError, which is all that's left once supabase-js
-// has already unwrapped it into error.message.
+// has already unwrapped it into error.message. TimeoutError (below) is
+// treated the same way — see withTimeout's own comment for why.
 function isNetworkError(error) {
-  return error?.name === 'AuthRetryableFetchError' || /failed to fetch/i.test(error?.message ?? '')
+  return error?.name === 'AuthRetryableFetchError' || error?.name === 'TimeoutError' || /failed to fetch/i.test(error?.message ?? '')
+}
+
+// Jeff, 2026-10-21 (yet another follow-up): "Sophie用行動網路，當時Facebook、
+// WeChat都能正常登入，所以應該不是完全斷網" — if the connection itself is
+// fine but THIS particular request simply never gets a response (no error,
+// no native timeout — the browser's fetch() just never settles, which can
+// happen on a flaky mobile link even while other sites work), none of the
+// isNetworkError retry logic above ever runs, because nothing ever rejects
+// to trigger it — the caller just awaits forever and the spinner never
+// goes away. Racing a request against a plain timer bounds that wait: past
+// REQUEST_TIMEOUT_MS it's treated exactly like a network error (one retry,
+// then fall through to whatever "give up" path that caller already has —
+// a signed-out session, or profileError's Retry screen) instead of hanging
+// indefinitely. The original request is simply abandoned, not aborted —
+// if it does eventually resolve, nothing is still listening for it.
+const REQUEST_TIMEOUT_MS = 8000
+function withTimeout(promise, ms = REQUEST_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(Object.assign(new Error('Request timed out'), { name: 'TimeoutError' })), ms)
+    }),
+  ])
 }
 
 // Monday-start week key, e.g. "2026-09-14"
@@ -208,7 +232,10 @@ export function AuthProvider({ children }) {
         for (let attempt = 0; attempt < 3; attempt++) {
           if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt))
           try {
-            const { profileRow, overrideRows, storeRows } = await fetchProfileBundle(userId)
+            // withTimeout: see its own comment — a hung request (no error,
+            // no response) would otherwise stall this whole attempt forever
+            // instead of moving on to the next retry.
+            const { profileRow, overrideRows, storeRows } = await withTimeout(fetchProfileBundle(userId))
             setProfile(profileRow)
             setOverrides(overrideRows)
             setAccessibleStores(storeRows)
@@ -264,12 +291,17 @@ export function AuthProvider({ children }) {
       try {
         let result
         try {
-          result = await supabase.auth.getSession()
+          // withTimeout: see its own comment — Sophie was confirmed to
+          // still have a working mobile connection (Facebook/WeChat logged
+          // in fine) when this happened, so a plain thrown network error
+          // isn't the only failure mode to cover — the request itself can
+          // just never come back.
+          result = await withTimeout(supabase.auth.getSession())
         } catch (err) {
           if (isNetworkError(err)) {
             await new Promise((resolve) => setTimeout(resolve, 1500))
             try {
-              result = await supabase.auth.getSession()
+              result = await withTimeout(supabase.auth.getSession())
             } catch (retryErr) {
               console.error('getSession retry also failed:', retryErr)
               result = { data: { session: null } }
@@ -712,11 +744,24 @@ export function AuthProvider({ children }) {
     // begin/endCriticalSection so a service-worker update discovered on this
     // same page load can't force a reload mid-attempt.
     beginCriticalSection()
+    // withTimeout: see its own comment — a hung signInWithPassword() call
+    // (no error, no response) would otherwise leave "Signing in…" showing
+    // forever with no error for isNetworkError's retry below to react to.
+    // withTimeout rejects with a TimeoutError in that case, which this
+    // wraps back into the same { error } shape signInWithPassword() itself
+    // returns, so the retry/error handling below doesn't need to change.
+    async function attemptSignIn() {
+      try {
+        return await withTimeout(supabase.auth.signInWithPassword({ email, password }))
+      } catch (err) {
+        return { error: err }
+      }
+    }
     try {
-      let { error } = await supabase.auth.signInWithPassword({ email, password })
+      let { error } = await attemptSignIn()
       if (error && isNetworkError(error)) {
         await new Promise((resolve) => setTimeout(resolve, 1500))
-        ;({ error } = await supabase.auth.signInWithPassword({ email, password }))
+        ;({ error } = await attemptSignIn())
       }
       if (error) {
         if (isNetworkError(error)) {
