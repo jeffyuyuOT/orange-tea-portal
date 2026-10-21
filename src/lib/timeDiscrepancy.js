@@ -1,6 +1,7 @@
 import { addDays, format } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { pairEventsIntoSessions, dailyTotals, breakMinutesFromHalfHours } from './attendance'
+import { brisbaneLocalToIso } from './brisbaneTime'
 
 // Jeff, 2026-09: "staff time logs如果有員工的time logs算出的時間跟班表上算
 // 出來的時間的有出入15mins以上，該員名字會顯示提示" — decided via
@@ -99,13 +100,32 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       .select('*')
       .eq('store_id', storeId)
       .in('profile_id', profileIds)
-      .gte('occurred_at', `${fromDate}T00:00:00`),
+      // Jeff, 2026-10-22: "只抓到第二段的時間2:02-4:06pm那段" — Sophie's
+      // 9:28am punch (Brisbane time) on the window's own oldest day got
+      // silently dropped, leaving its clock-out orphaned and only the
+      // later 2:02-4:06pm session counted. Root cause: this used to send
+      // `${fromDate}T00:00:00` with no timezone offset — PostgREST reads a
+      // bare timestamp like that as UTC, not Brisbane, so the cutoff landed
+      // at Brisbane 10:00am on fromDate instead of Brisbane midnight. Any
+      // punch before 10am on the oldest day of the 14-day window (occurred_at
+      // is a real UTC instant, so Brisbane's early morning is still the
+      // PREVIOUS UTC calendar day) fell just before that wrong cutoff and
+      // was excluded from the query entirely — not merely misdated, actually
+      // never fetched, which is why its matching clock-out above came back
+      // with no clockIn to pair with (an orphan dailyTotals silently
+      // ignores) instead of showing up as a second, too-short session.
+      // brisbaneLocalToIso (used everywhere else this app turns a
+      // Brisbane-wall-clock date/time into a timestamptz boundary) fixes
+      // the same class of bug this file already explains for leave
+      // requests — just missed here.
+      .gte('occurred_at', brisbaneLocalToIso(`${fromDate}T00:00`)),
     supabase
       .from('roster_change_events')
       .select('profile_id, changed_at')
       .eq('store_id', storeId)
       .in('profile_id', profileIds)
-      .gte('changed_at', `${fromDate}T00:00:00`),
+      // Same fix, same reason — changed_at is a timestamptz too.
+      .gte('changed_at', brisbaneLocalToIso(`${fromDate}T00:00`)),
     // Jeff, 2026-10-03: "編輯attendance logs時如果有加入break...但在跟班表
     // 檢查出入時並沒有把休息時間扣掉" — Attendance Logs' own "Total" already
     // nets a day's logged break out of the raw clocked duration (see
