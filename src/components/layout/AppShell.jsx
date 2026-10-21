@@ -351,13 +351,13 @@ export default function AppShell() {
           </header>
           {showPushNudge && (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
-              <span className="text-brand-800">🔔 開啟推播通知，才不會錯過新訊息、公告跟班表更新。</span>
+              <span className="text-brand-800">🔔 Turn on push notifications so you don't miss new messages, announcements, and roster updates.</span>
               <div className="flex shrink-0 items-center gap-2">
                 <button onClick={enablePushFromNudge} className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">
-                  開啟推播通知
+                  Turn on
                 </button>
                 <button onClick={dismissPushNudge} className="rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">
-                  之後再說
+                  Later
                 </button>
               </div>
             </div>
