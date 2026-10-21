@@ -58,9 +58,28 @@ export function isUpdateReady() {
 // call) and may be calling this before watchForUpdate's listener above has
 // had a chance to record it, so it passes it straight through here rather
 // than relying on readyRegistration already being set.
+//
+// Jeff, 2026-10-21 (further follow-up): "為什麼手機版按check for update找到
+// 更新，會一直卡在reloading" — MyInformationPage.jsx's button calls this, then
+// just sits on "Update found — reloading…" waiting for main.jsx's
+// controllerchange listener to actually reload the page. That chain (postMessage
+// -> push-sw.js's self.skipWaiting() -> browser hands control to the new worker
+// -> controllerchange fires) is entirely outside our control once this
+// postMessage is sent, and on at least some mobile browser/OS combinations it
+// can apparently just never complete — no error, nothing to catch, the handover
+// simply doesn't happen, so controllerchange never fires and the page is stuck
+// showing that text forever. Rather than chase an un-reproducible platform quirk
+// blind, add an unconditional fallback here: if nothing has already torn this
+// page down (via the real controllerchange reload) within RELOAD_FALLBACK_MS,
+// reload it ourselves. Harmless in the normal case — when controllerchange does
+// fire, window.location.reload() runs first and destroys this page's JS context
+// (this very timer included) well before it would have fired on its own.
+const RELOAD_FALLBACK_MS = 8000
+
 export function applyUpdate(reg) {
   const registration = reg ?? readyRegistration
   if (!registration?.waiting) return
   readyRegistration = registration
   registration.waiting.postMessage({ type: 'SKIP_WAITING' })
+  setTimeout(() => window.location.reload(), RELOAD_FALLBACK_MS)
 }
