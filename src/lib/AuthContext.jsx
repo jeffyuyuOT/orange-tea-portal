@@ -232,12 +232,45 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(async ({ data }) => {
+    // Jeff, 2026-10-21: Sophie hit "一直轉圈圈進不去" (RequireAuth.jsx's
+    // "Loading your session…" spinner, stuck forever) on a flaky mobile
+    // connection. This call had NO .catch() at all — unlike signIn()'s own
+    // retry further down, which only covers the sign-in FORM submission, not
+    // this session-restore call that runs on every app open/reload whether
+    // or not anyone touches the login form. getSession() can still need a
+    // network round-trip (refreshing an expired token) and reject with the
+    // same AuthRetryableFetchError class signIn() already handles — when it
+    // does, `setLoading(false)` below never ran, so `loading` stayed true
+    // forever and nothing ever offered a way out. Same treatment as signIn():
+    // one silent retry after a short pause for a one-off blip; if it's still
+    // failing, fall through to a signed-out LoginPage (via session staying
+    // null) rather than spinning forever — worst case she just tries again,
+    // same as any other network hiccup, instead of being stuck with no retry
+    // button at all.
+    async function restoreSession() {
+      let result
+      try {
+        result = await supabase.auth.getSession()
+      } catch (err) {
+        if (isNetworkError(err)) {
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+          try {
+            result = await supabase.auth.getSession()
+          } catch (retryErr) {
+            console.error('getSession retry also failed:', retryErr)
+            result = { data: { session: null } }
+          }
+        } else {
+          console.error('getSession failed:', err)
+          result = { data: { session: null } }
+        }
+      }
       if (!mounted) return
-      setSession(data.session)
-      if (data.session?.user) await loadProfileData(data.session.user.id)
+      setSession(result.data.session)
+      if (result.data.session?.user) await loadProfileData(result.data.session.user.id)
       if (mounted) setLoading(false)
-    })
+    }
+    restoreSession()
 
     // Jeff, 2026-10-17: this callback used to `await loadProfileData(...)` for
     // EVERY auth event. supabase-js holds its internal auth lock while it runs
@@ -605,6 +638,36 @@ export function AuthProvider({ children }) {
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [profile?.id, refreshAllBadges])
+
+  // Jeff, 2026-10-21 (further follow-up): "切到Sunnybank還是顯示Toowong的
+  // staff time logs提示" — refreshRosterUpdates/refreshFormulaUpdates/
+  // refreshBulletinUpdates/refreshTimeDiscrepancies are each computed for
+  // `currentStoreId` only (see their own comments), but nothing actually
+  // re-ran them when currentStoreId itself changed — StoreSwitcher.jsx just
+  // calls setCurrentStoreId and nothing else, so every one of those dots
+  // kept showing whatever was true for the PREVIOUS store until the next
+  // login or app-foreground refresh happened to land on the new one. This
+  // re-runs the same refreshAllBadges() cascade right when the store
+  // actually changes, so each dot always reflects the store being viewed.
+  //
+  // Deliberately only fires on a store change WITHIN the same login (the
+  // ref's profileId matches), not on the very first render for a newly
+  // arrived profile — that initial case is already covered by the
+  // badgesReady effect's own ~2.5s delay (see its 2026-10-17 comment on why
+  // badges shouldn't fire immediately and compete with the first screen's
+  // own requests); this effect would otherwise fire instantly on every
+  // login too, since currentStoreId already has a value from its very first
+  // render (read from localStorage).
+  const lastBadgeStoreRef = useRef({ profileId: null, storeId: null })
+  useEffect(() => {
+    const last = lastBadgeStoreRef.current
+    const sameProfile = last.profileId === (profile?.id ?? null)
+    const storeChanged = last.storeId !== currentStoreId
+    lastBadgeStoreRef.current = { profileId: profile?.id ?? null, storeId: currentStoreId }
+    if (sameProfile && storeChanged && profile?.id && currentStoreId) {
+      refreshAllBadges()
+    }
+  }, [profile?.id, currentStoreId, refreshAllBadges])
 
   // Jeff, 2026-10-16: two different people (both on mobile data, different
   // carriers/devices, same day) hit a raw "Failed to fetch" on the sign-in
