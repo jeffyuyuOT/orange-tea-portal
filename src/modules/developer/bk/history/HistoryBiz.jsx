@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
-import { brisbaneToday, fmtMoney, monthDates, round2, weekdayOf } from '../bkUtils'
+import { brisbaneToday, brisbaneTodayStr, fmtMoney, monthDates, round2, weekdayOf } from '../bkUtils'
 import { loadPublicHolidays, loadSalesAll, loadSalesNotesAll, loadSfPostAll } from '../bkSalesData'
 import { loadHourSalesRange, loadHourSettings } from '../bkHourData'
 import { averageByHour, hourlyByDay, hoursFor, settingsMap } from '../bkHourly'
@@ -59,8 +59,8 @@ function YearSelect({ years, value, onChange }) {
   )
 }
 
-// A clickable block: label + 總營業額 + 總杯數.
-function Tile({ label, sub, total, cups, onClick }) {
+// A clickable block: label + 總營業額 + 總杯數 (+ 日均杯數 when given).
+function Tile({ label, sub, total, cups, avgCups, onClick }) {
   const empty = total === null && cups === null
   return (
     <button
@@ -75,6 +75,12 @@ function Tile({ label, sub, total, cups, onClick }) {
       <div className="text-lg font-semibold tabular-nums text-gray-900">{money(total)}</div>
       <div className="mt-1 text-xs text-gray-500">總杯數</div>
       <div className="text-lg font-semibold tabular-nums text-gray-900">{count(cups)}</div>
+      {avgCups !== undefined && (
+        <>
+          <div className="mt-1 text-xs text-gray-500">日均杯數</div>
+          <div className="text-lg font-semibold tabular-nums text-gray-900">{count(avgCups)}</div>
+        </>
+      )}
     </button>
   )
 }
@@ -94,13 +100,14 @@ function DetailModal({ detail, onClose, onHours }) {
                 <th className={th}>{detail.firstCol}</th>
                 <th className={`${th} text-right`}>總營業額</th>
                 <th className={`${th} text-right`}>總杯數</th>
+                {detail.rows.some((r) => 'avgCups' in r) && <th className={`${th} text-right`}>日均杯數</th>}
                 {detail.rows.some((r) => r.hour) && <th className={th} />}
               </tr>
             </thead>
             <tbody>
               {detail.rows.length === 0 && (
                 <tr>
-                  <td className={`${td} text-gray-400`} colSpan={4}>
+                  <td className={`${td} text-gray-400`} colSpan={5}>
                     沒有紀錄
                   </td>
                 </tr>
@@ -110,6 +117,7 @@ function DetailModal({ detail, onClose, onHours }) {
                   <td className={td}>{r.label}</td>
                   <td className={`${td} text-right tabular-nums`}>{money(r.total)}</td>
                   <td className={`${td} text-right tabular-nums`}>{count(r.cups)}</td>
+                  {detail.rows.some((x) => 'avgCups' in x) && <td className={`${td} text-right tabular-nums`}>{count(r.avgCups)}</td>}
                   {detail.rows.some((x) => x.hour) && (
                     <td className={`${td} text-right`}>
                       {r.hour && (
@@ -133,7 +141,7 @@ function DetailModal({ detail, onClose, onHours }) {
   )
 }
 
-// 歷史紀錄 › 營業. Only 總營業額 and 總杯數; every block opens the same period in
+// 歷史紀錄 › 營業. 總營業額 and 總杯數 (季／月 also 日均杯數); every block opens the same period in
 // earlier (and later) years.
 export default function HistoryBiz({ salesStores, stores = [], active }) {
   const today = brisbaneToday()
@@ -175,7 +183,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   const records = useMemo(() => aggregateDays(storeDays, scopeIds), [storeDays, scopeIds])
   const years = useMemo(() => recordYears(records), [records])
   const events = useMemo(
-    () => (data ? withSales(buildEvents(data.notes, data.holidays, scopeIds), records) : []),
+    // Jeff, 2026-10-17: dates that haven't happened yet (e.g. next year's holidays from the payroll list) have no figures — left out.
+    () => (data ? withSales(buildEvents(data.notes, data.holidays, scopeIds), records).filter((e) => e.date <= brisbaneTodayStr()) : []),
     [data, scopeIds, records]
   )
 
@@ -190,13 +199,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   }
 
   // 小時統計 button of a detail row. spec = { type:'day', date } | { type:'weekday', index, year, filter }.
-  // Hour data is keyed by the SF / U帳 stores, so the chosen 營業 stores are mapped through their SF link.
   async function openHours(spec, title) {
-    const ids = scopeIds.map((id) => salesStores.find((s) => s.id === id)?.sf_store_id).filter(Boolean)
-    if (ids.length === 0) {
-      setHourView({ title, message: '這家店沒有連到 SF / U帳 的分店，所以沒有小時營業額資料。' })
-      return
-    }
+    const ids = scopeIds
     setHourView({ title, loading: true })
     try {
       const from = spec.type === 'day' ? spec.date : `${spec.year}-01-01`
@@ -237,11 +241,12 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
               sub={`${QUARTER_MONTHS[q.key][0]}–${QUARTER_MONTHS[q.key][2]} 月`}
               total={q.total}
               cups={q.cups}
+              avgCups={q.avgCups}
               onClick={() =>
                 showAcross(
                   `歷年 ${q.label}`,
                   '年份',
-                  quarterAcrossYears(records, q.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, highlight: r.year === year }))
+                  quarterAcrossYears(records, q.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgCups: r.avgCups, highlight: r.year === year }))
                 )
               }
             />
@@ -262,11 +267,12 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
               label={`${year} 年 ${m.label}`}
               total={m.total}
               cups={m.cups}
+              avgCups={m.avgCups}
               onClick={() =>
                 showAcross(
                   `歷年 ${m.label}`,
                   '年份',
-                  monthAcrossYears(records, m.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, highlight: r.year === year }))
+                  monthAcrossYears(records, m.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgCups: r.avgCups, highlight: r.year === year }))
                 )
               }
             />

@@ -54,8 +54,16 @@ export function aggregateDays(storeDays, storeIds) {
 // Sum of the records matching `pred`; null when nothing matches.
 export function sumRecords(records, pred = () => true) {
   const hit = records.filter((r) => pred(r.date))
-  if (hit.length === 0) return { total: null, cups: null, days: 0 }
-  return { total: sumOrNull(hit.map((r) => r.total)), cups: sumOrNull(hit.map((r) => r.cups)), days: hit.length }
+  if (hit.length === 0) return { total: null, cups: null, days: 0, avgCups: null }
+  const cups = sumOrNull(hit.map((r) => r.cups))
+  // 日均杯數 = 總杯數 ÷ the days that actually have a cup figure.
+  const cupDays = hit.filter((r) => r.cups !== null && r.cups !== undefined).length
+  return {
+    total: sumOrNull(hit.map((r) => r.total)),
+    cups,
+    days: hit.length,
+    avgCups: cups !== null && cupDays > 0 ? round2(cups / cupDays) : null,
+  }
 }
 
 // Years that have any record, newest first.
@@ -96,7 +104,23 @@ export function dayAcrossYears(records, mmdd) {
 // Events = notes + public holidays. `notes` = [{ store_id, day, note }],
 // `holidays` = { [date]: name }. Only the stores in `storeIds` contribute notes.
 // → [{ date, label, kind: 'note'|'holiday' }] sorted by date.
-export const eventKey = (label) => label.trim().replace(/\s+/g, ' ').toLowerCase()
+// "Queen's Birthday" (until 2022) and "King's Birthday" are the same holiday, so they share a key.
+// The year in a note ("2025周年慶") is not part of the event, and every note that mentions
+// 周年慶 / 週年慶 / anniversary is the same event, so 歷年 shows them all together.
+const SAME_EVENT_WORDS = [[/周年慶|週年慶|anniversary/, '周年慶']]
+export const eventKey = (label) => {
+  const k = label
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/queen'?s birthday/g, "king's birthday")
+    .replace(/(?<!\d)(19|20)\d{2}(?!\d)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  for (const [re, key] of SAME_EVENT_WORDS) if (re.test(k)) return key
+  return k
+}
 export function buildEvents(notes, holidays, storeIds) {
   const ids = new Set(storeIds)
   const seen = new Set()
