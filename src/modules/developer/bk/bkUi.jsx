@@ -89,6 +89,7 @@ export function YearMonthPicker({ year, month, onChange, allowAllMonths = false 
 // While you are NOT typing in it, a valid number is shown with two decimals
 // (595 -> 595.00); the text you type is left alone while the box has focus.
 // `plain` turns that off for counts (cups, CV) that are not money.
+// Editable cell: invisible border until hovered — then a clear orange frame + tinted fill (Jeff, 2026-10-22: the old light border was hard to see).
 export function MoneyInput({ value, onChange, allowNegative = true, plain = false, className = '', onFocus, onBlur, ...rest }) {
   const re = allowNegative ? /^-?\d*\.?\d*$/ : /^\d*\.?\d*$/
   const [focused, setFocused] = useState(false)
@@ -113,7 +114,7 @@ export function MoneyInput({ value, onChange, allowNegative = true, plain = fals
         setFocused(false)
         onBlur?.(e)
       }}
-      className={`w-full min-w-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-right text-sm tabular-nums hover:border-brand-200 focus:border-brand-400 focus:bg-white focus:outline-none ${className}`}
+      className={`w-full min-w-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-right text-sm tabular-nums hover:border-brand-500 hover:bg-brand-50 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-300 ${className}`}
       {...rest}
     />
   )
