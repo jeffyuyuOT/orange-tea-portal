@@ -23,6 +23,7 @@ import {
 import { listCashDayRows, listCashMonths, listEntries, loadCashMonth } from '../bkData'
 import { exportCashXlsx, exportPlXlsx } from '../bkExcel'
 import { NoteButton, Notice, inputCls } from '../bkUi'
+import EntryForm from './EntryForm'
 
 const VIEWS = [
   ['store', '分店現金'],
@@ -239,6 +240,8 @@ function ItemHistory({ stores, initialStoreId, active }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [noteText, setNoteText] = useState(null)
+  const [editing, setEditing] = useState(null) // the raw entry being edited
+  const [reloadKey, setReloadKey] = useState(0)
 
   const storeName = (id) => stores.find((s) => s.id === id)?.name ?? ''
   const availableKinds = ITEM_KINDS.filter(([k]) => !addedKinds.includes(k))
@@ -294,6 +297,7 @@ function ItemHistory({ stores, initialStoreId, active }) {
               desc: e.description ?? '',
               amount: e.kind === 'deposit' || e.kind === 'withdraw' ? dwSigned(e) : Number(e.amount),
               note: e.note,
+              entry: e.transfer_group_id ? null : e,
             })
           }
         }
@@ -329,7 +333,7 @@ function ItemHistory({ stores, initialStoreId, active }) {
     return () => {
       cancelled = true
     }
-  }, [active, storeId, addedKinds, from, to, rujuTarget])
+  }, [active, storeId, addedKinds, from, to, rujuTarget, reloadKey])
 
   const grandTotal = round2(addedKinds.reduce((a, k) => a + (byKind[k] ?? []).reduce((aa, r) => aa + r.amount, 0), 0))
 
@@ -424,6 +428,7 @@ function ItemHistory({ stores, initialStoreId, active }) {
                             {!storeId && <th className="px-2 py-1.5">分店</th>}
                             <th className="px-2 py-1.5">Description</th>
                             <th className="px-2 py-1.5 text-right">金額</th>
+                            <th className="px-2 py-1.5" />
                           </tr>
                         </thead>
                         <tbody>
@@ -437,6 +442,17 @@ function ItemHistory({ stores, initialStoreId, active }) {
                                 <NoteButton note={r.note} onOpen={setNoteText} />
                               </td>
                               <td className="px-2 py-1.5 text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                              <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                                {r.entry && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditing(r.entry)}
+                                    className="rounded border border-brand-200 px-1.5 py-0.5 text-xs text-brand-700 hover:bg-brand-50"
+                                  >
+                                    編輯
+                                  </button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -451,6 +467,20 @@ function ItemHistory({ stores, initialStoreId, active }) {
       )}
       <Modal open={noteText !== null} onClose={() => setNoteText(null)} title="附註" footer={<Button onClick={() => setNoteText(null)}>關閉</Button>}>
         <p className="whitespace-pre-wrap text-sm text-gray-700">{noteText}</p>
+      </Modal>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={`編輯收支${editing ? ` — ${storeName(editing.store_id)}` : ''}`}>
+        {editing && (
+          <EntryForm
+            storeId={editing.store_id}
+            stores={stores}
+            initial={editing}
+            onCancel={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null)
+              setReloadKey((k) => k + 1)
+            }}
+          />
+        )}
       </Modal>
     </div>
   )

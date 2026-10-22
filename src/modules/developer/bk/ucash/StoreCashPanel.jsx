@@ -75,8 +75,9 @@ function entryDescription(kindKey, e) {
   return desc
 }
 
-function EntryDetailModal({ detail, entries, storeId, onClose, onNote }) {
+function EntryDetailModal({ detail, entries, storeId, stores, onClose, onNote, onChanged }) {
   const [range, setRange] = useState('month') // 'month' | 'fy'
+  const [editing, setEditing] = useState(null)
   const [fyRows, setFyRows] = useState(null)
   const [error, setError] = useState('')
   const t = brisbaneToday()
@@ -139,12 +140,13 @@ function EntryDetailModal({ detail, entries, storeId, onClose, onNote }) {
                   <th className="whitespace-nowrap px-3 py-1.5 font-medium">日期</th>
                   <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">金額</th>
                   <th className="w-full px-3 py-1.5 font-medium">Description</th>
+                  <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-3 py-3 text-center text-gray-300">
+                    <td colSpan={4} className="px-3 py-3 text-center text-gray-300">
                       —
                     </td>
                   </tr>
@@ -157,6 +159,15 @@ function EntryDetailModal({ detail, entries, storeId, onClose, onNote }) {
                       {entryDescription(detail.key, e)}
                       <NoteButton note={e.note} onOpen={onNote} />
                     </td>
+                    <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                      {e.transfer_group_id ? (
+                        <span className="text-xs text-gray-300">分店transfer</span>
+                      ) : (
+                        <Button variant="secondary" onClick={() => setEditing(e)}>
+                          編輯
+                        </Button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -165,12 +176,28 @@ function EntryDetailModal({ detail, entries, storeId, onClose, onNote }) {
                   <td className="px-3 py-1.5">Total</td>
                   <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{fmtMoney(total)}</td>
                   <td className="px-3 py-1.5 text-xs font-normal text-gray-500">{rows.length} 筆</td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
         )}
       </div>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="編輯收支">
+        {editing && (
+          <EntryForm
+            storeId={storeId}
+            stores={stores}
+            initial={editing}
+            onCancel={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null)
+              setFyRows(null) // re-read the 會計年度 list
+              onChanged?.()
+            }}
+          />
+        )}
+      </Modal>
     </Modal>
   )
 }
@@ -676,7 +703,15 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       </Modal>
 
       {detail && (
-        <EntryDetailModal detail={detail} entries={entries} storeId={store.id} onClose={() => setDetail(null)} onNote={setNoteText} />
+        <EntryDetailModal
+          detail={detail}
+          entries={entries}
+          storeId={store.id}
+          stores={stores}
+          onClose={() => setDetail(null)}
+          onNote={setNoteText}
+          onChanged={onEntriesChanged}
+        />
       )}
 
       <Modal open={!!dInfo} onClose={() => setDInfo(null)} title={`可 D 金額 — ${dInfo ?? ''}`} footer={<Button onClick={() => setDInfo(null)}>關閉</Button>}>
