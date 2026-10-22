@@ -127,8 +127,17 @@ export async function restoreBkBackup(file) {
 // Auto backup (browser version)
 // ---------------------------------------------------------------------------
 
-export const BACKUP_HOUR = 22
-export const BACKUP_MINUTE = 30
+// The nightly backup time (Brisbane) is chosen in 系統設置 › 備份 and stored in
+// bk_backup_settings.backup_time ('HH:MM'); until it has been read, or when the
+// column does not exist yet, it is 22:30.
+export const DEFAULT_BACKUP_TIME = '22:30'
+let backupTime = DEFAULT_BACKUP_TIME
+export function setBackupTime(t) {
+  backupTime = /^\d{1,2}:\d{2}/.test(t ?? '') ? t.slice(0, 5).padStart(5, '0') : DEFAULT_BACKUP_TIME
+}
+export const backupTimeLabel = () => backupTime
+const backupHour = () => Number(backupTime.slice(0, 2))
+const backupMinute = () => Number(backupTime.slice(3, 5))
 const BRISBANE_OFFSET_MS = 10 * 3600 * 1000 // Brisbane is UTC+10 all year (no DST)
 
 export const autoBackupSupported = () => typeof window !== 'undefined' && 'showDirectoryPicker' in window
@@ -141,18 +150,18 @@ export function brisbaneDayStr(ms = Date.now()) {
   return dayStr(brisbaneWall(ms))
 }
 
-// The latest day whose 22:30 has already passed (today after 22:30, else yesterday).
+// The latest day whose backup time has already passed (today after it, else yesterday).
 export function lastDueDay(ms = Date.now()) {
   const w = brisbaneWall(ms)
   const minutes = w.getUTCHours() * 60 + w.getUTCMinutes()
-  if (minutes >= BACKUP_HOUR * 60 + BACKUP_MINUTE) return dayStr(w)
+  if (minutes >= backupHour() * 60 + backupMinute()) return dayStr(w)
   return dayStr(new Date(w.getTime() - 86400000))
 }
 
-// Milliseconds from now until the next 22:30 Brisbane.
+// Milliseconds from now until the next backup time (Brisbane).
 export function msUntilNextBackup(ms = Date.now()) {
   const w = brisbaneWall(ms)
-  const target = new Date(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), BACKUP_HOUR, BACKUP_MINUTE))
+  const target = new Date(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), backupHour(), backupMinute()))
   if (target.getTime() <= w.getTime()) target.setUTCDate(target.getUTCDate() + 1)
   return target.getTime() - w.getTime()
 }
@@ -211,7 +220,17 @@ export async function loadBackupState() {
   ])
   if (s.error) throw new Error(s.error.message)
   if (l.error) throw new Error(l.error.message)
-  return { settings: s.data ?? { enabled: false, enabled_since: null }, log: l.data ?? [] }
+  const settings = s.data ?? { enabled: false, enabled_since: null }
+  setBackupTime(settings.backup_time)
+  return { settings, log: l.data ?? [] }
+}
+
+// Save the nightly backup time ('HH:MM', Brisbane).
+export async function saveBackupTime(t) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new Error('請輸入正確的時間。')
+  const { error } = await supabase.from('bk_backup_settings').upsert({ id: 1, backup_time: t, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+  if (error) throw new Error(/backup_time/.test(error.message) ? '資料庫還沒有 backup_time 欄位，請先執行 0136_bk_backup_time.sql。' : error.message)
+  setBackupTime(t)
 }
 
 export async function setBackupEnabled(enabled) {

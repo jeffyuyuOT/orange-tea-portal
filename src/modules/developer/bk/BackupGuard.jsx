@@ -6,6 +6,7 @@ import {
   acknowledgeMissed,
   brisbaneDayStr,
   getBackupDir,
+  backupTimeLabel,
   lastDueDay,
   loadBackupState,
   missedDays,
@@ -14,16 +15,22 @@ import {
 
 export const BACKUP_CHANGED_EVENT = 'bk-backup-changed'
 
-function nearBackupTime() {
-  const hour = Number(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Brisbane', hour: '2-digit', hour12: false }).format(new Date()))
-  return hour >= 22
+// True once today's backup time has passed and today's backup is not done yet.
+function backupPending(state) {
+  if (!state?.settings?.enabled) return false
+  const [h, m] = backupTimeLabel().split(':').map(Number)
+  const parts = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Brisbane', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date())
+  const now = Number(parts.find((p) => p.type === 'hour').value) % 24 * 60 + Number(parts.find((p) => p.type === 'minute').value)
+  if (now < h * 60 + m) return false
+  const today = brisbaneDayStr()
+  return !state.log.some((r) => r.day === today && (r.status === 'ok' || r.status === 'acknowledged'))
 }
 
 // Lives inside BkPage (so it only works while the BK page is open and logged in).
 //  - On entering BK: reads the backup log; if today's 22:30 backup is due and
 //    still missing it is made right away (when the folder permission is still
 //    valid); any earlier day without a successful backup opens a warning.
-//  - While BK stays open: checks every 30 s and makes the backup once it is 22:30.
+//  - While BK stays open: checks every 30 s and makes the backup once the chosen time (系統設置 › 備份) arrives.
 export default function BackupGuard() {
   const [missed, setMissed] = useState([])
   const [busy, setBusy] = useState(false)
@@ -64,11 +71,11 @@ export default function BackupGuard() {
 
   useEffect(() => {
     refresh()
-    // The 30 s tick only has something to do around the 22:30 backup time, so
-    // outside 22:00–23:59 (Brisbane) — or while the tab is hidden — it skips the
-    // two Supabase reads. Opening BK and the change event still refresh at once.
+    // The 30 s tick only has something to do once the backup time has passed and
+    // today's backup is still missing; otherwise (or while the tab is hidden) it
+    // skips the two Supabase reads. Opening BK and the change event still refresh at once.
     const id = setInterval(() => {
-      if (document.hidden || !nearBackupTime()) return
+      if (document.hidden || !backupPending(stateRef.current)) return
       refresh()
     }, 30000)
     const onChange = () => refresh()
@@ -128,7 +135,7 @@ export default function BackupGuard() {
       }
     >
       <div className="space-y-3 text-sm">
-        <p>下面這幾天晚上 10:30 的自動備份沒有成功：</p>
+        <p>下面這幾天（{backupTimeLabel()}）的自動備份沒有成功：</p>
         <ul className="list-disc space-y-1 pl-5">
           {missed.map((m) => (
             <li key={m.day}>

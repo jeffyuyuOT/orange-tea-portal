@@ -4,6 +4,7 @@ import { Notice } from '../bkUi'
 import { BACKUP_CHANGED_EVENT } from '../BackupGuard'
 import {
   autoBackupSupported,
+  backupTimeLabel,
   brisbaneDayStr,
   dirPermission,
   forgetBackupDir,
@@ -12,13 +13,14 @@ import {
   missedDays,
   pickBackupDir,
   runAutoBackup,
+  saveBackupTime,
   setBackupEnabled,
 } from '../bkBackup'
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane', hour12: false }) : '')
 
 // 系統設置 › 備份 › 自動備份 (browser version): pick a folder, switch on the
-// nightly 22:30 backup, see the last results.
+// nightly backup (time is chosen here), see the last results.
 export default function AutoBackupPanel() {
   const [state, setState] = useState(null)
   const [dir, setDir] = useState(null)
@@ -26,11 +28,14 @@ export default function AutoBackupPanel() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
+  const [timeInput, setTimeInput] = useState('22:30')
   const supported = autoBackupSupported()
 
   const load = useCallback(async () => {
     try {
-      setState(await loadBackupState())
+      const st = await loadBackupState()
+      setState(st)
+      setTimeInput(backupTimeLabel())
       const h = await getBackupDir()
       setDir(h)
       setPerm(h ? await dirPermission(h) : '')
@@ -82,6 +87,12 @@ export default function AutoBackupPanel() {
       if (state.settings.enabled) await setBackupEnabled(false)
       await changed()
     })
+  const saveTime = () =>
+    guarded(async () => {
+      await saveBackupTime(timeInput)
+      setMsg(`已儲存：每天 ${timeInput}（布里斯本時間）自動備份。`)
+      await changed()
+    })
   const testNow = () =>
     guarded(async () => {
       const r = await runAutoBackup(dir, brisbaneDayStr(), { manual: true })
@@ -98,7 +109,7 @@ export default function AutoBackupPanel() {
     <div className="space-y-3">
       <h3 className="font-semibold text-brand-900">自動備份（瀏覽器版）</h3>
       <Notice kind="info">
-        每天晚上 10:30（布里斯本時間）自動把 BK 全部資料備份成一個檔案到你指定的資料夾，檔名 bk-backup-日期.json。瀏覽器版有幾個限制：一定要用 Chrome / Edge、OT Portal 已登入、而且 BK 頁面開著（可以在背景分頁）才會執行；沒登入或瀏覽器沒開就不會備份——下次進入 BK 頁面時會跳出警示說明哪一天沒成功。重新開啟瀏覽器後，可能要在這裡按一次「重新授權」。
+        每天在下面設定的時間（布里斯本時間）自動把 BK 全部資料備份成一個檔案到你指定的資料夾，檔名 bk-backup-日期.json。瀏覽器版有幾個限制：一定要用 Chrome / Edge、OT Portal 已登入、而且 BK 頁面開著（可以在背景分頁）才會執行；沒登入或瀏覽器沒開就不會備份——下次進入 BK 頁面時會跳出警示說明哪一天沒成功。重新開啟瀏覽器後，可能要在這裡按一次「重新授權」。
       </Notice>
       {!supported && <Notice kind="error">這個瀏覽器不支援選擇資料夾，請改用 Chrome 或 Edge。</Notice>}
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
@@ -131,6 +142,20 @@ export default function AutoBackupPanel() {
           </div>
         </div>
         <p className="mt-1 text-xs text-gray-400">資料夾只記在這台電腦的這個瀏覽器；換電腦或瀏覽器要重新選擇。</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand-100 bg-white p-3 text-sm">
+        <span className="text-gray-500">自動備份時間（布里斯本）：</span>
+        <input
+          type="time"
+          className="rounded-lg border border-brand-200 px-2 py-1 text-sm"
+          value={timeInput}
+          onChange={(e) => setTimeInput(e.target.value)}
+        />
+        <Button variant="secondary" onClick={saveTime} disabled={busy || !timeInput || timeInput === backupTimeLabel()}>
+          儲存時間
+        </Button>
+        <span className="text-xs text-gray-400">目前：每天 {backupTimeLabel()}。電腦要在那個時間開著、BK 頁面開著才會備份。</span>
       </div>
 
       <div className="flex items-center gap-3">
