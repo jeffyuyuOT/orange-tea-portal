@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { checkForAppUpdate } from '../../../lib/pwaUpdate'
-import { getPushPermissionState, subscribeToPush, unsubscribeFromPush } from '../../../lib/webPush'
+import { getPushPermissionState, relinkPush, subscribeToPush, unsubscribeFromPush } from '../../../lib/webPush'
 import Button from '../../../components/ui/Button'
 import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
 import MyStaffIdModal from './MyStaffIdModal'
@@ -31,21 +31,24 @@ export default function MyInformationPage() {
   }
 
   useEffect(() => {
-    getPushPermissionState().then(setPushState)
-  }, [])
+    if (profile?.id) getPushPermissionState(profile.id).then(setPushState)
+  }, [profile?.id])
 
   async function handleTogglePush() {
     setPushState('working')
     try {
-      if ((await getPushPermissionState()) === 'on') {
+      const current = await getPushPermissionState(profile.id)
+      if (current === 'on') {
         await unsubscribeFromPush()
+      } else if (current === 'other') {
+        await relinkPush(profile.id)
       } else {
         await subscribeToPush(profile.id)
       }
     } catch (e) {
       alert(e.message)
     }
-    setPushState(await getPushPermissionState())
+    setPushState(await getPushPermissionState(profile.id))
   }
 
   useEffect(() => {
@@ -200,9 +203,23 @@ export default function MyInformationPage() {
           ) : pushState === 'denied' ? (
             <p className="text-sm text-gray-500">Notification permission was denied — turn it on from your phone/browser's notification settings.</p>
           ) : (
-            <Button variant="secondary" onClick={handleTogglePush} disabled={pushState === 'working' || pushState === ''}>
-              {pushState === 'working' ? 'Working…' : pushState === 'on' ? '🔕 Turn off push notifications' : '🔔 Turn on push notifications'}
-            </Button>
+            <>
+              <Button variant="secondary" onClick={handleTogglePush} disabled={pushState === 'working' || pushState === ''}>
+                {pushState === 'working'
+                  ? 'Working…'
+                  : pushState === 'on'
+                    ? '🔕 Turn off push notifications'
+                    : pushState === 'other'
+                      ? '🔔 Link this device to my account'
+                      : '🔔 Turn on push notifications'}
+              </Button>
+              {pushState === 'on' && <span className="text-sm text-green-600">On for this account</span>}
+              {pushState === 'other' && (
+                <span className="text-sm text-amber-600">
+                  Push on this device is not linked to this account (it may be linked to another account).
+                </span>
+              )}
+            </>
           )}
         </div>
       </section>
