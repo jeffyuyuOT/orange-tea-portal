@@ -27,12 +27,14 @@ export default function NavBadge({ badge, corner }) {
   // counts, so a fake number there would be misleading — and just making the
   // dot itself bigger and higher-contrast (added a white ring on the corner
   // variant so it reads clearly against any background it sits on).
+  // Jeff, 2026-10-21 (follow-up): still looked small on the My Dashboard home
+  // grid card — sized up again (14px -> 18px on the corner variant).
   return (
     <span
       className={
         corner
-          ? 'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-red-500 shadow'
-          : 'h-2.5 w-2.5 rounded-full bg-red-500'
+          ? 'absolute -right-1.5 -top-1.5 h-[18px] w-[18px] rounded-full border-2 border-white bg-red-500 shadow'
+          : 'h-3 w-3 rounded-full bg-red-500'
       }
       aria-label="Update"
     />

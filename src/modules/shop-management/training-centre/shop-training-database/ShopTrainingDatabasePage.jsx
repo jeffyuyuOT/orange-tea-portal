@@ -32,6 +32,20 @@ import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker
 // that tab is unaffected/still there, this is just a second, inline place to
 // set the same training_journey_phase column). "copy to store也會將phase
 // assign設定copy過去" — CopyToStoreModal's insert carries it over too.
+//
+// Jeff, 2026-10-22: "admin在shop training database在改有copy到其他店的资料
+// 时，save旁有多一个Save to Multiple Stores。這樣的話之前有copy到其他分店的
+// 同樣資料就會一起更改" — an item copied via "Copy to store…" now carries a
+// shared `copy_group_id` (migration 0135) linking it to every copy that was
+// made from it (or that it was made from). EditModal's footer gets a second
+// "Save to Multiple Stores" button, shown only when the item being edited
+// has that group id, which pushes title/content/flags/files to every linked
+// row at once — `store_id` and `sort_order` are never touched, so each
+// store keeps its own position in its own list. The plain "Save" button is
+// unchanged and only ever touches this one row. Also answers Jeff's "only
+// admin?" question: it's `isAdmin` below, which is admin + developer (see
+// the 2026-09 note just under this one) — shop_manager never gets either
+// button.
 export default function ShopTrainingDatabasePage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [items, setItems] = useState([])
@@ -133,6 +147,7 @@ export default function ShopTrainingDatabasePage() {
                     </span>
                   )}
                   {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
+                  {item.copy_group_id && <Badge color="brand">🔗 Linked across stores</Badge>}
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
                   <button
@@ -186,6 +201,7 @@ export default function ShopTrainingDatabasePage() {
           profileId={profile.id}
           profileName={`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email}
           isAdmin={isAdmin}
+          accessibleStores={accessibleStores}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -200,6 +216,13 @@ export default function ShopTrainingDatabasePage() {
           currentStoreId={currentStoreId}
           accessibleStores={accessibleStores}
           onClose={() => setCopyingItem(null)}
+          onCopied={() => {
+            setCopyingItem(null)
+            // Refreshes this store's own list so the source item's new
+            // "🔗 Linked across stores" badge (set the first time an item is
+            // copied) shows up immediately, without a manual page refresh.
+            load()
+          }}
         />
       )}
     </div>
@@ -212,8 +235,12 @@ export default function ShopTrainingDatabasePage() {
 // without the person needing to resize/compress first).
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
-function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName, isAdmin, onClose, onSaved }) {
+function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName, isAdmin, accessibleStores, onClose, onSaved }) {
   const isNew = !item.id
+  // Set once this item has ever been through "Copy to store…" (by itself or
+  // by whichever copy it came from) — null for an item that's never been
+  // copied anywhere, in which case there's nothing else to push an edit to.
+  const copyGroupId = item.copy_group_id ?? null
   const [title, setTitle] = useState(item.title ?? '')
   const [content, setContent] = useState(item.content_html ?? '')
   const [visible, setVisible] = useState(item.visible_to_training ?? false)
@@ -342,6 +369,68 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
     onSaved()
   }
 
+  // Pushes this same title/content/flags/files to every row sharing this
+  // item's copy_group_id (every store a copy of this item landed in, plus
+  // the item it was itself copied from) — everything "Save" would write for
+  // this one row, written to all of them in one go. Never touches store_id
+  // or sort_order, so each store keeps its own position in its own list.
+  async function saveToMultiple() {
+    if (!copyGroupId) return
+    if (mustKnow && !trainingPhase) {
+      alert('Must-Know items need a Phase 1–3 Training Journey assignment — pick one below.')
+      return
+    }
+    const { data: group, error: groupError } = await supabase
+      .from('shop_training_items')
+      .select('id, store_id')
+      .eq('copy_group_id', copyGroupId)
+    if (groupError || !group?.length) {
+      alert(groupError?.message || 'Could not find the linked copies.')
+      return
+    }
+    const storeNames = group
+      .map((row) => accessibleStores?.find((s) => s.id === row.store_id)?.name)
+      .filter(Boolean)
+    const storeList = storeNames.length === group.length ? ` (${storeNames.join(', ')})` : ''
+    if (
+      !confirm(
+        `Save this content to all ${group.length} linked store cop${group.length === 1 ? 'y' : 'ies'}${storeList}? This overwrites the title, content, flags and attached files at every one of them — each store's own sort order is left as-is.`
+      )
+    ) {
+      return
+    }
+    setSaving(true)
+    const nonEmptyFiles = files.filter((f) => f.file_path)
+    for (const row of group) {
+      await supabase
+        .from('shop_training_items')
+        .update({
+          title,
+          content_html: content,
+          visible_to_training: visible,
+          is_must_know: mustKnow,
+          training_journey_phase: trainingPhase,
+          updated_by: profileId,
+          updated_by_name: profileName,
+        })
+        .eq('id', row.id)
+      await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', row.id)
+      if (nonEmptyFiles.length) {
+        await supabase.from('shop_training_item_files').insert(
+          nonEmptyFiles.map((f, idx) => ({
+            shop_training_item_id: row.id,
+            display_name: f.display_name?.trim() || 'File',
+            file_path: f.file_path,
+            sort_order: idx,
+            uploaded_by: profileId,
+          }))
+        )
+      }
+    }
+    setSaving(false)
+    onSaved()
+  }
+
   return (
     <>
     <Modal
@@ -350,9 +439,20 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
       wide
       title={isNew ? 'New Training Item' : 'Edit Training Item'}
       footer={
-        <Button onClick={save} disabled={saving || !title || (mustKnow && !trainingPhase)}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          {isAdmin && copyGroupId && (
+            <Button
+              variant="secondary"
+              onClick={saveToMultiple}
+              disabled={saving || !title || (mustKnow && !trainingPhase)}
+            >
+              {saving ? 'Saving…' : 'Save to Multiple Stores'}
+            </Button>
+          )}
+          <Button onClick={save} disabled={saving || !title || (mustKnow && !trainingPhase)}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       }
     >
       <div className="space-y-3">
@@ -473,9 +573,12 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
 // Admin-only: duplicates one item (title, content, "visible to training",
 // and every attached file) straight into one or more other stores, each as
 // its own brand-new row/id — the same as if that store's manager had
-// created it themselves. The two copies are independent from that point on;
-// editing this store's item afterwards does not touch the copies.
-function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
+// created it themselves. Each copy can still be edited on its own
+// afterwards, but it now shares a `copy_group_id` with the item it was
+// copied from (and with every other copy made from that same item), so
+// EditModal's "Save to Multiple Stores" button can find and update them
+// all together later.
+function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onCopied }) {
   const targets = accessibleStores.filter((s) => s.id !== currentStoreId)
   const [selected, setSelected] = useState(new Set())
   const [copying, setCopying] = useState(false)
@@ -493,12 +596,22 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
     if (!selected.size) return
     if (
       !confirm(
-        `Copy "${item.title}" to ${selected.size} store(s)? This adds a new, independent copy at each — it won't stay linked to this one.`
+        `Copy "${item.title}" to ${selected.size} store(s)? Each store gets its own copy you can still edit separately — but afterwards, "Save to Multiple Stores" on any of them (including this one) pushes an edit to every linked copy at once.`
       )
     ) {
       return
     }
     setCopying(true)
+
+    // Give the source item a group id (shared by every copy made from it)
+    // the first time it's ever copied, so this copy — and any later one —
+    // can all be found and updated together via "Save to Multiple Stores".
+    let groupId = item.copy_group_id
+    if (!groupId) {
+      groupId = crypto.randomUUID()
+      await supabase.from('shop_training_items').update({ copy_group_id: groupId }).eq('id', item.id)
+    }
+
     const { data: sourceFiles } = await supabase
       .from('shop_training_item_files')
       .select('*')
@@ -525,6 +638,7 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
           // destination store, leaving the copy's Training Journey placement
           // to be redone by hand).
           training_journey_phase: item.training_journey_phase,
+          copy_group_id: groupId,
           sort_order: count ?? 0,
           store_id: storeId,
         })
@@ -546,7 +660,7 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose }) {
       }
     }
     setCopying(false)
-    onClose()
+    onCopied()
     alert(failCount ? `Copied, but ${failCount} store(s) failed.` : `Copied to ${selected.size} store(s).`)
   }
 
