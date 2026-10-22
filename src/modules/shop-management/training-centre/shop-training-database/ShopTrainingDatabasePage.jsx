@@ -46,6 +46,15 @@ import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker
 // admin?" question: it's `isAdmin` below, which is admin + developer (see
 // the 2026-09 note just under this one) — shop_manager never gets either
 // button.
+//
+// Jeff, 2026-10-22 (same day, follow-up): "還有copy到其他store，如果有同名的
+// item，先視窗提醒有同名item是否覆蓋，確認則覆蓋" — CopyToStoreModal's copy()
+// now checks each destination store for an item whose title matches (case-
+// insensitive) before inserting. A match asks to confirm per store ("already
+// has an item named … — overwrite it?"); confirming overwrites that existing
+// row in place (and joins it into this item's copy_group_id) instead of
+// creating a second item with the same name; declining leaves that one store
+// untouched and still copies to any other selected stores with no conflict.
 export default function ShopTrainingDatabasePage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [items, setItems] = useState([])
@@ -618,8 +627,69 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onC
       .eq('shop_training_item_id', item.id)
       .order('sort_order')
 
+    let copiedCount = 0
+    let overwrittenCount = 0
+    let skippedCount = 0
     let failCount = 0
+    const title = item.title.trim()
+
     for (const storeId of selected) {
+      const storeName = accessibleStores.find((s) => s.id === storeId)?.name ?? 'that store'
+
+      // Jeff, 2026-10-22: "如果有同名的item，先視窗提醒有同名item是否覆蓋，
+      // 確認則覆蓋" — look for an item already sitting at this destination
+      // store under the same name (case-insensitive) before adding a second
+      // one. .limit(1) rather than .single()/.maybeSingle(), since a store
+      // could in principle already have more than one same-named item (e.g.
+      // from before this check existed) — overwriting just the first match
+      // is enough to stop a brand-new duplicate from being created here.
+      const { data: existingRows } = await supabase
+        .from('shop_training_items')
+        .select('id')
+        .eq('store_id', storeId)
+        .ilike('title', title)
+        .limit(1)
+      const existing = existingRows?.[0]
+
+      if (existing) {
+        if (
+          !confirm(
+            `${storeName} already has a training item named "${item.title}". Overwrite it with this copy? (Choosing Cancel leaves it untouched and skips this store.)`
+          )
+        ) {
+          skippedCount += 1
+          continue
+        }
+        const { error } = await supabase
+          .from('shop_training_items')
+          .update({
+            title: item.title,
+            content_html: item.content_html,
+            visible_to_training: item.visible_to_training,
+            is_must_know: item.is_must_know,
+            training_journey_phase: item.training_journey_phase,
+            copy_group_id: groupId,
+          })
+          .eq('id', existing.id)
+        if (error) {
+          failCount += 1
+          continue
+        }
+        await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', existing.id)
+        if (sourceFiles?.length) {
+          await supabase.from('shop_training_item_files').insert(
+            sourceFiles.map((f) => ({
+              shop_training_item_id: existing.id,
+              display_name: f.display_name,
+              file_path: f.file_path,
+              sort_order: f.sort_order,
+            }))
+          )
+        }
+        overwrittenCount += 1
+        continue
+      }
+
       const { count } = await supabase
         .from('shop_training_items')
         .select('id', { count: 'exact', head: true })
@@ -658,10 +728,16 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onC
           }))
         )
       }
+      copiedCount += 1
     }
     setCopying(false)
     onCopied()
-    alert(failCount ? `Copied, but ${failCount} store(s) failed.` : `Copied to ${selected.size} store(s).`)
+    const parts = []
+    if (copiedCount) parts.push(`copied to ${copiedCount} store(s)`)
+    if (overwrittenCount) parts.push(`overwrote the same-named item at ${overwrittenCount} store(s)`)
+    if (skippedCount) parts.push(`left ${skippedCount} store(s) unchanged`)
+    if (failCount) parts.push(`${failCount} store(s) failed`)
+    alert(parts.length ? `${parts.join(', ')}.` : 'Nothing was copied.')
   }
 
   return (
