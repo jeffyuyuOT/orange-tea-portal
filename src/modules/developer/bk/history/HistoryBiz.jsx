@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
-import { brisbaneToday, brisbaneTodayStr, fmtMoney, monthDates, round2, weekdayOf } from '../bkUtils'
+import { brisbaneToday, fmtMoney, monthDates, round2, weekdayOf } from '../bkUtils'
 import { loadPublicHolidays, loadSalesAll, loadSalesNotesAll, loadSfPostAll } from '../bkSalesData'
 import { loadHourSalesRange, loadHourSettings } from '../bkHourData'
 import { averageByHour, hourlyByDay, hoursFor, settingsMap } from '../bkHourly'
@@ -175,8 +175,7 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   const records = useMemo(() => aggregateDays(storeDays, scopeIds), [storeDays, scopeIds])
   const years = useMemo(() => recordYears(records), [records])
   const events = useMemo(
-    // Jeff, 2026-10-17: dates that haven't happened yet (e.g. next year's holidays from the payroll list) have no figures — left out.
-    () => (data ? withSales(buildEvents(data.notes, data.holidays, scopeIds), records).filter((e) => e.date <= brisbaneTodayStr()) : []),
+    () => (data ? withSales(buildEvents(data.notes, data.holidays, scopeIds), records) : []),
     [data, scopeIds, records]
   )
 
@@ -191,8 +190,13 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   }
 
   // 小時統計 button of a detail row. spec = { type:'day', date } | { type:'weekday', index, year, filter }.
+  // Hour data is keyed by the SF / U帳 stores, so the chosen 營業 stores are mapped through their SF link.
   async function openHours(spec, title) {
-    const ids = scopeIds
+    const ids = scopeIds.map((id) => salesStores.find((s) => s.id === id)?.sf_store_id).filter(Boolean)
+    if (ids.length === 0) {
+      setHourView({ title, message: '這家店沒有連到 SF / U帳 的分店，所以沒有小時營業額資料。' })
+      return
+    }
     setHourView({ title, loading: true })
     try {
       const from = spec.type === 'day' ? spec.date : `${spec.year}-01-01`
