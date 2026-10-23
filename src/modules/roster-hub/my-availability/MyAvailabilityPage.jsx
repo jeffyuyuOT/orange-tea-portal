@@ -68,6 +68,7 @@ export default function MyAvailabilityPage() {
           locked={locked}
           savingLock={savingLock}
           onToggleLocked={toggleLocked}
+          isThisWeek
         />
         <AvailabilityWeekSection
           title="Next Week"
@@ -84,7 +85,7 @@ export default function MyAvailabilityPage() {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLock, onToggleLocked }) {
+function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLock, onToggleLocked, isThisWeek = false }) {
   const dates = weekDatesFrom(weekStart)
   const [editState, setEditState] = useState(null) // null while loading; then { 'yyyy-MM-dd': {mode, boundaryTime, windows} }
   const [saving, setSaving] = useState(false)
@@ -153,8 +154,65 @@ function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLo
       return
     }
     const { error } = await saveWeekAvailability(profileId, weekStart, editState)
+    if (error) {
+      setSaving(false)
+      setMessage(`Error: ${error.message}`)
+      return
+    }
+
+    if (!isThisWeek || !locked) {
+      setSaving(false)
+      setMessage('Availability saved.')
+      return
+    }
+
+    // Jeff, 2026-10-24: "我lock time pattern,但這禮拜跟下禮拜的時間應該要同
+    // 步? 禮拜天還是不一樣" — migration 0088's weekly cron only ever copies
+    // THIS week's pattern into NEXT week once, early Monday morning
+    // (Brisbane), and only into a next-week day that has no row at all yet
+    // — so an edit to This Week made any time after that (exactly what
+    // happened here: Sunday got flipped to Available after this week's own
+    // Monday-morning copy had already run and already written next week's
+    // Sunday as Unavailable) never reaches next week on its own — that
+    // boundary has already passed and the cron never revisits it. Pushing
+    // the save straight into next week right here, the moment This Week is
+    // actually saved, is what actually keeps the two in sync the way "Lock
+    // time pattern" implies, instead of relying entirely on Sunday night's
+    // job. The cron is left exactly as-is — it's still what carries a
+    // locked pattern forward for someone who never touches This Week again
+    // after it's already been auto-copied once.
+    const nextWeekStartStr = format(addDays(parseISO(weekStart), 7), 'yyyy-MM-dd')
+    const nextDates = weekDatesFrom(nextWeekStartStr)
+    const proposedNextByDate = {}
+    dates.forEach((d, i) => {
+      proposedNextByDate[nextDates[i]] = editState[d]
+    })
+    // Same leave-conflict check, re-run against next week's own calendar
+    // dates — a day that would overlap leave already approved for NEXT week
+    // keeps whatever next week already had (loaded fresh) instead of being
+    // silently overwritten with This Week's pattern, the same "never
+    // clobber a legitimate override" rule the cron job itself follows for
+    // an already-populated day.
+    const proposedNextForCheck = Object.fromEntries(nextDates.map((d) => [d, editDayToRowShape(proposedNextByDate[d])]))
+    const nextConflicts = findLeaveConflicts(proposedNextForCheck, leaves ?? [])
+    if (nextConflicts.length) {
+      const conflictDates = new Set(nextConflicts.map((c) => c.dateStr))
+      const existingNext = await loadWeekAvailability(profileId, nextWeekStartStr)
+      conflictDates.forEach((d) => {
+        proposedNextByDate[d] = rowToEditDay(existingNext[d])
+      })
+    }
+    const { error: syncError } = await saveWeekAvailability(profileId, nextWeekStartStr, proposedNextByDate)
     setSaving(false)
-    setMessage(error ? `Error: ${error.message}` : 'Availability saved.')
+    if (syncError) {
+      setMessage(`Availability saved, but syncing to next week failed: ${syncError.message}`)
+      return
+    }
+    setMessage(
+      nextConflicts.length
+        ? `Availability saved and synced to next week (${nextConflicts.length} day${nextConflicts.length > 1 ? 's' : ''} left as-is — conflicts with leave).`
+        : 'Availability saved and synced to next week.'
+    )
   }
 
   const weekEnd = format(addDays(parseISO(weekStart), 6), 'yyyy-MM-dd')
@@ -181,6 +239,9 @@ function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLo
           </Button>
         </div>
       </div>
+      {locked && isThisWeek && (
+        <p className="mb-2 text-xs text-gray-400">Saving This Week will also copy it into Next Week.</p>
+      )}
 
       {!editState ? (
         <LoadingSpinner />
