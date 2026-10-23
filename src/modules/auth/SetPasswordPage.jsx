@@ -22,12 +22,32 @@ import AuthLayout from './AuthLayout'
 // Either way, once there's a session the same "set a new password" form
 // works whether this is a brand new account (invite), a reset, or a
 // voluntary change from someone already logged in.
+//
+// Jeff, 2026-10-24: "手機登入顯示錯誤訊息" — this screen (via a reset-password
+// link) was showing "AAL2 session is required to update email or password
+// when MFA is enabled." instead of actually setting the password. Root
+// cause: Jeff's own account has a verified TOTP factor enrolled (the
+// "Payroll/BK" authenticator) — Supabase's own security rule is that once
+// ANY MFA factor is enrolled, changing that account's password/email
+// requires an AAL2 session (i.e. the person has to prove they still hold
+// the authenticator, not just a password-reset email link), and the
+// invite/reset-link session this page establishes is only ever AAL1. This
+// isn't a bug to "turn off" — it's exactly the protection enrolling MFA on
+// the Payroll/BK account was for — so the fix is to actually let someone in
+// that position step up to AAL2 right here (enter the 6-digit code from
+// their authenticator) instead of just hitting a dead end. Nobody else in
+// this app has an MFA factor enrolled today, so in practice only Jeff's own
+// account will ever see the new "mfa" step below — everyone else's password
+// change still goes straight through exactly as before.
 export default function SetPasswordPage() {
   const navigate = useNavigate()
-  const [status, setStatus] = useState('checking') // checking | ready | invalid | done
+  const [status, setStatus] = useState('checking') // checking | ready | invalid | done | mfa
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaFactorId, setMfaFactorId] = useState('')
+  const [mfaSubmitting, setMfaSubmitting] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -94,6 +114,56 @@ export default function SetPasswordPage() {
     }
     const { error: updateError } = await supabase.auth.updateUser({ password })
     if (updateError) {
+      // Supabase's documented code for exactly this case (see Error Codes
+      // reference): the account has an MFA factor enrolled, and this
+      // session hasn't proven it yet. Step up right here instead of just
+      // showing the raw message as a dead end.
+      if (updateError.code === 'insufficient_aal') {
+        const { data: factorsData, error: factorsError } = await supabase.auth.mfa.listFactors()
+        const totpFactor = factorsData?.totp?.find((f) => f.status === 'verified')
+        if (factorsError || !totpFactor) {
+          setError('This account has two-factor authentication enabled, but its authenticator could not be found. Contact an admin.')
+          return
+        }
+        setMfaFactorId(totpFactor.id)
+        setStatus('mfa')
+        return
+      }
+      setError(updateError.message)
+      return
+    }
+    setStatus('done')
+    setTimeout(() => navigate('/', { replace: true }), 1500)
+  }
+
+  // Challenge + verify the enrolled TOTP factor to raise this session from
+  // AAL1 to AAL2 (supabase-js refreshes the session for us the moment
+  // verify() succeeds), then retry the exact same password update that
+  // triggered the step-up in the first place.
+  async function handleMfaSubmit(e) {
+    e.preventDefault()
+    setError('')
+    const code = mfaCode.trim()
+    if (!/^\d{6}$/.test(code)) {
+      setError('Enter the 6-digit code from your authenticator app.')
+      return
+    }
+    setMfaSubmitting(true)
+    const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: mfaFactorId })
+    if (challengeError) {
+      setMfaSubmitting(false)
+      setError(challengeError.message)
+      return
+    }
+    const { error: verifyError } = await supabase.auth.mfa.verify({ factorId: mfaFactorId, challengeId: challengeData.id, code })
+    if (verifyError) {
+      setMfaSubmitting(false)
+      setError(verifyError.message)
+      return
+    }
+    const { error: updateError } = await supabase.auth.updateUser({ password })
+    setMfaSubmitting(false)
+    if (updateError) {
       setError(updateError.message)
       return
     }
@@ -105,6 +175,37 @@ export default function SetPasswordPage() {
     return (
       <AuthLayout title="Set password">
         <p className="text-sm text-gray-500">Verifying your link…</p>
+      </AuthLayout>
+    )
+  }
+
+  if (status === 'mfa') {
+    return (
+      <AuthLayout title="Enter your authenticator code">
+        <p className="mb-4 text-sm text-gray-600">
+          This account has two-factor authentication enabled. Enter the 6-digit code from your authenticator app to
+          confirm the password change.
+        </p>
+        <form onSubmit={handleMfaSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">Authenticator code</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              required
+              autoFocus
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-center text-lg tracking-widest focus:border-brand-400 focus:outline-none"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Button type="submit" className="w-full" disabled={mfaSubmitting}>
+            {mfaSubmitting ? 'Verifying…' : 'Confirm'}
+          </Button>
+        </form>
       </AuthLayout>
     )
   }
