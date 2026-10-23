@@ -63,6 +63,16 @@ export default function RosterEntryGrid({
   // reverts or blocks the entry.
   const [conflictWarning, setConflictWarning] = useState(null)
 
+  // Jeff, 2026-10-24: "手機板manage roster時，如果點擊員工的名字，上面會顯示
+  // 該員工這個禮拜目前牌的時間" — mobile's day-tabs (below) only ever show
+  // ONE day's Start/End per staff card at a time, so seeing someone's whole
+  // week means tapping through all 7 day tabs while re-finding their row
+  // each time. Tapping their name instead pops up every day's shift for
+  // THAT person in one readable list, independent of whichever day tab is
+  // currently selected. Desktop already shows the full week in one row per
+  // person (the table above), so this is mobile-only — see MobileStaffCard.
+  const [weekSummaryRow, setWeekSummaryRow] = useState(null)
+
   // Jeff, 2026-10-02 (Training Journey spec, point 6): System Setting >
   // Roster Name Display Format + the 6 phase definitions — same fetch-once
   // pattern as RosterWeekTable.jsx (shared Bulletin/My Roster view), which
@@ -421,6 +431,7 @@ export default function RosterEntryGrid({
                 onCheckConflict={checkConflict}
                 displayFormat={displayFormat}
                 phases={phases}
+                onShowWeek={() => setWeekSummaryRow(row)}
               />
             )
           })}
@@ -465,6 +476,39 @@ export default function RosterEntryGrid({
               </>
             )}
           </p>
+        )}
+      </Modal>
+
+      <Modal open={!!weekSummaryRow} onClose={() => setWeekSummaryRow(null)} title={weekSummaryRow ? `${weekSummaryRow.name}'s week` : ''}>
+        {weekSummaryRow && (
+          <div className="space-y-2">
+            {weekDates.map((date) => {
+              const entry = findEntry(weekSummaryRow, date)
+              const hasShift = entry?.startTime !== '' && entry?.startTime != null && entry?.endTime !== '' && entry?.endTime != null
+              return (
+                <div key={date} className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-800">{weekdayLabel(date)}</div>
+                    <div className="text-xs text-gray-400">{format(parseISO(date), 'd MMM')}</div>
+                  </div>
+                  {hasShift ? (
+                    <div className="text-right">
+                      <div className="text-base font-semibold text-brand-700">
+                        {minutesToLabel(Math.round(Number(entry.startTime) * 60))} – {minutesToLabel(Math.round(Number(entry.endTime) * 60))}
+                      </div>
+                      <div className="text-xs text-gray-400">{dayHours(entry)} hr worked</div>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-300">Off</span>
+                  )}
+                </div>
+              )
+            })}
+            <div className="flex items-center justify-between border-t border-brand-100 pt-2 text-sm font-semibold text-brand-800">
+              <span>Week total</span>
+              <span>{rowTotals(weekSummaryRow).total || 0} hr</span>
+            </div>
+          </div>
         )}
       </Modal>
     </div>
@@ -606,7 +650,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
 // instead of two wide table rows. Wk/WKD totals still reflect the whole
 // week (computed the same way as desktop) so switching days doesn't lose
 // sight of the running total.
-function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases }) {
+function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, onShowWeek }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -634,10 +678,17 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
     <div className="flex flex-wrap items-center gap-1 p-2">
       <div className="min-w-0 flex-1">
         {row.profileId ? (
-          <span
-            className={`block truncate text-xs font-medium ${displayFormat === 'original' && notQualified ? 'text-red-600' : 'text-gray-800'}`}
+          // Jeff, 2026-10-24: tap the name to see this person's whole week
+          // (every day's shift, not just the currently-selected day tab) —
+          // see the week-summary modal in RosterEntryGrid above. Underline
+          // is the only visual hint it's tappable (not a button-ish look),
+          // so it still reads as a name first.
+          <button
+            type="button"
+            onClick={() => onShowWeek?.(row)}
+            className={`block w-full truncate text-left text-xs font-medium underline decoration-dotted decoration-gray-300 underline-offset-2 ${displayFormat === 'original' && notQualified ? 'text-red-600' : 'text-gray-800'}`}
             style={colorStyle}
-            title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : row.name}
+            title={displayFormat === 'original' && notQualified ? 'Not yet Qualified — tap to see this week' : `Tap to see ${row.name}'s week`}
           >
             {row.name || <span className="text-gray-400">Unnamed</span>}
             {titleStyle?.icon && (
@@ -646,7 +697,7 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
               </span>
             )}
             {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}
-          </span>
+          </button>
         ) : (
           <input
             className="input !py-1 text-xs"
