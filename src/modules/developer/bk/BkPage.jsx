@@ -40,12 +40,12 @@ import BackupGuard from './BackupGuard'
 //     used to just switch a local sub-tab back to the sheet, now has to jump
 //     to a different top-level tab AND tell it which store/month to open).
 const TABS = [
-  ['sf', 'Sales figure'],
-  ['biz', '營業'],
-  ['hours', '小時統計'],
-  ['u', 'U帳'],
+  ['sf', '消費展望'],
+  ['biz', '鷹眼'],
+  ['hours', 'HA'],
+  ['u', 'SL'],
   ['bonus', '收成'],
-  ['owed', '積欠'],
+  ['owed', '機件'],
   ['history', '歷史紀錄'],
   ['settings', '系統設置'],
 ]

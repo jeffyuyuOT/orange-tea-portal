@@ -6,9 +6,9 @@ import HistoryBonusView from './HistoryBonusView'
 import HistoryBiz from './HistoryBiz'
 
 const SUBTABS = [
-  ['sf', 'SF'],
-  ['biz', '營業'],
-  ['u', 'U帳'],
+  ['sf', '消費展望'],
+  ['biz', '鷹眼'],
+  ['u', 'SL'],
   ['bonus', '收成'],
 ]
 
