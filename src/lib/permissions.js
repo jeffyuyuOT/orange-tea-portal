@@ -154,7 +154,7 @@ export const SECTIONS = {
   developer_tools: {
     label: 'Developer',
     pages: {
-      payroll: 'Payroll',
+      payroll: 'PR',
       // Jeff, 2026-10-12: bookkeeping (記帳) page — Sales figure + U帳 so far.
       // Developer-only exactly like payroll: excluded from the admin and
       // shop_manager defaults below, and the real boundary is is_developer()

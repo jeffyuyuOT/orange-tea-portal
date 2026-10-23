@@ -43,14 +43,14 @@ const TABS = [
   ['sf', '消費展望'],
   ['biz', '鷹眼'],
   ['hours', 'HA'],
-  ['u', 'SL'],
+  ['u', 'Stock lost'],
   ['bonus', '收成'],
   ['owed', '機件'],
   ['history', '歷史紀錄'],
   ['settings', '系統設置'],
 ]
 
-const TAB_NAMES = { sf: 'Sales figure', biz: '營業', u: 'U帳' }
+const TAB_NAMES = { sf: '消費展望', biz: '鷹眼', u: 'Stock lost' }
 
 export default function BkPage() {
   const [tab, setTab] = useState('sf')

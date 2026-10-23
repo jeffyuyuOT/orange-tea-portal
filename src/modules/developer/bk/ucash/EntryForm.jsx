@@ -147,7 +147,7 @@ export default function EntryForm({ storeId, stores = [], initial = null, onSave
           </div>
           <Notice kind="info">
             {transferMode === 'loan_repay'
-              ? 'From 分店會記一筆借貸、To 分店會記一筆償還到「積欠 › 分店之間」（兩邊各自累計，不互相沖銷）。'
+              ? 'From 分店會記一筆借貸、To 分店會記一筆償還到「機件 › 分店之間」（兩邊各自累計，不互相沖銷）。'
               : '兩邊都記在 Ucost：From 分店為正數（UCOH 減少），To 分店為負數（UCOH 增加）。'}
           </Notice>
         </>

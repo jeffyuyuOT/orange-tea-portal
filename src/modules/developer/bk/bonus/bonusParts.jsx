@@ -264,7 +264,7 @@ export function PayoutForm({ stores, storeId, parties, initial = null, onSaved, 
 export function EventTable({ events, storeNames, showStore, partyNames, fullKeys, signed = false, onOpen, onNote }) {
   if (events.length === 0) return <p className="py-6 text-center text-sm text-gray-400">沒有紀錄。</p>
   const describe = (ev) => {
-    if (ev.type === 'income') return `入金 · ${BUCKET_LABELS[ev.bucket] ?? ev.bucket}${ev.source === 'ucash' ? '（U帳）' : ''}`
+    if (ev.type === 'income') return `入金 · ${BUCKET_LABELS[ev.bucket] ?? ev.bucket}${ev.source === 'ucash' ? '（Stock lost）' : ''}`
     if (ev.type === 'cost') return `Cost · ${COST_METHOD_LABELS[ev.method] ?? '（未選方式）'}`
     if (ev.type === 'selfcost') return `Party自身支出 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'}`
     return `收成 · ${partyNames[ev.partyId] ?? '（已刪除的 party）'} · ${METHOD_LABELS[ev.method] ?? ev.method}`

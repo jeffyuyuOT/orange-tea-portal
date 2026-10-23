@@ -79,18 +79,18 @@ export default function BizStoreManager({ salesStores, sfStores, onChanged }) {
   return (
     <div className="max-w-2xl space-y-3">
       <Notice kind="info">
-        只有在這裡的分店才會出現在「營業」分頁。順序由上到下 = 營業分頁的分店分頁由左到右。連結 SF 分店後，POS 會直接讀 Sales figure 的 O.POST，Self O 會是該 SF 分店 Self order kiosk 的預設值（SF 可手動改，不一致會有警示）；不連結的話 POS 要手動輸入。
+        只有在這裡的分店才會出現在「鷹眼」分頁。順序由上到下 = 鷹眼分頁的分店分頁由左到右。連結消費展望分店後，POS 會直接讀消費展望的 O.POST，Self O 會是該消費展望分店 Self order kiosk 的預設值（消費展望可手動改，不一致會有警示）；不連結的話 POS 要手動輸入。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
 
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-brand-900">營業分店（{salesStores.length}）</h3>
+        <h3 className="font-semibold text-brand-900">鷹眼分店（{salesStores.length}）</h3>
         <Button onClick={openAdd}>＋ 新增分店</Button>
       </div>
 
       {salesStores.length === 0 ? (
         <p className="rounded-xl border border-dashed border-brand-200 bg-brand-50/40 px-4 py-8 text-center text-sm text-gray-500">
-          還沒有任何營業分店。請先新增一間，「營業」分頁才會有資料可以輸入。
+          還沒有任何鷹眼分店。請先新增一間，「鷹眼」分頁才會有資料可以輸入。
         </p>
       ) : (
         <ul className="space-y-1.5">
@@ -118,7 +118,7 @@ export default function BizStoreManager({ salesStores, sfStores, onChanged }) {
               </div>
               <span className="font-medium text-gray-800">{s.name}</span>
               <span className="text-xs text-gray-400">
-                {s.sf_store_id ? `連結 SF：${sfName(s.sf_store_id) ?? '（已刪除）'}` : 'POS 手動輸入'}
+                {s.sf_store_id ? `連結消費展望：${sfName(s.sf_store_id) ?? '（已刪除）'}` : 'POS 手動輸入'}
               </span>
               <div className="ml-auto flex gap-2">
                 <Button
@@ -142,7 +142,7 @@ export default function BizStoreManager({ salesStores, sfStores, onChanged }) {
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title={editing?.id ? '編輯營業分店' : '新增營業分店'}
+        title={editing?.id ? '編輯鷹眼分店' : '新增鷹眼分店'}
         footer={
           <>
             <Button variant="secondary" onClick={() => setEditing(null)}>
@@ -162,7 +162,7 @@ export default function BizStoreManager({ salesStores, sfStores, onChanged }) {
                 autoFocus
               />
             </Field>
-            <Field label="連結 SF 分店" hint="連結後 POS 讀 SF 的 O.POST，Self O 是該 SF 分店 Self order kiosk 的預設值">
+            <Field label="連結消費展望分店" hint="連結後 POS 讀消費展望的 O.POST，Self O 是該消費展望分店 Self order kiosk 的預設值">
               <select
                 className={`${inputCls} w-full`}
                 value={editing.sfStoreId}
@@ -184,7 +184,7 @@ export default function BizStoreManager({ salesStores, sfStores, onChanged }) {
       <Modal
         open={!!deleting}
         onClose={() => setDeleting(null)}
-        title={`刪除營業分店：${deleting?.store.name ?? ''}`}
+        title={`刪除鷹眼分店：${deleting?.store.name ?? ''}`}
         footer={
           <>
             <Button variant="secondary" onClick={() => setDeleting(null)}>
@@ -200,11 +200,11 @@ export default function BizStoreManager({ salesStores, sfStores, onChanged }) {
           <div className="space-y-3 text-sm">
             {deleting.days > 0 ? (
               <Notice kind="error">
-                刪除後，這間分店在「營業」的 {deleting.days} 天資料（POS、CV、Self O、杯數）會永久消失、無法復原。
-                {deleting.store.sf_store_id && '它連結的 SF 分店之後只剩 SF 自己存的 Self order kiosk 數字，不再有營業的 Self O 可以預設。'}
+                刪除後，這間分店在「鷹眼」的 {deleting.days} 天資料（POS、CV、Self O、杯數）會永久消失、無法復原。
+                {deleting.store.sf_store_id && '它連結的消費展望分店之後只剩消費展望自己存的 Self order kiosk 數字，不再有鷹眼的 Self O 可以預設。'}
               </Notice>
             ) : (
-              <Notice kind="info">這間分店在「營業」還沒有任何資料。</Notice>
+              <Notice kind="info">這間分店在「鷹眼」還沒有任何資料。</Notice>
             )}
             <Field label={`請輸入分店名稱「${deleting.store.name}」確認刪除`}>
               <input

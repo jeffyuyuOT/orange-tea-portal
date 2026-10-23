@@ -27,7 +27,7 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
 
   useEffect(() => {
     if (!sunnybank) {
-      setState({ failed: 'BK 分店清單裡沒有「Sunnybank」，無法匯入積欠 Jeff 的紀錄。' })
+      setState({ failed: 'BK 分店清單裡沒有「Sunnybank」，無法匯入機件 Jeff 的紀錄。' })
       return
     }
     let cancelled = false
@@ -80,7 +80,7 @@ export default function JeffOwedExcelImport({ file, stores, onImported, onClose 
       open
       wide
       onClose={onClose}
-      title="匯入 Excel — 積欠 Jeff"
+      title="匯入 Excel — 機件 Jeff"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

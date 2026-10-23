@@ -91,7 +91,7 @@ export default function HoursTab({ stores, topActive = true }) {
   }
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 新增分店。</Notice>
   }
 
   const cols = hours.length + 1 + (stats.outsideAny ? 1 : 0)
@@ -117,7 +117,7 @@ export default function HoursTab({ stores, topActive = true }) {
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} allowAll allAtEnd />
       <div className="flex flex-wrap items-center gap-3">
         <YearMonthPicker year={year} month={month} onChange={(v) => (setYear(v.year), setMonth(v.month))} />
-        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › 小時統計 設定。點日期可看當天的小時分佈圖（可複製圖片）</span>
+        <span className="text-xs text-gray-400">營業額 = POS + 自動點單；顯示的時段在 系統設置 › HA 設定。點日期可看當天的小時分佈圖（可複製圖片）</span>
         <div className="ml-auto">
           <Button variant="secondary" onClick={() => setImporting(true)}>
             匯入

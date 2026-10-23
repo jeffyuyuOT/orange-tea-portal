@@ -71,7 +71,7 @@ export default function StoreManager({ stores, onChanged }) {
   return (
     <div className="max-w-2xl space-y-3">
       <Notice kind="info">
-        只有在這裡的分店才會出現在 BK 頁面（Sales figure 與 U帳）。順序由上到下 = SF 與 U帳 分店分頁由左到右。這份名單只屬於 BK，新增或刪除不會影響 OT Portal 本身的分店。
+        只有在這裡的分店才會出現在 BK 頁面（消費展望與 Stock lost）。順序由上到下 = 消費展望與 Stock lost 分店分頁由左到右。這份名單只屬於 BK，新增或刪除不會影響 OT Portal 本身的分店。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
 
@@ -183,7 +183,7 @@ export default function StoreManager({ stores, onChanged }) {
           <div className="space-y-3 text-sm">
             {hasData ? (
               <Notice kind="error">
-                刪除後，這間分店在 BK 的所有資料會一併永久消失、無法復原：Sales figure {deleting.counts.sfMonths} 個月、U帳每日紀錄{' '}
+                刪除後，這間分店在 BK 的所有資料會一併永久消失、無法復原：消費展望 {deleting.counts.sfMonths} 個月、Stock lost 每日紀錄{' '}
                 {deleting.counts.cashDays} 天、收支 {deleting.counts.entries} 筆、收成 party {deleting.counts.parties} 個、收成入金/cost {deleting.counts.dividendEntries} 筆、收成記錄 {deleting.counts.payouts} 筆，以及 payment type 設定與期初餘額。
               </Notice>
             ) : (

@@ -99,7 +99,7 @@ export default function HourImport({ stores, defaultStoreId, onImported, onClose
       open
       wide
       onClose={onClose}
-      title="匯入 小時統計"
+      title="匯入 HA"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

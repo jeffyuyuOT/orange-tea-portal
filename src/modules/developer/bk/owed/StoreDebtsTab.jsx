@@ -87,7 +87,7 @@ export default function StoreDebtsTab({ stores, topActive = true }) {
       )}
 
       <StatCard
-        label={showAll ? '總積欠（全部分店）' : `${storeName(storeId)} — 總積欠`}
+        label={showAll ? '總機件（全部分店）' : `${storeName(storeId)} — 總機件`}
         value={totalOwed}
         tone={totalOwed < 0 ? undefined : 'cost'}
         hint="借貸總額 − 償還總額（依目前篩選條件重新計算）"
@@ -96,7 +96,7 @@ export default function StoreDebtsTab({ stores, topActive = true }) {
       {loading ? (
         <LoadingSpinner />
       ) : shown.length === 0 ? (
-        <EmptyState label="還沒有符合條件的積欠紀錄。" />
+        <EmptyState label="還沒有符合條件的機件紀錄。" />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-100">
           <table className="min-w-full text-sm">

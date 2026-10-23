@@ -104,7 +104,7 @@ export default function SfHistory({ stores, salesStores, sfStoreId, active, refr
       {loading ? (
         <LoadingSpinner />
       ) : shown.length === 0 ? (
-        <EmptyState label="沒有符合的 Sales figure 紀錄。" />
+        <EmptyState label="沒有符合的消費展望紀錄。" />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-100">
           <table className="min-w-full text-sm">
@@ -134,7 +134,7 @@ export default function SfHistory({ stores, salesStores, sfStoreId, active, refr
                       <Button
                         variant="secondary"
                         disabled={r.status !== 'submitted'}
-                        title={r.status === 'submitted' ? '' : '只有已提交的 SF 才能匯出'}
+                        title={r.status === 'submitted' ? '' : '只有已提交的消費展望才能匯出'}
                         onClick={() => exportRow(r)}
                       >
                         匯出

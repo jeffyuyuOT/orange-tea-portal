@@ -48,7 +48,7 @@ export function parseBizRows(rows, { year, month, linked }) {
     else if (COMPUTED.has(k)) ignored.push({ header: label, reason: '由系統計算，不匯入' })
     else if (FIELD_BY_HEADER[k]) {
       const [field, name] = FIELD_BY_HEADER[k]
-      if (field === 'pos' && linked) ignored.push({ header: label, reason: '這間分店連結 SF，POS 讀 SF 的 O.POST，不匯入' })
+      if (field === 'pos' && linked) ignored.push({ header: label, reason: '這間分店連結消費展望，POS 讀消費展望的 O.POST，不匯入' })
       else {
         targets[i] = field
         mapped.push({ header: label, target: name })

@@ -145,7 +145,7 @@ export default function BonusHistory({ view }) {
         </>
       ) : (
       <>
-      <p className="text-xs text-gray-500">共 {rows.length} 筆。分店用上面的分店標籤篩選。點一筆可以編輯（U帳的入金要到 U帳 修改）。</p>
+      <p className="text-xs text-gray-500">共 {rows.length} 筆。分店用上面的分店標籤篩選。點一筆可以編輯（Stock lost 的入金要到 Stock lost 修改）。</p>
       <EventTable
         events={rows}
         storeNames={storeNames}

@@ -8,7 +8,7 @@ import HistoryBiz from './HistoryBiz'
 const SUBTABS = [
   ['sf', '消費展望'],
   ['biz', '鷹眼'],
-  ['u', 'SL'],
+  ['u', 'Stock lost'],
   ['bonus', '收成'],
 ]
 
@@ -22,7 +22,7 @@ export default function HistoryTab({ stores, salesStores, topActive = true, onLo
   const [sub, setSub] = useState('sf')
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › 消費展望 › 分店管理 新增分店。</Notice>
   }
 
   return (

@@ -103,7 +103,7 @@ export default function HourGridImport({ file, stores, onImported, onClose }) {
       open
       wide
       onClose={onClose}
-      title="匯入 Excel — 小時統計"
+      title="匯入 Excel — HA"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

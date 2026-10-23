@@ -59,8 +59,8 @@ export default function MyobFillModal({ open, onClose, stores, salesStores, year
     >
       <div className="space-y-3 text-sm">
         <p className="text-gray-600">
-          選會計用的 Excel（例如 sales figure - 202610.xlsx）。系統把<b>所有分店 {monthLabel(year, month)}</b> 已儲存的 Sales figure 填進對應的工作表，
-          公式和 MYOB 工作表都不動，填好後直接下載。Cash、Pos total 用 SF 計算出來的數字；Easi 固定填 0。
+          選會計用的 Excel（例如 sales figure - 202610.xlsx）。系統把<b>所有分店 {monthLabel(year, month)}</b> 已儲存的消費展望填進對應的工作表，
+          公式和 MYOB 工作表都不動，填好後直接下載。Cash、Pos total 用消費展望計算出來的數字；Easi 固定填 0。
         </p>
         <label className="inline-block">
           <input type="file" accept=".xlsx" className="hidden" onChange={onPick} disabled={busy} />

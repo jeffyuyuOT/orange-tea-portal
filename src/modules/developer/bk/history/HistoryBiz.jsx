@@ -126,7 +126,7 @@ function DetailModal({ detail, onClose, onHours }) {
                           onClick={() => onHours(r.hour, `${detail.title} · ${r.label}`)}
                           className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
                         >
-                          小時統計
+                          HA
                         </button>
                       )}
                     </td>
@@ -189,7 +189,7 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   )
 
   if (salesStores.length === 0) {
-    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 › 分店管理 新增分店。</Notice>
   }
 
   const wFilter = { quarter: wQuarter ? Number(wQuarter) : null, month: wMonth ? Number(wMonth) : null }

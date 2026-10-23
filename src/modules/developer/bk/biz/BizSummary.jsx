@@ -124,7 +124,7 @@ export default function BizSummary({ stores, year, month, onYearMonth, holidays 
             <div className="flex items-center justify-end gap-1 px-1 py-1 text-right font-semibold tabular-nums">
               {all && all.items.length > 0 && (
                 <IncomeMark
-                  title="這個月有 U帳 其他收入，點擊查看合計"
+                  title="這個月有 Stock lost 其他收入，點擊查看合計"
                   onClick={() => setIncomeInfo({ title: `${s.name} · ${year}/${month} 其他收入`, items: all.items, sales: src.total })}
                 />
               )}
@@ -254,7 +254,7 @@ function DayNotesModal({ date, items, holiday, storeCount, onClose }) {
             <div className="mt-0.5 whitespace-pre-wrap text-gray-800">{g.note}</div>
           </div>
         ))}
-        <p className="text-xs text-gray-400">要修改附註，請到「營業」分頁點該日期。</p>
+        <p className="text-xs text-gray-400">要修改附註，請到「鷹眼」分頁點該日期。</p>
       </div>
     </Modal>
   )

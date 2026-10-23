@@ -162,7 +162,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
     <div className="space-y-4">
       <StoreTabs stores={stores} storeId={storeId} onChange={setStoreId} />
       <Notice kind="info">
-        以下設定只套用在目前這間分店。順序由上到下 = SF 頁面由左到右。Cash、Pos total 與 Self order kiosk 是計算用的欄位，名稱不能改、也不能停用（Total = Pos total + Self order kiosk）。每個 payment type 都可以勾選「鎖定」（鎖定的不能刪除）。
+        以下設定只套用在目前這間分店。順序由上到下 = 消費展望頁面由左到右。Cash、Pos total 與 Self order kiosk 是計算用的欄位，名稱不能改、也不能停用（Total = Pos total + Self order kiosk）。每個 payment type 都可以勾選「鎖定」（鎖定的不能刪除）。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
 
@@ -263,7 +263,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
                   disabled={isFormula}
                   onChange={(e) => setEditing({ ...editing, is_active: e.target.checked })}
                 />
-                啟用（取消勾選 = 不再顯示在 SF 頁面，已輸入的歷史資料保留）
+                啟用（取消勾選 = 不再顯示在消費展望頁面，已輸入的歷史資料保留）
               </label>
             )}
             <label className="flex items-center gap-2 text-sm">
@@ -305,7 +305,7 @@ function PaymentTypePanel({ stores, sfStoreId, active, onChanged }) {
         {deleting && (
           <div className="space-y-3 text-sm">
             <Notice kind="error">
-              刪除後這個欄位會從這間分店的 SF 消失，已經輸入在這一欄的數字也不會再顯示或計算，無法復原。
+              刪除後這個欄位會從這間分店的消費展望消失，已經輸入在這一欄的數字也不會再顯示或計算，無法復原。
               {deleting.kind === 'main' && ' 屬於它的 sub payment type 也會一起刪除。'}
               {FORMULA_TYPE_NAMES.includes(deleting.name) && ' 注意：這是計算用的欄位（Cash / Pos total / Self order kiosk），刪除後相關的計算會失效。'}
             </Notice>

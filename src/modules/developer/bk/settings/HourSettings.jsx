@@ -32,7 +32,7 @@ export default function HourSettings({ stores }) {
     setMsg('')
   }, [settings, storeId])
 
-  if (stores.length === 0) return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
+  if (stores.length === 0) return <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 新增分店。</Notice>
   if (!settings) return error ? <Notice kind="error">{error}</Notice> : <LoadingSpinner />
 
   const saved = settings[storeId]
@@ -88,7 +88,7 @@ export default function HourSettings({ stores }) {
         <Button disabled={invalid} onClick={save}>
           儲存
         </Button>
-        <p className="text-xs text-gray-400">時段外的營業額不會消失：小時統計頁的「合計」仍然包含，另外會多一欄「其他時段」。</p>
+        <p className="text-xs text-gray-400">時段外的營業額不會消失：HA 頁的「合計」仍然包含，另外會多一欄「其他時段」。</p>
       </div>
     </div>
   )

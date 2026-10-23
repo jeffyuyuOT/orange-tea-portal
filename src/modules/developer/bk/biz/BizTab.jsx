@@ -51,7 +51,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
   const [noteDraft, setNoteDraft] = useState('')
   const [noteError, setNoteError] = useState('')
   const [noteAll, setNoteAll] = useState(false) // 套用到全部分店
-  const [incomeRows, setIncomeRows] = useState([]) // U帳 其他收入 of the linked store this month
+  const [incomeRows, setIncomeRows] = useState([]) // Stock lost 其他收入 of the linked store this month
   const [incomeInfo, setIncomeInfo] = useState(null) // the open 其他收入 popup
 
   const store = stores.find((s) => s.id === storeId) ?? stores[0] ?? null
@@ -203,7 +203,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
 
   if (!store) {
     return (
-      <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 › 分店管理 新增分店。</Notice>
+      <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 › 分店管理 新增分店。</Notice>
     )
   }
 
@@ -312,7 +312,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
 
       {linked && (
         <Notice kind="info">
-          這間分店的 POS 直接讀 Sales figure 的 O.POST（不能在這裡改）；Sales figure 沒有那一天的數字時，會顯示匯入的歷史 POS。Self O 是 Sales figure 的 Self order kiosk 的預設值；SF 那邊可以手動改，兩邊不一致時 SF 會顯示警示。
+          這間分店的 POS 直接讀消費展望的 O.POST（不能在這裡改）；消費展望沒有那一天的數字時，會顯示匯入的歷史 POS。Self O 是消費展望的 Self order kiosk 的預設值；消費展望那邊可以手動改，兩邊不一致時消費展望會顯示警示。
         </Notice>
       )}
       <Notice kind="info">
@@ -352,7 +352,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                 {BIZ_INPUTS.map(({ key, label }, i) => (
                   <th key={key} className={`${th} bg-sky-50 ${i === 0 ? split : ''}`}>
                     {label}
-                    {key === 'pos' && linked && <div className="text-[10px] font-normal text-gray-500">SF 的 O.POST</div>}
+                    {key === 'pos' && linked && <div className="text-[10px] font-normal text-gray-500">消費展望的 O.POST</div>}
                   </th>
                 ))}
               </tr>
@@ -401,7 +401,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                       <td key={key} className={`${td} bg-sky-50/40 ${c === 0 ? split : ''}`}>
                         <div
                           className="px-1 py-1 text-right tabular-nums text-gray-700"
-                          title={key === 'pos' && linked ? '來自 Sales figure 的 O.POST' : '在手動輸入總頁輸入'}
+                          title={key === 'pos' && linked ? '來自消費展望的 O.POST' : '在手動輸入總頁輸入'}
                         >
                           {money ? fmtMoney(r[key]) : fmtCount(r[key])}
                         </div>
@@ -424,7 +424,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
                     {label === 'Total' && incomeAll.items.length > 0 ? (
                       <div className="flex items-center justify-end gap-1 px-1 py-1 tabular-nums text-gray-700">
                         <IncomeMark
-                          title="這個月有 U帳 其他收入，點擊查看合計"
+                          title="這個月有 Stock lost 其他收入，點擊查看合計"
                           onClick={() => setIncomeInfo({ title: `${store.name} · ${year}/${month} 其他收入`, items: incomeAll.items, sales: src.total })}
                         />
                         {fmtMoney(src.total)}
@@ -490,7 +490,7 @@ export default function BizTab({ stores, topActive = true, onTabDirty, registerS
             <input type="checkbox" checked={noteAll} onChange={(e) => setNoteAll(e.target.checked)} />
             套用到全部分店（所有分店的 {noteDate} 都會是這則附註{notes[noteDate] ? '；刪除也會一併刪除' : ''}）
           </label>
-          <p className="text-xs text-gray-400">相同文字的附註，會在 歷史紀錄 › 營業 › Event 裡跨年份對照。</p>
+          <p className="text-xs text-gray-400">相同文字的附註，會在 歷史紀錄 › 鷹眼 › Event 裡跨年份對照。</p>
           {noteError && <Notice kind="error" onClose={() => setNoteError('')}>{noteError}</Notice>}
         </div>
       </Modal>

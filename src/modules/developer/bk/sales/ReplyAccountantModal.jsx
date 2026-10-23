@@ -68,7 +68,7 @@ export default function ReplyAccountantModal({ open, onClose, stores }) {
             rows={16}
             className="w-full rounded-lg border border-brand-200 p-3 font-mono text-sm"
           />
-          <p className="text-xs text-gray-400">日期是今天；金額是各分店 U帳 分店現金目前的 COH（本月）。內容可以先改再複製。</p>
+          <p className="text-xs text-gray-400">日期是今天；金額是各分店 Stock lost 分店現金目前的 COH（本月）。內容可以先改再複製。</p>
         </div>
       )}
     </Modal>

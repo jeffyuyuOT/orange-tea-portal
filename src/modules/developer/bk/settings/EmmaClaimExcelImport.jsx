@@ -71,7 +71,7 @@ export default function EmmaClaimExcelImport({ file, onImported, onClose }) {
       open
       wide
       onClose={onClose}
-      title="匯入 Excel — 積欠 Emma"
+      title="匯入 Excel — 機件 Emma"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

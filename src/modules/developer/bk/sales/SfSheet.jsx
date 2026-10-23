@@ -50,7 +50,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
   const [sfMonth, setSfMonth] = useState(null)
   const [days, setDays] = useState({})
   const [dMap, setDMap] = useState({})
-  const [selfOMap, setSelfOMap] = useState({}) // 營業 Self O per day (linked stores only)
+  const [selfOMap, setSelfOMap] = useState({}) // 鷹眼 Self O per day (linked stores only)
   const [kioskWarn, setKioskWarn] = useState(null) // { date, typeId, sf, biz }
   const bizStoreId = salesStores?.find((s) => s.sf_store_id === store.id)?.id ?? null
   const [loading, setLoading] = useState(true)
@@ -345,7 +345,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
         <div className="min-w-0 flex-1">
           <StoreTabs stores={stores} storeId={store.id} onChange={(id) => onNavigate({ storeId: id })} />
         </div>
-        <Button onClick={submit} disabled={saving || loading} title="提交全部分店這個月的 Sales figure">
+        <Button onClick={submit} disabled={saving || loading} title="提交全部分店這個月的消費展望">
           提交全部分店
         </Button>
       </div>
@@ -496,8 +496,8 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
                             <button
                               type="button"
                               onClick={() => setKioskWarn({ date, typeId: s.id, ...mismatch })}
-                              title="和營業的 Self O 不一致，點一下看詳細"
-                              aria-label="和營業的 Self O 不一致"
+                              title="和鷹眼的 Self O 不一致，點一下看詳細"
+                              aria-label="和鷹眼的 Self O 不一致"
                               className="absolute left-0.5 top-1/2 z-10 -translate-y-1/2 text-[12px] leading-none text-amber-600 hover:text-amber-700"
                             >
                               ⚠
@@ -508,7 +508,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
                             s.id,
                             own,
                             (v) => setAmount(date, s.id, v),
-                            fromBiz ? { placeholder: numToInput(biz), title: '空白：用營業的 Self O' } : undefined
+                            fromBiz ? { placeholder: numToInput(biz), title: '空白：用鷹眼的 Self O' } : undefined
                           )}
                         </td>
                       )
@@ -545,11 +545,11 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
       <Modal
         open={!!kioskWarn}
         onClose={() => setKioskWarn(null)}
-        title="Self order kiosk 和營業的 Self O 不一致"
+        title="Self order kiosk 和鷹眼的 Self O 不一致"
         footer={
           <>
             <Button variant="secondary" onClick={() => setKioskWarn(null)}>
-              保留 SF 的數字
+              保留消費展望的數字
             </Button>
             <Button
               onClick={() => {
@@ -557,7 +557,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
                 setKioskWarn(null)
               }}
             >
-              改用營業的數字
+              改用鷹眼的數字
             </Button>
           </>
         }
@@ -567,19 +567,19 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
             <p>{kioskWarn.date} 這一天：</p>
             <ul className="space-y-1">
               <li className="flex justify-between rounded bg-amber-50 px-2 py-1">
-                <span>營業的 Self O</span>
+                <span>鷹眼的 Self O</span>
                 <span className="tabular-nums">{fmtMoney(kioskWarn.biz)}</span>
               </li>
               <li className="flex justify-between rounded bg-amber-50 px-2 py-1">
-                <span>SF 的 Self order kiosk</span>
+                <span>消費展望的 Self order kiosk</span>
                 <span className="tabular-nums">{fmtMoney(kioskWarn.sf)}</span>
               </li>
               <li className="flex justify-between rounded bg-gray-50 px-2 py-1">
-                <span>差額（SF − 營業）</span>
+                <span>差額（消費展望 − 鷹眼）</span>
                 <span className="tabular-nums">{fmtMoney(kioskWarn.sf - kioskWarn.biz)}</span>
               </li>
             </ul>
-            <p className="text-xs text-gray-400">SF 手動輸入的數字優先；如果要跟營業一致，按「改用營業的數字」後記得按「提交」。</p>
+            <p className="text-xs text-gray-400">消費展望手動輸入的數字優先；如果要跟鷹眼一致，按「改用鷹眼的數字」後記得按「提交」。</p>
           </div>
         )}
       </Modal>

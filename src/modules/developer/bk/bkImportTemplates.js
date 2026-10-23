@@ -80,18 +80,18 @@ export async function downloadUAccountTemplate() {
   const wb = await buildTemplate([
     {
       name: '分店現金',
-      note: 'U帳 > 分店現金的每日數字（只支援通用欄位，不含期初餘額）。',
+      note: 'Stock lost > 分店現金的每日數字（只支援通用欄位，不含期初餘額）。',
       headers: ['Date', 'Store', '實CA', 'D', '入庫'],
       example: ['2026-10-05', 'Sunnybank', 2000, 500, '是'],
     },
     {
       name: '收支',
-      note: 'U帳 > 收支：Type 填 Icost / Ucost / 其他收入 / Deposit / Withdraw / 入金 / 分店transfer。入金另外需要「入金對象」欄（Jeff bank / Mao 保險箱 / 其他）；分店transfer 需要 From / To 兩個分店欄，Mode 留白代表一般 transfer，填「借貸償還」代表借貸償還。',
+      note: 'Stock lost > 收支：Type 填 Icost / Ucost / 其他收入 / Deposit / Withdraw / 入金 / 分店transfer。入金另外需要「入金對象」欄（Jeff bank / Mao 保險箱 / 其他）；分店transfer 需要 From / To 兩個分店欄，Mode 留白代表一般 transfer，填「借貸償還」代表借貸償還。',
       headers: ['Date', 'Store', 'Type', 'Amount', 'Description', 'Note', '入金對象', 'From', 'To', 'Mode'],
       example: ['2026-10-05', 'Sunnybank', 'Icost', 120, '買清潔用品', '', '', '', '', ''],
     },
   ])
-  await download(wb, 'BK匯入範本_U帳.xlsx')
+  await download(wb, 'BK匯入範本_Stock lost.xlsx')
 }
 
 export async function downloadDividendTemplate() {
@@ -109,25 +109,25 @@ export async function downloadDividendTemplate() {
 export async function downloadJeffOwedTemplate() {
   const wb = await buildTemplate([
     {
-      name: '積欠Jeff',
+      name: '機件Jeff',
       note: 'Type 填 薪水 / 預付 / 預拿。薪水如果本來就是從 payroll 計算表自動抓的，這裡只用來補登不在那張表裡的薪水。Store 可以留白，留白的話會算到 Sunnybank。',
       headers: ['Date', 'Store', 'Type', 'Description', 'Amount', 'Note'],
       example: ['2026-10-05', 'Sunnybank', '預付', '出差墊款', 500, ''],
     },
   ])
-  await download(wb, 'BK匯入範本_積欠Jeff.xlsx')
+  await download(wb, 'BK匯入範本_機件Jeff.xlsx')
 }
 
 export async function downloadEmmaClaimTemplate() {
   const wb = await buildTemplate([
     {
-      name: '積欠Emma',
-      note: '每一列是一筆歷史的 bonus 領取紀錄（提交日期 + 總金額），不會對應到特定的 U帳 入金明細 — 那些明細只有當時在系統裡建立的紀錄才有。',
+      name: '機件Emma',
+      note: '每一列是一筆歷史的 bonus 領取紀錄（提交日期 + 總金額），不會對應到特定的 Stock lost 入金明細 — 那些明細只有當時在系統裡建立的紀錄才有。',
       headers: ['Date', 'Amount', 'Note'],
       example: ['2026-09-01', 450, '9 月份 bonus'],
     },
   ])
-  await download(wb, 'BK匯入範本_積欠Emma.xlsx')
+  await download(wb, 'BK匯入範本_機件Emma.xlsx')
 }
 
 // 小時統計: one tab per SF / U帳 store, rows = dates, columns = hours (the hours set
@@ -145,7 +145,7 @@ export async function downloadHourTemplate(stores) {
     headerRow(ws, ['日期', ...hours.map(hourLabel)])
     ws.addRow(['2026-10-05', ...hours.map((h, i) => (i % 3 === 2 ? '' : 100 + h * 5))])
   }
-  await download(wb, 'BK匯入範本_小時統計.xlsx')
+  await download(wb, 'BK匯入範本_HA.xlsx')
 }
 
 // 營業: one tab per 營業 store, same columns the 營業 tab exports (the two
@@ -156,13 +156,13 @@ export async function downloadBizTemplate(salesStores) {
     const ws = wb.addWorksheet(sheetNameForStore(store.name))
     ws.addRow([
       store.sf_store_id
-        ? `${store.name} — 連結 SF：POS 讀 SF 的 O.POST，匯入時 POS 欄會略過（可留空）`
-        : `${store.name} — 營業：POS 手動輸入`,
+        ? `${store.name} — 連結消費展望：POS 讀消費展望的 O.POST，匯入時 POS 欄會略過（可留空）`
+        : `${store.name} — 鷹眼：POS 手動輸入`,
     ]).font = { italic: true, color: { argb: 'FF888888' } }
     ws.addRow([])
     const headers = ['日期', 'P杯數', 'POS', 'CV', 'Self O', 'SO杯數']
     headerRow(ws, headers)
     ws.addRow(['2026-10-05', 120, store.sf_store_id ? '' : 1500, 3, 400, 40])
   }
-  await download(wb, 'BK匯入範本_營業.xlsx')
+  await download(wb, 'BK匯入範本_鷹眼.xlsx')
 }
