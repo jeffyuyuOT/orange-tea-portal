@@ -56,23 +56,25 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   // Jeff, 2026-10-24: "如果直接標記為qualified的員工則入職日期下會註明圖示，
-  // 點擊會顯示..." — originally gated on staff.qualified_marked_directly
-  // (migration 0139), set only by Learning Tracker's "Mark as Qualified"
-  // direct grant (StaffStudyDetail.jsx's markQualified — Jeff's own "e.g. an
-  // experienced hire" case), never by the ordinary Formal Quiz Pass path.
+  // 點擊會顯示..." — gated on staff.qualified_marked_directly (migration
+  // 0139), set only by Learning Tracker's "Mark as Qualified" direct grant
+  // (StaffStudyDetail.jsx's markQualified — Jeff's own "e.g. an experienced
+  // hire" case), never by the ordinary Formal Quiz Pass review path
+  // (togglePass) — a genuinely new trainee who trains in the app and earns
+  // Qualified that normal way shouldn't get flagged; their first clock-in
+  // really is their hire date.
   //
-  // Jeff, 2026-10-24 (follow-up): "麻煩幫我把這6位也標示警示圖案，因為他們是
-  // 自己去考試的，但其實也是資深員工" — the 6 staff who passed a reviewed
-  // Formal Quiz instead of being marked qualified outright are, in Jeff's
-  // own words, senior staff too, so the icon shouldn't single out the
-  // direct-grant path. Broadened to staff.qualified itself — ANY qualified
-  // staff member's Hire date may have been auto-filled from their first
-  // clock-in (migration 0139's trigger), which can predate their real hire
-  // date by however long they worked here before this system existed,
-  // whichever path they became qualified through. qualified_marked_directly
-  // itself is left as-is (still set only by the direct-grant path, still
-  // never cleared) in case it's useful to tell the two paths apart again
-  // later — it just no longer gates this icon on its own.
+  // Jeff, 2026-10-24 (follow-up): briefly broadened this to staff.qualified
+  // itself so 6 historically-direct-marked staff (who'd also separately sat
+  // a Formal Quiz themselves, so 0141's backfill heuristic mistook them for
+  // the reviewed-path case) would get the icon too — then reverted once
+  // 0142 backfilled qualified_marked_directly = true for those 6 directly
+  // instead (see that migration's comment: once already Qualified, a LATER
+  // Formal Quiz attempt auto-passes with no review, so a passed row proves
+  // nothing about how someone originally became qualified). Jeff confirmed
+  // the forward-looking rule should stay exactly as this column already
+  // models it — only the direct-grant path flags the icon, not "qualified"
+  // in general — so this is back to staff.qualified_marked_directly.
   const [showSeniorNote, setShowSeniorNote] = useState(false)
 
   async function save() {
@@ -189,7 +191,7 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
         <Field
           label="Hire date (staff information only)"
           labelExtra={
-            staff.qualified && (
+            staff.qualified_marked_directly && (
               <button
                 type="button"
                 onClick={(e) => {
