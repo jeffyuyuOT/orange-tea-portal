@@ -49,9 +49,11 @@ const TOP10_CATEGORY_ID = '__top10__'
 // same shape as Top 10 — it does NOT pull in Shop Training items.
 const MUST_KNOW_CATEGORY_ID = '__must_know__'
 
-// Shared between "My Dashboard > Study Log" (own progress) and
-// "Shop Management > Learning Tracker" (a manager/admin viewing + bulk
-// editing someone else's progress, per the spec's "admin可支援批量選取").
+// Shared between "My Dashboard > Study Log" (own progress, editable) and
+// "Shop Management > Learning Tracker" (a manager/admin viewing someone
+// else's progress — pass `readOnly` there; see that prop's own note below).
+// "Admin可支援批量選取" from the original spec is Mark as Qualified's
+// one-click snapshot over in StaffStudyDetail.jsx, not per-item editing here.
 //
 // `qualified`: a Qualified staff member (profiles.qualified — migration
 // 0049, granted via a passed Formal Quiz or directly by a manager in
@@ -71,7 +73,13 @@ const MUST_KNOW_CATEGORY_ID = '__must_know__'
 // `headerActions`: optional content (e.g. StudyLogPage's Quick Quiz/Formal
 // Quiz buttons) rendered at the right end of the group-tabs row, so a
 // caller isn't stuck putting its own controls below the whole list.
-export default function StudyLogList({ profileId, qualified = false, onProgressChange, headerActions }) {
+// `readOnly`: Jeff, 2026-10-24: "manager看其他員工只能看不能勾" — Learning
+// Tracker's manager view (StaffStudyDetail.jsx) passes this so every
+// Memorized checkbox below is disabled — a manager can see exactly what a
+// staff member has and hasn't ticked, but can't tick it for them. The
+// staff member's own Study Log (StudyLogPage.jsx) never passes this, so
+// nothing changes there.
+export default function StudyLogList({ profileId, qualified = false, onProgressChange, headerActions, readOnly = false }) {
   const { currentStoreId } = useAuth()
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([]) // drink-group sub-categories, for the filter dropdown
@@ -89,6 +97,11 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   const [openTrainingItemFiles, setOpenTrainingItemFiles] = useState([])
   const [group, setGroup] = useState('drink')
   const [categoryId, setCategoryId] = useState(null) // null = "All categories" within the drink group
+  // toggle/toggleShopTraining (self-editable use only — see `readOnly`
+  // above) update this optimistically so the checkbox flips the instant
+  // it's clicked, and revert + explain via toggleError if the save itself
+  // fails, instead of silently reverting next time this list reloads.
+  const [toggleError, setToggleError] = useState('')
 
   async function load() {
     setLoading(true)
@@ -200,8 +213,14 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   const mustKnowTrainingItems = useMemo(() => shopTrainingItems.filter((i) => i.is_must_know), [shopTrainingItems])
 
   async function toggle(itemId, value) {
+    // Belt-and-suspenders alongside each checkbox's own `disabled={readOnly}`
+    // below — a manager browsing Learning Tracker should never be able to
+    // write another staff member's progress, whatever triggers this.
+    if (readOnly) return
+    setToggleError('')
+    const prevRow = progress[itemId]
     setProgress((prev) => ({ ...prev, [itemId]: { ...prev[itemId], memorized: value } }))
-    await supabase.from('study_progress').upsert(
+    const { error } = await supabase.from('study_progress').upsert(
       {
         profile_id: profileId,
         formula_item_id: itemId,
@@ -210,6 +229,11 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
       },
       { onConflict: 'profile_id,formula_item_id' }
     )
+    if (error) {
+      setProgress((prev) => ({ ...prev, [itemId]: prevRow }))
+      setToggleError(`Couldn't save — ${error.message}`)
+      return
+    }
     onProgressChange?.()
   }
 
@@ -217,8 +241,11 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
   // study_progress (migration 0073) — kept as its own function rather than
   // a shared helper since the two tables' conflict keys/column names differ.
   async function toggleShopTraining(itemId, value) {
+    if (readOnly) return
+    setToggleError('')
+    const prevRow = shopTrainingProgress[itemId]
     setShopTrainingProgress((prev) => ({ ...prev, [itemId]: { ...prev[itemId], memorized: value } }))
-    await supabase.from('shop_training_progress').upsert(
+    const { error } = await supabase.from('shop_training_progress').upsert(
       {
         profile_id: profileId,
         shop_training_item_id: itemId,
@@ -227,6 +254,11 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
       },
       { onConflict: 'profile_id,shop_training_item_id' }
     )
+    if (error) {
+      setShopTrainingProgress((prev) => ({ ...prev, [itemId]: prevRow }))
+      setToggleError(`Couldn't save — ${error.message}`)
+      return
+    }
     onProgressChange?.()
   }
 
@@ -243,6 +275,9 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
 
   return (
     <div>
+      {toggleError && (
+        <div className="mb-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">⚠️ {toggleError}</div>
+      )}
       {/* headerActions (Quick/Formal Quiz, Progress chart/Study summary) gets
           its own row above the Drink/Tea/Toppings/Others tabs, instead of
           sharing one row with them — on a phone-width screen, four tabs plus
@@ -322,6 +357,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
                   <input
                     type="checkbox"
                     checked={!!progress[item.id]?.memorized}
+                    disabled={readOnly}
                     onChange={(e) => toggle(item.id, e.target.checked)}
                   />
                 </label>
@@ -338,6 +374,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
                   <input
                     type="checkbox"
                     checked={!!shopTrainingProgress[item.id]?.memorized}
+                    disabled={readOnly}
                     onChange={(e) => toggleShopTraining(item.id, e.target.checked)}
                   />
                 </label>
@@ -360,6 +397,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
                   <input
                     type="checkbox"
                     checked={!!shopTrainingProgress[item.id]?.memorized}
+                    disabled={readOnly}
                     onChange={(e) => toggleShopTraining(item.id, e.target.checked)}
                   />
                 </label>
@@ -386,6 +424,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
                 <input
                   type="checkbox"
                   checked={!!progress[item.id]?.memorized}
+                  disabled={readOnly}
                   onChange={(e) => toggle(item.id, e.target.checked)}
                 />
               </label>

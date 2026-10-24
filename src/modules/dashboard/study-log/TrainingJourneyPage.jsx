@@ -20,9 +20,14 @@ import MasterExamModal from './MasterExamModal'
 // training view. `profileId` is whose journey is shown; `isSelf=false`
 // (viewed from Shop Management > Learning Tracker) hides every exam-taking
 // button — exams are something a staff member sits themselves, never
-// something a manager triggers on their behalf — but the phase breakdown,
-// item checklist (shared with Study Log — ticking here ticks there too)
+// something a manager triggers on their behalf — but the phase breakdown
 // and title/warning banners are otherwise identical.
+//
+// Jeff, 2026-10-24: "manager看其他員工只能看不能勾" — the Memorized checklist
+// is view-only too when !isSelf: a manager browsing Learning Tracker can see
+// exactly what a staff member has and hasn't ticked, but can't tick it for
+// them — same as the exam buttons above, that's something only the staff
+// member does for themselves.
 //
 // Jeff, 2026-10-07 (8-point phase-merge request, point 1): the old 7-phase
 // ladder with a separate Expert tier between Qualified/Advanced and Master
@@ -82,6 +87,12 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   const [showMaster, setShowMaster] = useState(null) // null | { isDefense }
   const [staleItemsWarning, setStaleItemsWarning] = useState(null) // null | items[]
   const [congrats, setCongrats] = useState(null)
+  // toggleItem (self-view only — see isSelf below and the checkbox's own
+  // `disabled`) updates this optimistically so the checkbox flips the
+  // instant it's clicked instead of waiting for the full upsert-then-
+  // reload() round trip, and toggleError surfaces an actual save failure
+  // (network, etc.) instead of the checkbox silently reverting next reload.
+  const [toggleError, setToggleError] = useState('')
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -103,11 +114,34 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
   }, [reload])
 
   async function toggleItem(item, value) {
+    // Belt-and-suspenders alongside the checkbox's own `disabled={!isSelf}`
+    // below — a manager viewing Learning Tracker should never be able to
+    // tick an item on a staff member's behalf, whatever triggers this.
+    if (!isSelf) return
+    setToggleError('')
     const table = item.kind === 'formula' ? 'study_progress' : 'shop_training_progress'
     const idField = item.kind === 'formula' ? 'formula_item_id' : 'shop_training_item_id'
-    await supabase
+    // Patch this item's memorized flag everywhere it appears right away —
+    // itemsByPhase (the Phase 1-3 inline checklists) and phaseFourItems (the
+    // Phase 4 card + its "View items" modal) — so the checkbox responds the
+    // instant it's clicked instead of only updating once reload() finishes.
+    setData((prev) => {
+      if (!prev) return prev
+      const patch = (arr) => arr.map((i) => (i.kind === item.kind && i.id === item.id ? { ...i, memorized: value } : i))
+      const wasInPhaseFour = prev.phaseFourItems.some((i) => i.kind === item.kind && i.id === item.id && i.memorized !== value)
+      return {
+        ...prev,
+        itemsByPhase: Object.fromEntries(Object.entries(prev.itemsByPhase).map(([k, arr]) => [k, patch(arr)])),
+        phaseFourItems: patch(prev.phaseFourItems),
+        phaseFourMemorized: wasInPhaseFour ? prev.phaseFourMemorized + (value ? 1 : -1) : prev.phaseFourMemorized,
+      }
+    })
+    const { error } = await supabase
       .from(table)
       .upsert({ profile_id: profileId, [idField]: item.id, memorized: value, memorized_at: value ? new Date().toISOString() : null }, { onConflict: `profile_id,${idField}` })
+    if (error) {
+      setToggleError(`Couldn't save "${item.label}" — ${error.message}`)
+    }
     reload()
   }
 
@@ -223,6 +257,9 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
         )}
       </div>
 
+      {toggleError && (
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">⚠️ {toggleError}</div>
+      )}
       {previouslyLostTitle ? (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           ⚠️ Warning! Please pass the test as soon as possible to restore your title.
@@ -325,8 +362,16 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
                           <p className="text-xs text-gray-400">No items assigned to this phase yet.</p>
                         ) : (
                           items.map((i) => (
-                            <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 text-sm text-gray-700">
-                              <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
+                            <label
+                              key={`${i.kind}-${i.id}`}
+                              className={`flex items-center gap-2 text-sm text-gray-700 ${!isSelf ? 'opacity-70' : ''}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={i.memorized}
+                                disabled={!isSelf}
+                                onChange={(e) => toggleItem(i, e.target.checked)}
+                              />
                               {i.label}
                             </label>
                           ))
@@ -379,8 +424,16 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
               <p className="text-xs text-gray-400">No items yet.</p>
             ) : (
               phaseFourItems.map((i) => (
-                <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0">
-                  <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
+                <label
+                  key={`${i.kind}-${i.id}`}
+                  className={`flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0 ${!isSelf ? 'opacity-70' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={i.memorized}
+                    disabled={!isSelf}
+                    onChange={(e) => toggleItem(i, e.target.checked)}
+                  />
                   {i.label}
                 </label>
               ))
@@ -396,8 +449,16 @@ export default function TrainingJourneyPage({ profileId, isSelf }) {
           </p>
           <div className="max-h-[50vh] space-y-1 overflow-y-auto">
             {staleItemsWarning.map((i) => (
-              <label key={`${i.kind}-${i.id}`} className="flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0">
-                <input type="checkbox" checked={i.memorized} onChange={(e) => toggleItem(i, e.target.checked)} />
+              <label
+                key={`${i.kind}-${i.id}`}
+                className={`flex items-center gap-2 border-b border-gray-100 py-1.5 text-sm text-gray-700 last:border-0 ${!isSelf ? 'opacity-70' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={i.memorized}
+                  disabled={!isSelf}
+                  onChange={(e) => toggleItem(i, e.target.checked)}
+                />
                 Phase {i.phaseNumber}: {i.label}
               </label>
             ))}

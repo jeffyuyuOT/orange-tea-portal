@@ -42,6 +42,15 @@ const TABS = [
 // This staff member's Training Journey progress now has its own tab here
 // too (isSelf=false — read-only, no exam-taking buttons: see
 // TrainingJourneyPage's own comment).
+//
+// Jeff, 2026-10-24: "manager看其他員工只能看不能勾" — both tabs are
+// view-only for a manager here: TrainingJourneyPage's Memorized checklist is
+// already disabled via isSelf={false} above, and StudyLogList below gets
+// `readOnly` for the same reason. A manager can see exactly what a staff
+// member has and hasn't ticked, but ticking items for them is specifically
+// NOT something this page does — the manager-only actions that remain
+// (Mark/Cancel Qualified, the Quiz History Pass checkbox below) are
+// deliberate exceptions, not per-item study progress.
 export default function StaffStudyDetail({ staff, onBack }) {
   const { profile, currentStoreId } = useAuth()
   const [tab, setTab] = useState('training_journey')
@@ -338,7 +347,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
       {tab === 'training_journey' ? (
         <TrainingJourneyPage profileId={staff.id} isSelf={false} />
       ) : (
-        <StudyLogList key={`${staff.id}-${progressVersion}`} profileId={staff.id} qualified={qualified} />
+        <StudyLogList key={`${staff.id}-${progressVersion}`} profileId={staff.id} qualified={qualified} readOnly />
       )}
 
       {showHistory && (
