@@ -12,8 +12,9 @@ import {
 } from '../../../lib/attendance'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Button from '../../../components/ui/Button'
+import Modal from '../../../components/ui/Modal'
 import AttendanceCellEditModal from './AttendanceCellEditModal'
-import { DISCREPANCY_WINDOW_DAYS } from '../../../lib/timeDiscrepancy'
+import { DISCREPANCY_WINDOW_DAYS, getRosteredShiftForDay } from '../../../lib/timeDiscrepancy'
 
 function todayStr() {
   return format(new Date(), 'yyyy-MM-dd')
@@ -111,6 +112,21 @@ export default function AttendanceLogTable({
   const [loading, setLoading] = useState(true)
   const [editingCell, setEditingCell] = useState(null) // { storeId, date, punches, breakHalfHours } | null
   const [addingRecord, setAddingRecord] = useState(false)
+  // Jeff, 2026-10-24: "staff time log點擊每一天的日期，上面會跳出小視窗顯示
+  // 那一天的班表時間跟休息次數" — rosterDetailCell is which day's (date +
+  // store) popup is open, or null; rosterDetailShift is undefined while that
+  // day's rostered shift is being fetched (getRosteredShiftForDay), null
+  // once fetched if there wasn't a published shift that day, or the
+  // { start_time, end_time, break_half_hours } row once there is one.
+  const [rosterDetailCell, setRosterDetailCell] = useState(null)
+  const [rosterDetailShift, setRosterDetailShift] = useState(undefined)
+
+  async function openRosterDetail(cell) {
+    setRosterDetailCell(cell)
+    setRosterDetailShift(undefined)
+    const shift = await getRosteredShiftForDay(profileId, cell.storeId, cell.date)
+    setRosterDetailShift(shift)
+  }
 
   async function load() {
     setLoading(true)
@@ -300,7 +316,19 @@ export default function AttendanceLogTable({
               <div key={key} className="rounded-xl border border-brand-100 bg-white p-3">
                 <div className="mb-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-800">{format(parseISO(cell.date), 'EEE, MMM d yyyy')}</span>
+                    {/* Jeff, 2026-10-24: "點擊每一天的日期，上面會跳出小視窗
+                        顯示那一天的班表時間跟休息次數" — the date itself is
+                        now the click target, same dotted-underline "this is
+                        clickable" treatment as the "Rostered Xh Ym" link in
+                        StaffTimeLogsPage's discrepancy table above. */}
+                    <button
+                      type="button"
+                      onClick={() => openRosterDetail(cell)}
+                      className="text-sm font-semibold text-gray-800 underline decoration-dotted underline-offset-2 hover:text-brand-700"
+                      title="Click to see that day's rostered shift"
+                    >
+                      {format(parseISO(cell.date), 'EEE, MMM d yyyy')}
+                    </button>
                     <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">{storeName}</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -381,6 +409,34 @@ export default function AttendanceLogTable({
           })}
         </div>
       )}
+
+      <Modal
+        open={!!rosterDetailCell}
+        onClose={() => {
+          setRosterDetailCell(null)
+          setRosterDetailShift(undefined)
+        }}
+        title={rosterDetailCell ? format(parseISO(rosterDetailCell.date), 'EEE, MMM d yyyy') + ' — rostered shift' : ''}
+      >
+        {rosterDetailShift === undefined ? (
+          <LoadingSpinner />
+        ) : rosterDetailShift ? (
+          <div className="space-y-2 text-sm text-gray-700">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">Scheduled time</span>
+              <span className="font-medium">
+                {rosterDetailShift.start_time.slice(0, 5)}–{rosterDetailShift.end_time.slice(0, 5)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">Break</span>
+              <span className="font-medium">{formatBreakUnits(rosterDetailShift.break_half_hours) ?? 'None'}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No published roster shift found for this day.</p>
+        )}
+      </Modal>
 
       {editingCell && (
         <AttendanceCellEditModal

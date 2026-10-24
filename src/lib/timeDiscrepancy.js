@@ -254,6 +254,40 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
   return result
 }
 
+// Jeff, 2026-10-24: "staff time log點擊每一天的日期，上面會跳出小視窗顯示
+// 那一天的班表時間跟休息次數" — the same "rostered shift" popup
+// getStaffTimeDiscrepancies already feeds for a flagged day's "Rostered
+// Xh Ym" link, but for ANY day shown in the full Attendance Logs table
+// below (AttendanceLogTable.jsx), not just the last DISCREPANCY_WINDOW_DAYS
+// days' mismatched ones — so a plain single-day lookup instead of the whole
+// discrepancy scan. Same "only a PUBLISHED roster counts" rule as above
+// (status = 'submitted') — a draft shift was never a real commitment, so
+// it's not "that day's roster time" yet. Returns null when there's no
+// published shift for that profile/store/day (e.g. a day off, or a day
+// worked at a store they weren't actually rostered at).
+export async function getRosteredShiftForDay(profileId, storeId, date) {
+  if (!profileId || !storeId || !date) return null
+  // Periods are weekly (Monday-start) — the period covering `date` can
+  // begin up to 6 days before it, same bound getStaffTimeDiscrepancies uses.
+  const weekStartFrom = format(addDays(new Date(date), -6), 'yyyy-MM-dd')
+  const { data: periodRows } = await supabase
+    .from('roster_periods')
+    .select('id')
+    .eq('store_id', storeId)
+    .eq('status', 'submitted')
+    .gte('week_start_date', weekStartFrom)
+    .lte('week_start_date', date)
+  const periodIds = (periodRows ?? []).map((p) => p.id)
+  if (!periodIds.length) return null
+  const { data: entryRows } = await supabase
+    .from('roster_entries')
+    .select('start_time, end_time, break_half_hours')
+    .in('roster_period_id', periodIds)
+    .eq('profile_id', profileId)
+    .eq('work_date', date)
+  return entryRows?.[0] ?? null
+}
+
 // A subject counts as "unread" for this viewer when there's no
 // time_discrepancy_views row at all, or it's older than the discrepancy's
 // own latestSignal (a punch correction or a re-published roster since the
