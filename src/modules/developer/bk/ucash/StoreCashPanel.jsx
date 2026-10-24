@@ -561,9 +561,9 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <SummaryCard label="COH（SF現金）" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
-            <SummaryCard label="UCOH（非SF現金）" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
-            <SummaryCard label="D（未入庫）" value={summary.dUnstocked} hint="未勾入庫的 D + +/−" />
+            <SummaryCard label="COH" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
+            <SummaryCard label="UCOH" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
+            <SummaryCard label="耗損（未入庫）" value={summary.dUnstocked} hint="未勾入庫的耗損 + +/−" />
             <SummaryCard
               label="P/L"
               value={summary.pl}
@@ -599,7 +599,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                     <th className={`${th} bg-green-50`}>O.CA</th>
                     <th className={`${th} bg-brand-100`}>實 CA</th>
                     <th className={`${th} bg-gray-100`}>+/−</th>
-                    <th className={`${th} bg-sky-50`}>D</th>
+                    <th className={`${th} bg-sky-50`}>耗損</th>
                     <th className={`${th} bg-sky-50`}>入庫</th>
                     <th className={`${th} bg-brand-100`}>SF cash</th>
                   </tr>
