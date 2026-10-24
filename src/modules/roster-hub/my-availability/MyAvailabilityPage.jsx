@@ -39,6 +39,17 @@ export default function MyAvailabilityPage() {
   // this page only sets the flag.
   const [locked, setLocked] = useState(false)
   const [savingLock, setSavingLock] = useState(false)
+  // Jeff, 2026-10-24: "訊息說同步，但下禮拜六還是不一樣" / "禮拜天也不一樣" —
+  // the This-Week-saved-while-locked sync (added just above, same day) WAS
+  // writing next week's rows correctly, but the "Next Week" section is its
+  // own independent component with its own load-on-mount effect, so it had
+  // no way to know that This Week's save had just rewritten rows out from
+  // under it — it kept showing whatever it had loaded when the page first
+  // opened. Bumping this counter after a successful sync and passing it to
+  // Next Week's effect as an extra dependency forces that section to
+  // re-fetch from the database, so the screen catches up to what was
+  // actually just saved instead of needing a manual page reload.
+  const [nextWeekRefreshToken, setNextWeekRefreshToken] = useState(0)
 
   useEffect(() => {
     setLocked(!!profile?.availability_pattern_locked)
@@ -69,6 +80,7 @@ export default function MyAvailabilityPage() {
           savingLock={savingLock}
           onToggleLocked={toggleLocked}
           isThisWeek
+          onSyncedNextWeek={() => setNextWeekRefreshToken((t) => t + 1)}
         />
         <AvailabilityWeekSection
           title="Next Week"
@@ -77,6 +89,7 @@ export default function MyAvailabilityPage() {
           locked={locked}
           savingLock={savingLock}
           onToggleLocked={toggleLocked}
+          refreshToken={nextWeekRefreshToken}
         />
       </div>
     </div>
@@ -85,7 +98,17 @@ export default function MyAvailabilityPage() {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLock, onToggleLocked, isThisWeek = false }) {
+function AvailabilityWeekSection({
+  title,
+  weekStart,
+  profileId,
+  locked,
+  savingLock,
+  onToggleLocked,
+  isThisWeek = false,
+  onSyncedNextWeek,
+  refreshToken = 0,
+}) {
   const dates = weekDatesFrom(weekStart)
   const [editState, setEditState] = useState(null) // null while loading; then { 'yyyy-MM-dd': {mode, boundaryTime, windows} }
   const [saving, setSaving] = useState(false)
@@ -112,9 +135,11 @@ function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLo
     return () => {
       cancelled = true
     }
-    // dates is derived fresh from weekStart every render — only weekStart/profileId should re-trigger the fetch.
+    // dates is derived fresh from weekStart every render — only weekStart/profileId (and, for
+    // Next Week, a bump of refreshToken right after This Week's sync writes new rows for this
+    // same week) should re-trigger the fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId, weekStart])
+  }, [profileId, weekStart, refreshToken])
 
   function updateDay(dateStr, patch) {
     setEditState((prev) => ({ ...prev, [dateStr]: { ...prev[dateStr], ...patch } }))
@@ -208,6 +233,10 @@ function AvailabilityWeekSection({ title, weekStart, profileId, locked, savingLo
       setMessage(`Availability saved, but syncing to next week failed: ${syncError.message}`)
       return
     }
+    // Next Week's own section has no idea we just rewrote its rows — tell the parent so it can
+    // bump Next Week's refreshToken and make that section re-fetch and show what's actually in
+    // the database now, instead of the stale snapshot it loaded when the page first opened.
+    onSyncedNextWeek?.()
     setMessage(
       nextConflicts.length
         ? `Availability saved and synced to next week (${nextConflicts.length} day${nextConflicts.length > 1 ? 's' : ''} left as-is — conflicts with leave).`
