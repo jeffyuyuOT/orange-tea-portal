@@ -56,15 +56,23 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   // Jeff, 2026-10-24: "如果直接標記為qualified的員工則入職日期下會註明圖示，
-  // 點擊會顯示..." — staff.qualified_marked_directly (migration 0139) is set
-  // only by Learning Tracker's "Mark as Qualified" direct grant
-  // (StaffStudyDetail.jsx's markQualified — Jeff's own "e.g. an experienced
-  // hire" case), never by the ordinary Formal Quiz Pass path. For that
-  // specific case, Hire date was likely auto-filled from this person's
-  // first clock-in (same migration), which can predate their real hire date
-  // by however long they worked here before ever using this system — this
-  // icon/popup exists to flag that distinction right where a manager would
-  // otherwise take the date at face value.
+  // 點擊會顯示..." — originally gated on staff.qualified_marked_directly
+  // (migration 0139), set only by Learning Tracker's "Mark as Qualified"
+  // direct grant (StaffStudyDetail.jsx's markQualified — Jeff's own "e.g. an
+  // experienced hire" case), never by the ordinary Formal Quiz Pass path.
+  //
+  // Jeff, 2026-10-24 (follow-up): "麻煩幫我把這6位也標示警示圖案，因為他們是
+  // 自己去考試的，但其實也是資深員工" — the 6 staff who passed a reviewed
+  // Formal Quiz instead of being marked qualified outright are, in Jeff's
+  // own words, senior staff too, so the icon shouldn't single out the
+  // direct-grant path. Broadened to staff.qualified itself — ANY qualified
+  // staff member's Hire date may have been auto-filled from their first
+  // clock-in (migration 0139's trigger), which can predate their real hire
+  // date by however long they worked here before this system existed,
+  // whichever path they became qualified through. qualified_marked_directly
+  // itself is left as-is (still set only by the direct-grant path, still
+  // never cleared) in case it's useful to tell the two paths apart again
+  // later — it just no longer gates this icon on its own.
   const [showSeniorNote, setShowSeniorNote] = useState(false)
 
   async function save() {
@@ -181,7 +189,7 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
         <Field
           label="Hire date (staff information only)"
           labelExtra={
-            staff.qualified_marked_directly && (
+            staff.qualified && (
               <button
                 type="button"
                 onClick={(e) => {
