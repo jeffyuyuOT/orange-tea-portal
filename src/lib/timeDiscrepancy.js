@@ -259,33 +259,42 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
 // getStaffTimeDiscrepancies already feeds for a flagged day's "Rostered
 // Xh Ym" link, but for ANY day shown in the full Attendance Logs table
 // below (AttendanceLogTable.jsx), not just the last DISCREPANCY_WINDOW_DAYS
-// days' mismatched ones — so a plain single-day lookup instead of the whole
-// discrepancy scan. Same "only a PUBLISHED roster counts" rule as above
-// (status = 'submitted') — a draft shift was never a real commitment, so
-// it's not "that day's roster time" yet. Returns null when there's no
-// published shift for that profile/store/day (e.g. a day off, or a day
-// worked at a store they weren't actually rostered at).
-export async function getRosteredShiftForDay(profileId, storeId, date) {
-  if (!profileId || !storeId || !date) return null
-  // Periods are weekly (Monday-start) — the period covering `date` can
-  // begin up to 6 days before it, same bound getStaffTimeDiscrepancies uses.
-  const weekStartFrom = format(addDays(new Date(date), -6), 'yyyy-MM-dd')
-  const { data: periodRows } = await supabase
-    .from('roster_periods')
-    .select('id')
-    .eq('store_id', storeId)
-    .eq('status', 'submitted')
-    .gte('week_start_date', weekStartFrom)
-    .lte('week_start_date', date)
-  const periodIds = (periodRows ?? []).map((p) => p.id)
-  if (!periodIds.length) return null
+// days' mismatched ones.
+//
+// Jeff, 2026-10-24 (follow-up): "loading的時間比上面time discrepancy點擊彈
+// 出的時間久，是正常嗎?" — it WAS, because this used to be a per-day lookup
+// (two fresh queries run on every single click) while the discrepancy
+// popup above just re-displays a day object already sitting in memory from
+// one getStaffTimeDiscrepancies call made on page load. Reshaped into a
+// bulk fetch instead — every published roster_entries row this profile's
+// EVER had, in one go, keyed by `${work_date}|${store_id}` — so
+// AttendanceLogTable.jsx can fetch it once in its own load() (same place it
+// already fetches this profile's whole attendance_events history, no date
+// limit either) and have every click be a plain in-memory lookup, just as
+// instant as the one above. Same "only a PUBLISHED roster counts" rule as
+// getStaffTimeDiscrepancies (status = 'submitted') — a draft shift was
+// never a real commitment, so it's not "that day's roster time" yet.
+export async function getRosteredShiftsForProfile(profileId) {
+  if (!profileId) return {}
   const { data: entryRows } = await supabase
     .from('roster_entries')
-    .select('start_time, end_time, break_half_hours')
-    .in('roster_period_id', periodIds)
+    .select('roster_period_id, work_date, start_time, end_time, break_half_hours')
     .eq('profile_id', profileId)
-    .eq('work_date', date)
-  return entryRows?.[0] ?? null
+  if (!entryRows?.length) return {}
+  const periodIds = Array.from(new Set(entryRows.map((e) => e.roster_period_id)))
+  const { data: periodRows } = await supabase.from('roster_periods').select('id, store_id, status').in('id', periodIds)
+  const periodById = new Map((periodRows ?? []).map((p) => [p.id, p]))
+  const result = {}
+  for (const entry of entryRows) {
+    const period = periodById.get(entry.roster_period_id)
+    if (!period || period.status !== 'submitted') continue
+    result[`${entry.work_date}|${period.store_id}`] = {
+      start_time: entry.start_time,
+      end_time: entry.end_time,
+      break_half_hours: entry.break_half_hours,
+    }
+  }
+  return result
 }
 
 // A subject counts as "unread" for this viewer when there's no

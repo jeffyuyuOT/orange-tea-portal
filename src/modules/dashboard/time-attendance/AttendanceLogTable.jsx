@@ -14,7 +14,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import Button from '../../../components/ui/Button'
 import Modal from '../../../components/ui/Modal'
 import AttendanceCellEditModal from './AttendanceCellEditModal'
-import { DISCREPANCY_WINDOW_DAYS, getRosteredShiftForDay } from '../../../lib/timeDiscrepancy'
+import { DISCREPANCY_WINDOW_DAYS, getRosteredShiftsForProfile } from '../../../lib/timeDiscrepancy'
 
 function todayStr() {
   return format(new Date(), 'yyyy-MM-dd')
@@ -114,28 +114,35 @@ export default function AttendanceLogTable({
   const [addingRecord, setAddingRecord] = useState(false)
   // Jeff, 2026-10-24: "staff time log點擊每一天的日期，上面會跳出小視窗顯示
   // 那一天的班表時間跟休息次數" — rosterDetailCell is which day's (date +
-  // store) popup is open, or null; rosterDetailShift is undefined while that
-  // day's rostered shift is being fetched (getRosteredShiftForDay), null
-  // once fetched if there wasn't a published shift that day, or the
-  // { start_time, end_time, break_half_hours } row once there is one.
+  // store) popup is open, or null. rosterByKey (below) already has every
+  // published shift this profile's ever had, fetched once in load() the
+  // same way everything else on this table is — so opening the popup is
+  // just reading that map, no click-time query.
   const [rosterDetailCell, setRosterDetailCell] = useState(null)
-  const [rosterDetailShift, setRosterDetailShift] = useState(undefined)
+  // Jeff, 2026-10-24: "loading的時間比上面time discrepancy點擊彈出的時間久，
+  // 是正常嗎?" — it WAS normal: unlike StaffTimeLogsPage's "Rostered Xh Ym"
+  // link, which just re-displays a day object already sitting in memory
+  // from the one getStaffTimeDiscrepancies call the whole staff list made
+  // on load, this popup used to run two fresh queries on every single
+  // click. rosterByKey — every published roster_entries row this profile's
+  // ever had, keyed the same `${date}|${storeId}` way as editsByCell/
+  // breaksByCell below — is fetched once here instead, so a click is just
+  // as instant as the one above from now on.
+  const [rosterByKey, setRosterByKey] = useState({})
 
-  async function openRosterDetail(cell) {
+  function openRosterDetail(cell) {
     setRosterDetailCell(cell)
-    setRosterDetailShift(undefined)
-    const shift = await getRosteredShiftForDay(profileId, cell.storeId, cell.date)
-    setRosterDetailShift(shift)
   }
 
   async function load() {
     setLoading(true)
-    const [{ data: primaryRow }, { data: userStoreRows }, { data: eventRows }, { data: editRows }, breakRows] = await Promise.all([
+    const [{ data: primaryRow }, { data: userStoreRows }, { data: eventRows }, { data: editRows }, breakRows, rosterMap] = await Promise.all([
       supabase.from('profiles').select('primary_store_id').eq('id', profileId).single(),
       supabase.from('user_stores').select('store_id').eq('profile_id', profileId),
       supabase.from('attendance_events').select('*').eq('profile_id', profileId).order('occurred_at', { ascending: true }),
       supabase.from('attendance_event_edits').select('*').eq('profile_id', profileId).order('edited_at', { ascending: false }),
       getAttendanceDayBreaks(profileId),
+      getRosteredShiftsForProfile(profileId),
     ])
     const ownStoreIds = new Set()
     if (primaryRow?.primary_store_id) ownStoreIds.add(primaryRow.primary_store_id)
@@ -164,6 +171,7 @@ export default function AttendanceLogTable({
     setEvents(eventRows ?? [])
     setEdits(editRows ?? [])
     setBreaks(breakRows ?? [])
+    setRosterByKey(rosterMap ?? {})
     setLoading(false)
   }
 
@@ -209,6 +217,8 @@ export default function AttendanceLogTable({
   // editorAccessibleStoreIds=null, so no narrowing applies to them.
   const canAddAtCurrentStore =
     !!currentStoreId && (editorAccessibleStoreIds == null || editorAccessibleStoreIds.includes(currentStoreId))
+
+  const rosterDetailShift = rosterDetailCell ? rosterByKey[cellKey(rosterDetailCell.date, rosterDetailCell.storeId)] : null
 
   return (
     <div>
@@ -412,15 +422,10 @@ export default function AttendanceLogTable({
 
       <Modal
         open={!!rosterDetailCell}
-        onClose={() => {
-          setRosterDetailCell(null)
-          setRosterDetailShift(undefined)
-        }}
+        onClose={() => setRosterDetailCell(null)}
         title={rosterDetailCell ? format(parseISO(rosterDetailCell.date), 'EEE, MMM d yyyy') + ' — rostered shift' : ''}
       >
-        {rosterDetailShift === undefined ? (
-          <LoadingSpinner />
-        ) : rosterDetailShift ? (
+        {rosterDetailShift ? (
           <div className="space-y-2 text-sm text-gray-700">
             <div className="flex items-center justify-between">
               <span className="text-gray-500">Scheduled time</span>
