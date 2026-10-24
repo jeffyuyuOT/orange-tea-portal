@@ -704,6 +704,59 @@ export default function ManageRosterPage() {
     if (loadedPeriodStatus === 'submitted') setClearedFromPublished(true)
   }
 
+  // Jeff, 2026-10-24: "manage roaster的action裡新增Copy Last Week的選項並放
+  // 在最上面，選的話會copy上一個禮拜最後發布的班表時間。之後再手動更改" —
+  // "last week" is relative to whichever week is currently open here
+  // (weekStart - 7 days), not necessarily the real calendar's previous
+  // week, and "最後發布" (last published) means that week's roster_periods
+  // row has to actually be status 'submitted' — a week that was only ever
+  // saved as a draft, or never touched at all, has nothing to copy. Same
+  // contract as Clear above: only ever touches the on-screen `entries`
+  // (every date shifted forward 7 days onto the week being edited), nothing
+  // is written to the database until Save/Submit, and notes are left alone
+  // since Jeff's wording was specifically "班表時間" (the roster's shift
+  // TIMES), not the notes field below the grid.
+  async function copyLastWeek() {
+    if (
+      entries.length &&
+      !window.confirm("Copy last week's published roster into this grid? This replaces what's currently on screen (not saved until you Save/Submit again).")
+    ) {
+      return
+    }
+    const priorWeekStart = format(addDays(parseISO(weekStart), -7), 'yyyy-MM-dd')
+    const { data: period } = await supabase
+      .from('roster_periods')
+      .select('*')
+      .eq('store_id', currentStoreId)
+      .eq('week_start_date', priorWeekStart)
+      .eq('status', 'submitted')
+      .maybeSingle()
+    if (!period) {
+      setMessage("No published roster found for last week.")
+      return
+    }
+    const [{ data: rows }, { data: nameRows }] = await Promise.all([
+      supabase.from('roster_entries').select('*, profiles(first_name, last_name)').eq('roster_period_id', period.id),
+      supabase.from('user_stores').select('profile_id, roster_display_name').eq('store_id', currentStoreId),
+    ])
+    const nameByProfile = new Map((nameRows ?? []).map((r) => [r.profile_id, r.roster_display_name]))
+    setEntries(
+      (rows ?? []).map((r) => ({
+        profileId: r.profile_id ?? '',
+        staffName: r.profiles
+          ? rosterDisplayName({ ...r.profiles, roster_display_name: nameByProfile.get(r.profile_id) })
+          : r.staff_name_raw ?? '',
+        date: format(addDays(parseISO(r.work_date), 7), 'yyyy-MM-dd'),
+        startTime: timeToDecimal(r.start_time),
+        endTime: timeToDecimal(r.end_time),
+        breakHours: r.break_half_hours ?? '',
+        notes: r.notes ?? '',
+      }))
+    )
+    if (loadedPeriodStatus === 'submitted') setClearedFromPublished(true)
+    setMessage("Copied last week's published roster below — review the times and Save/Submit when ready.")
+  }
+
   // Save/Submit's actual entry point now — the published-week block (just
   // added) comes first since it's an outright block with nothing to confirm
   // past, then the Clear-while-published case (see clearGrid/
@@ -897,6 +950,23 @@ export default function ManageRosterPage() {
                   sm+, where the button genuinely is flush with the screen's
                   right edge again. */
               <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
+                {/* Jeff, 2026-10-24: "新增Copy Last Week的選項並放在最上面" —
+                    see copyLastWeek() above for what it actually does. Its
+                    own divider below separates it from the file-oriented
+                    items beneath (Upload Excel/Download template), the same
+                    way Clear already gets its own divider at the bottom for
+                    being a different kind of action. */}
+                <button
+                  type="button"
+                  className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  onClick={() => {
+                    setActionMenuOpen(false)
+                    copyLastWeek()
+                  }}
+                >
+                  Copy Last Week
+                </button>
+                <div className="my-1 border-t border-gray-100" />
                 <button
                   type="button"
                   className="block w-full px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-brand-50"

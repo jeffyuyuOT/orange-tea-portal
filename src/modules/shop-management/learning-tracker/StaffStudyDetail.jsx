@@ -231,6 +231,18 @@ export default function StaffStudyDetail({ staff, onBack }) {
   // Direct grant, bypassing the Formal Quiz Pass flow (and its memorize-
   // warning above) entirely — Jeff wanted a way to mark someone Qualified
   // outright, e.g. an experienced hire, without staging a review.
+  //
+  // Jeff, 2026-10-24: "如果直接標記為qualified的員工則入職日期下會註明圖示" —
+  // this is specifically the "experienced hire" path from the comment
+  // above, which is exactly when an auto-filled hire date (migration 0139 —
+  // Hire date now defaults to this profile's first-ever clock-in) can be
+  // misleading: someone brought in already-qualified may well have a real
+  // hire date well before they ever clocked in through this system.
+  // qualified_marked_directly records that fact (once true, left true —
+  // it's history, not a live status) so StaffDetailModal.jsx can show a
+  // warning icon next to Hire date. Deliberately NOT set by togglePass's
+  // ordinary Formal Quiz Pass grant above — that's a normal trainee whose
+  // first clock-in genuinely is their hire date.
   async function markQualified() {
     if (
       !confirm(
@@ -246,6 +258,7 @@ export default function StaffStudyDetail({ staff, onBack }) {
         qualified: true,
         qualified_at: new Date().toISOString(),
         qualified_by: profile.id,
+        qualified_marked_directly: true,
         // See the same comment on togglePass above — Qualified means at
         // least Advanced, so the title has to agree even when granted this
         // direct way, bypassing any Level-Up Exam entirely.

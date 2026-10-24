@@ -55,6 +55,17 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
   })
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Jeff, 2026-10-24: "如果直接標記為qualified的員工則入職日期下會註明圖示，
+  // 點擊會顯示..." — staff.qualified_marked_directly (migration 0139) is set
+  // only by Learning Tracker's "Mark as Qualified" direct grant
+  // (StaffStudyDetail.jsx's markQualified — Jeff's own "e.g. an experienced
+  // hire" case), never by the ordinary Formal Quiz Pass path. For that
+  // specific case, Hire date was likely auto-filled from this person's
+  // first clock-in (same migration), which can predate their real hire date
+  // by however long they worked here before ever using this system — this
+  // icon/popup exists to flag that distinction right where a manager would
+  // otherwise take the date at face value.
+  const [showSeniorNote, setShowSeniorNote] = useState(false)
 
   async function save() {
     setSaving(true)
@@ -167,7 +178,30 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
             onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })}
           />
         </Field>
-        <Field label="Hire date (staff information only)">
+        <Field
+          label="Hire date (staff information only)"
+          labelExtra={
+            staff.qualified_marked_directly && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  // Field's label wraps this whole block, including the date
+                  // input — without stopping propagation, clicking this icon
+                  // would also trigger the label's normal pairing with the
+                  // input (opening the browser's date picker) underneath.
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setShowSeniorNote(true)
+                }}
+                className="text-gray-400 hover:text-brand-600"
+                title="This is a senior staff member. The date shown is the system start date, not the official hire date."
+                aria-label="Note about this hire date"
+              >
+                ⚠️
+              </button>
+            )
+          }
+        >
           <input
             type="date"
             disabled={isReadOnly}
@@ -242,14 +276,28 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
           <StaffDocumentsSection profileId={staff.id} storeId={currentStoreId} readOnly={isReadOnly} />
         </div>
       )}
+
+      {showSeniorNote && (
+        <Modal open onClose={() => setShowSeniorNote(false)} title="Hire date note">
+          <p className="text-sm text-gray-600">
+            This is a senior staff member. The date shown is the system start date, not the official hire date.
+          </p>
+          <Button className="mt-4 w-full" onClick={() => setShowSeniorNote(false)}>
+            Close
+          </Button>
+        </Modal>
+      )}
     </Modal>
   )
 }
 
-function Field({ label, hint, span2, children }) {
+function Field({ label, hint, span2, labelExtra, children }) {
   return (
     <label className={`block ${span2 ? 'sm:col-span-2' : ''}`}>
-      <span className="mb-1 block text-xs font-medium text-gray-500">{label}</span>
+      <span className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-500">
+        {label}
+        {labelExtra}
+      </span>
       {children}
       {hint && <span className="mt-1 block text-xs text-gray-400">{hint}</span>}
     </label>
