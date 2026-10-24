@@ -189,7 +189,7 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   )
 
   if (salesStores.length === 0) {
-    return <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 › 分店管理 新增分店。</Notice>
   }
 
   const wFilter = { quarter: wQuarter ? Number(wQuarter) : null, month: wMonth ? Number(wMonth) : null }

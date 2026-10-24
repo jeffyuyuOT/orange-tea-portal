@@ -109,7 +109,7 @@ export default function BizGridImport({ file, salesStores, onImported, onClose }
       open
       wide
       onClose={onClose}
-      title="匯入 Excel — 鷹眼"
+      title="匯入 Excel — 營業"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -123,7 +123,7 @@ export default function BizGridImport({ file, salesStores, onImported, onClose }
     >
       <div className="space-y-3 text-sm">
         <Notice kind="info">
-          這裡直接寫入資料庫。每個鷹眼分店會讀檔案裡同名的工作表，檔案裡有幾個月份就匯入幾個月份。總營業額、總杯數由系統計算，不匯入；連結消費展望的分店 POS 讀消費展望的 O.POST，POS 欄會略過。鷹眼匯出的「Excel 匯出」檔案也可以直接匯入。
+          這裡直接寫入資料庫。每個營業分店會讀檔案裡同名的工作表，檔案裡有幾個月份就匯入幾個月份。總營業額、總杯數由系統計算，不匯入；連結SF的分店 POS 讀SF的 O.POST，POS 欄會略過。營業匯出的「Excel 匯出」檔案也可以直接匯入。
         </Notice>
         {state.loading && <LoadingSpinner label="讀取檔案…" />}
         {state.failed && <Notice kind="error">{state.failed}</Notice>}

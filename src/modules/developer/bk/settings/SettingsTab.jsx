@@ -32,15 +32,15 @@ import AutoBackupPanel from './AutoBackupPanel'
 const SUBTABS = [
   ['import', '匯入'],
   ['backup', '備份'],
-  ['sf', '消費展望'],
+  ['sf', 'SF'],
   ['bonus', '收成'],
 ]
 
 // SF's template has one tab per store (each with that store's own payment-
 // type columns), so it needs the full store list; the others are generic.
 const TEMPLATES = [
-  ['消費展望', (stores) => downloadSfTemplate(stores)],
-  ['Stock lost', () => downloadUAccountTemplate()],
+  ['SF', (stores) => downloadSfTemplate(stores)],
+  ['U', () => downloadUAccountTemplate()],
   ['收成', () => downloadDividendTemplate()],
   ['機件 Jeff', () => downloadJeffOwedTemplate()],
   ['機件 Emma', () => downloadEmmaClaimTemplate()],
@@ -52,8 +52,8 @@ const ROUTES = [
   ['jeff', /jeff/i, '機件 Jeff'],
   ['emma', /emma/i, '機件 Emma'],
   ['bonus', /收成|dividend|bonus/i, '收成'],
-  ['u', /stock\s*lost|u\s*帳|u\s*account|ucash|分店現金|收支/i, 'Stock lost'],
-  ['sf', /\bsf\b|sales\s*figure|消費展望/i, '消費展望'],
+  ['u', /stock\s*lost|u\s*帳|u\s*account|ucash|分店現金|收支|(^|[^a-z])u([^a-z]|$)/i, 'U'],
+  ['sf', /(^|[^a-z])sf([^a-z]|$)|sales\s*figure|消費展望/i, 'SF'],
 ]
 const ROUTE_LABEL = Object.fromEntries(ROUTES.map(([k, , label]) => [k, label]))
 
@@ -203,15 +203,15 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
               </select>
               <Button
                 variant="secondary"
-                disabled={templateChoice === '消費展望' && stores.length === 0}
+                disabled={templateChoice === 'SF' && stores.length === 0}
                 onClick={() => TEMPLATES.find(([label]) => label === templateChoice)?.[1](stores)}
               >
                 下載範本
               </Button>
             </div>
-            {templateChoice === '消費展望' && (
+            {templateChoice === 'SF' && (
               <div className="text-xs text-gray-500">
-                {stores.length === 0 ? '還沒有任何分店，無法產生消費展望範本。' : '消費展望範本每個分店各自一個分頁，欄位是該分店目前設定的 payment type。'}
+                {stores.length === 0 ? '還沒有任何分店，無法產生SF範本。' : 'SF範本每個分店各自一個分頁，欄位是該分店目前設定的 payment type。'}
               </div>
             )}
           </div>
@@ -219,7 +219,7 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
           <div className="space-y-3 rounded-xl border border-brand-100 bg-white p-4">
             <div className="text-sm font-semibold text-brand-900">上傳檔案</div>
             <div className="text-xs text-gray-500">
-              系統會根據檔名判斷匯入哪個分頁（檔名含「消費展望」「Stock lost」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
+              系統會根據檔名判斷匯入哪個分頁（檔名含「SF」「U」「收成」「Jeff」「Emma」）。檔名看不出來的話可以手動選擇。
             </div>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
               選擇 Excel 檔案
@@ -264,20 +264,20 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
 
                 {kind === 'sf' &&
                   (stores.length === 0 ? (
-                    <Notice kind="info">還沒有任何分店，無法匯入消費展望。</Notice>
+                    <Notice kind="info">還沒有任何分店，無法匯入SF。</Notice>
                   ) : (
                     <BackfillGridImport
                       file={file}
                       kind="sf"
                       stores={stores}
                       onClose={reset}
-                      onImported={(count) => imported(count, '消費展望')}
+                      onImported={(count) => imported(count, 'SF')}
                     />
                   ))}
 
                 {kind === 'u' &&
                   (stores.length === 0 ? (
-                    <Notice kind="info">還沒有任何分店，無法匯入 Stock lost。</Notice>
+                    <Notice kind="info">還沒有任何分店，無法匯入 U。</Notice>
                   ) : !uSheets ? (
                     <LoadingSpinner label="讀取檔案…" />
                   ) : (
@@ -298,7 +298,7 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
                           stores={stores}
                           sheetNames={uSheets.cash ? [uSheets.cash] : undefined}
                           onClose={() => setUPipeline(null)}
-                          onImported={(count) => imported(count, 'Stock lost > 分店現金')}
+                          onImported={(count) => imported(count, 'U > 分店現金')}
                         />
                       )}
                       {uPipeline === 'entries' && (
@@ -308,7 +308,7 @@ export default function SettingsTab({ stores, onStoresChanged, onPaymentTypesCha
                           defaultStoreId={stores[0]?.id ?? null}
                           sheetNames={uSheets.entries ? [uSheets.entries] : undefined}
                           onClose={() => setUPipeline(null)}
-                          onImported={(count) => imported(count, 'Stock lost > 收支')}
+                          onImported={(count) => imported(count, 'U > 收支')}
                         />
                       )}
                     </div>

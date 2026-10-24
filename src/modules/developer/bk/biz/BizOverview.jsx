@@ -136,7 +136,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
     }
   }
 
-  if (stores.length === 0) return <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 › 分店管理 新增分店。</Notice>
+  if (stores.length === 0) return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 › 分店管理 新增分店。</Notice>
 
   return (
     <div className="space-y-3">
@@ -151,7 +151,7 @@ export default function BizOverview({ stores, year, month, onYearMonth, onDirtyC
         </div>
       </div>
       <Notice kind="info">
-        各分店的 P杯數、CV、Self O、SO杯數都在這裡輸入，分店頁面會直接讀這裡的數字（分店頁只能看，不能改）。有連結消費展望的分店，POS 讀消費展望的 O.POST；沒有連結消費展望的分店，POS 欄也在這裡輸入（P杯數右邊）。
+        各分店的 P杯數、CV、Self O、SO杯數都在這裡輸入，分店頁面會直接讀這裡的數字（分店頁只能看，不能改）。有連結SF的分店，POS 讀SF的 O.POST；沒有連結SF的分店，POS 欄也在這裡輸入（P杯數右邊）。
       </Notice>
       {error && <Notice kind="error" onClose={() => setError('')}>{error}</Notice>}
       {msg && <Notice kind="ok" onClose={() => setMsg('')}>{msg}</Notice>}

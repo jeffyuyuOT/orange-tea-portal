@@ -91,7 +91,7 @@ export default function HoursTab({ stores, topActive = true }) {
   }
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何鷹眼分店。請先到 系統設置 › 鷹眼 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何營業分店。請先到 系統設置 › 營業 新增分店。</Notice>
   }
 
   const cols = hours.length + 1 + (stats.outsideAny ? 1 : 0)

@@ -59,8 +59,8 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
   const jobs = useMemo(
     () =>
       (state.jobs ?? []).map((j) => {
-        let posDropped = 0 // linked store: 消費展望 already has that day's O.POST
-        let posKept = 0 // linked store: 消費展望 has nothing that day, so the file's POS is imported
+        let posDropped = 0 // linked store: SF already has that day's O.POST
+        let posKept = 0 // linked store: SF has nothing that day, so the file's POS is imported
         const entries = Object.fromEntries(
           Object.entries(j.s.entries)
             .map(([d, e]) => {
@@ -123,7 +123,7 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
       open
       wide
       onClose={onClose}
-      title="匯入 Excel — 鷹眼（歷史年度檔）"
+      title="匯入 Excel — 營業（歷史年度檔）"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -137,7 +137,7 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
     >
       <div className="space-y-3 text-sm">
         <Notice kind="info">
-          這是歷史年度檔（分頁名稱像 202401，每個分頁把各分店並排）。直接寫入資料庫。檔案裡的 Sunnypark 會當作 Sunnybank。總營業額、總杯數由系統計算（POS + Self O + CV×4；P杯數 + SO杯數）。連結消費展望的分店，POS 以消費展望的 O.POST 為準，只有消費展望沒有資料的日期才會匯入檔案裡的 POS。只有「營業額／杯數」合計的舊資料，營業額會記在 POS、杯數記在 P杯數，這樣合計才會一樣。一次匯入一個檔案。
+          這是歷史年度檔（分頁名稱像 202401，每個分頁把各分店並排）。直接寫入資料庫。檔案裡的 Sunnypark 會當作 Sunnybank。總營業額、總杯數由系統計算（POS + Self O + CV×4；P杯數 + SO杯數）。連結SF的分店，POS 以SF的 O.POST 為準，只有SF沒有資料的日期才會匯入檔案裡的 POS。只有「營業額／杯數」合計的舊資料，營業額會記在 POS、杯數記在 P杯數，這樣合計才會一樣。一次匯入一個檔案。
         </Notice>
         {state.loading && <LoadingSpinner label="讀取檔案…" />}
         {state.failed && <Notice kind="error">{state.failed}</Notice>}
@@ -147,7 +147,7 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
             <div className="text-gray-500">檔案：{file.name}</div>
             {state.unmatched?.length > 0 && (
               <Notice kind="info">
-                這些分店在鷹眼分店裡找不到同名的，不會匯入：{state.unmatched.join('、')}。需要的話先到 系統設置 › 鷹眼 › 分店管理 新增，再重新匯入這個檔案。
+                這些分店在營業分店裡找不到同名的，不會匯入：{state.unmatched.join('、')}。需要的話先到 系統設置 › 營業 › 分店管理 新增，再重新匯入這個檔案。
               </Notice>
             )}
             {jobs.length === 0 ? (
@@ -177,7 +177,7 @@ export default function BizHistoryImport({ file, salesStores, onImported, onClos
                             {j.store.name}
                             {j.linked && (
                               <div className="text-[11px] text-amber-600">
-                                連結消費展望：消費展望沒有資料的 {j.posKept} 天會匯入 POS；消費展望已有資料的 {j.posDropped} 天略過 POS
+                                連結SF：SF沒有資料的 {j.posKept} 天會匯入 POS；SF已有資料的 {j.posDropped} 天略過 POS
                               </div>
                             )}
                           </td>

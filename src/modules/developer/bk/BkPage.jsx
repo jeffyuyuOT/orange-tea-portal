@@ -40,17 +40,17 @@ import BackupGuard from './BackupGuard'
 //     used to just switch a local sub-tab back to the sheet, now has to jump
 //     to a different top-level tab AND tell it which store/month to open).
 const TABS = [
-  ['sf', '消費展望'],
-  ['biz', '鷹眼'],
+  ['sf', 'SF'],
+  ['biz', '營業'],
   ['hours', 'HA'],
-  ['u', 'Stock lost'],
+  ['u', 'U'],
   ['bonus', '收成'],
   ['owed', '機件'],
   ['history', '歷史紀錄'],
   ['settings', '系統設置'],
 ]
 
-const TAB_NAMES = { sf: '消費展望', biz: '鷹眼', u: 'Stock lost' }
+const TAB_NAMES = { sf: 'SF', biz: '營業', u: 'U' }
 
 export default function BkPage() {
   const [tab, setTab] = useState('sf')

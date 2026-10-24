@@ -24,7 +24,7 @@ export function sumOtherIncome(byDate) {
   return { total: round2(items.reduce((s, i) => s + i.amount, 0)), items }
 }
 
-export function IncomeMark({ onClick, title = '有 Stock lost 其他收入，點擊查看' }) {
+export function IncomeMark({ onClick, title = '有 U 其他收入，點擊查看' }) {
   return (
     <button
       type="button"

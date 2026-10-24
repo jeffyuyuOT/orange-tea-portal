@@ -561,8 +561,8 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <SummaryCard label="COH（消費展望現金）" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
-            <SummaryCard label="UCOH（非消費展望現金）" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
+            <SummaryCard label="COH（SF現金）" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
+            <SummaryCard label="UCOH（非SF現金）" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
             <SummaryCard label="D（未入庫）" value={summary.dUnstocked} hint="未勾入庫的 D + +/−" />
             <SummaryCard
               label="P/L"
@@ -601,7 +601,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                     <th className={`${th} bg-gray-100`}>+/−</th>
                     <th className={`${th} bg-sky-50`}>D</th>
                     <th className={`${th} bg-sky-50`}>入庫</th>
-                    <th className={`${th} bg-brand-100`}>消費展望 cash</th>
+                    <th className={`${th} bg-brand-100`}>SF cash</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -614,7 +614,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                           <span className="font-medium">{Number(r.date.slice(8))}</span>{' '}
                           <span className="text-xs text-gray-400">{weekdayOf(r.date)}</span>
                         </td>
-                        <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-600`} title="與消費展望頁面同步">
+                        <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-600`} title="與SF頁面同步">
                           {r.income > 0 && (
                             <button
                               type="button"

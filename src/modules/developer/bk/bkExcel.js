@@ -62,7 +62,7 @@ export async function buildSfWorkbook({ storeName, year, month, columns, days, d
   const wb = await newWorkbook()
   const ws = wb.addWorksheet(monthLabel(year, month))
   const subs = columns.flatMap((c) => c.subs.map((s) => ({ ...s, parentName: c.name })))
-  ws.addRow([`${storeName} — 消費展望 ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
+  ws.addRow([`${storeName} — SF ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
   ws.addRow([])
   styleHeader(
     ws.addRow(['Date', ...columns.map((c) => c.name), 'Total', 'Sum vs Total', ...subs.map((s) => `${s.name} (${s.parentName})`), 'O.CA', 'O.POST'])
@@ -111,14 +111,14 @@ export async function exportCashXlsx({ storeName, year, month, open, sfDaysMap, 
   const dayRows = dates.map((date) => ({ date, ...computeCashDay(sfDaysMap[date], cashDaysMap[date]) }))
   const s = computeCashSummary(open.coh, open.ucoh, dayRows, entries)
 
-  ws.addRow([`${storeName} — Stock lost 分店現金 ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
+  ws.addRow([`${storeName} — U 分店現金 ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
   ws.addRow([])
   styleHeader(ws.addRow(['COH', 'UCOH', 'D + +/− (未入庫)', 'P/L']))
   ws.addRow([s.coh, s.ucoh, s.dUnstocked, s.pl])
   ws.addRow(['上月月底 COH', open.coh, '上月月底 UCOH', open.ucoh])
   ws.addRow([])
 
-  styleHeader(ws.addRow(['Date', 'O.CA', '實 CA', '+/−', 'D', '入庫', '消費展望 cash']))
+  styleHeader(ws.addRow(['Date', 'O.CA', '實 CA', '+/−', 'D', '入庫', 'SF cash']))
   for (const r of dayRows) {
     ws.addRow([`${r.date} ${weekdayOf(r.date)}`, r.oCa, r.actual, r.pm, r.d, r.stocked ? '✓' : '', r.sfCash])
   }

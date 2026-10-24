@@ -15,7 +15,7 @@ import { brisbaneToday, buildColumns, cashDaysFromRows, monthLabel, sfDaysFromRo
 import { Notice, StoreTabs } from '../bkUi'
 import { sheetNameForStore } from '../bkImportTemplates'
 
-const LABEL = { sf: '消費展望', cashday: 'Stock lost > 分店現金' }
+const LABEL = { sf: 'SF', cashday: 'U > 分店現金' }
 
 // Every row in these files already carries its own date, so which month(s)
 // a sheet covers is read straight off the dates — `fallback` is only used to
@@ -217,9 +217,9 @@ export default function BackfillGridImport({ file, kind, stores, sheetNames, onI
           </>
         )}
         <Notice kind="info">
-          這裡直接寫入資料庫（不像分店現金頁面要再按「儲存」、消費展望頁面要再按「提交」）。
+          這裡直接寫入資料庫（不像分店現金頁面要再按「儲存」、SF頁面要再按「提交」）。
           {kind === 'sf'
-            ? '每個分店會讀檔案裡同名的那個工作表（消費展望範本每個分店各自一個分頁），檔案裡有幾個月份的資料就會匯入幾個月份，一次套用全部分店。'
+            ? '每個分店會讀檔案裡同名的那個工作表（SF範本每個分店各自一個分頁），檔案裡有幾個月份的資料就會匯入幾個月份，一次套用全部分店。'
             : '每一列的分店以檔案裡的 Store 欄為準（分店名稱要跟系統裡的一樣），檔案裡有幾個月份的資料就會匯入幾個月份，不需要先選分店或月份。'}
         </Notice>
 

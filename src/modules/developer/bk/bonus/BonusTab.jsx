@@ -55,7 +55,7 @@ export default function BonusTab({ stores, topActive = true }) {
   }, [data, stores, storeId, reload])
 
   if (stores.length === 0) {
-    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › 消費展望 › 分店管理 新增分店。</Notice>
+    return <Notice kind="info">還沒有任何分店。請先到 系統設置 › SF › 分店管理 新增分店。</Notice>
   }
 
   return (

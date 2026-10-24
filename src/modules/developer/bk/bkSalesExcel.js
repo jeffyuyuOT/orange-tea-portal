@@ -75,7 +75,7 @@ export async function buildBizRangeWorkbook({ blocks, from, to }) {
     for (let n = 2; used.has(name.toLowerCase()); n++) name = `${safeSheetName(store.name).slice(0, 28)} ${n}`
     used.add(name.toLowerCase())
     const ws = wb.addWorksheet(name)
-    ws.addRow([`${store.name} — 鷹眼 ${from} ~ ${to}`]).font = { bold: true, size: 14 }
+    ws.addRow([`${store.name} — 營業 ${from} ~ ${to}`]).font = { bold: true, size: 14 }
     ws.addRow([])
     const header = ws.addRow(HEADERS)
     header.font = { bold: true }
@@ -119,7 +119,7 @@ export async function buildBizRangeWorkbook({ blocks, from, to }) {
 export async function exportBizExcel({ stores, from, to }) {
   const blocks = await collect(stores, from, to)
   const wb = await buildBizRangeWorkbook({ blocks, from, to })
-  await download(wb, `鷹眼_${from}_${to}.xlsx`)
+  await download(wb, `營業_${from}_${to}.xlsx`)
 }
 
 // ---------------------------------------------------------------------------
@@ -175,5 +175,5 @@ export async function exportBizWeek({ stores, monday }) {
   if (!isMonday(monday)) throw new Error('週匯出要從星期一開始。')
   const blocks = await collect(stores, monday, addDays(monday, 6))
   const wb = await buildBizWeekWorkbook({ blocks, monday })
-  await download(wb, `鷹眼週報_${safeName(monday)}.xlsx`)
+  await download(wb, `營業週報_${safeName(monday)}.xlsx`)
 }
