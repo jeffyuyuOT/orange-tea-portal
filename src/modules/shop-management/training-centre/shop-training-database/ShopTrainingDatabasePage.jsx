@@ -8,6 +8,7 @@ import ClampedText from '../../../../components/ui/ClampedText'
 import SimpleRichTextEditor from '../../../../components/ui/SimpleRichTextEditor'
 import { EmptyState } from '../../../../components/ui/LoadingSpinner'
 import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker'
+import { useDragReorder, DragHandle } from '../../../../lib/useDragReorder'
 
 // Moved here from Admin Center (migration 0052): each store now owns its own
 // training content outright — no more one shared global list with an
@@ -77,6 +78,13 @@ import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker
 // neither "Save to Multiple Stores" nor "Copy to store…" carries a
 // category_id across stores — a destination store's categories are a
 // completely different set of rows, even if one happens to share a name.
+//
+// Jeff, 2026-10-26 (same day, follow-up): "shop training data base裡的排序
+// 改成用拉的，不是用箭頭上下" — item reordering is now drag-and-drop (the same
+// `useDragReorder`/`DragHandle` helper Formula Database's CategoryManager.jsx
+// and ItemManager.jsx already use) instead of ↑/↓ buttons. Dragging only
+// ever reorders within whichever group is on screen — the open category, or
+// the uncategorized list — same scoping the ↑/↓ buttons had.
 export default function ShopTrainingDatabasePage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [items, setItems] = useState([])
@@ -89,11 +97,6 @@ export default function ShopTrainingDatabasePage() {
   const [openCategoryId, setOpenCategoryId] = useState(null)
   const [creatingCategory, setCreatingCategory] = useState(false)
   const [editingCategory, setEditingCategory] = useState(null)
-  // Locks BOTH ↑/↓ buttons for every row while a reorder is in flight — not
-  // just the one clicked — since a reorder is a two-step swap (two
-  // sequential updates) and a second click landing mid-swap could race it
-  // and leave sort_order inconsistent, not just double-fire.
-  const [moving, setMoving] = useState(false)
 
   // Jeff, 2026-09: "developer也要像admin一樣可以copy到其他分店" — developer
   // is meant to be admin's superset everywhere (RLS already treats it that
@@ -125,21 +128,17 @@ export default function ShopTrainingDatabasePage() {
     ? items.filter((i) => i.category_id === openCategoryId)
     : items.filter((i) => !i.category_id)
 
-  async function move(item, dir) {
-    if (moving) return
-    // Swaps within visibleItems, not the full items list, so reordering
-    // never crosses from one category (or the uncategorized list) into
-    // another — an item can only trade places with its own neighbor in the
-    // same group that's actually on screen.
-    const idx = visibleItems.findIndex((i) => i.id === item.id)
-    const swapWith = visibleItems[idx + dir]
-    if (!swapWith) return
-    setMoving(true)
-    await supabase.from('shop_training_items').update({ sort_order: swapWith.sort_order }).eq('id', item.id)
-    await supabase.from('shop_training_items').update({ sort_order: item.sort_order }).eq('id', swapWith.id)
+  // Dragging a row can move it several places in one go, so every item in
+  // `next` (the reordered visibleItems slice `useDragReorder` hands back)
+  // gets a fresh sequential sort_order (0..n-1) — only ever meaningful
+  // relative to its own group's other members, since every view here
+  // already filters by category_id before sorting, so it's fine for these
+  // values to overlap with another group's sort_order.
+  async function persistOrder(next) {
+    await Promise.all(next.map((it, idx) => supabase.from('shop_training_items').update({ sort_order: idx }).eq('id', it.id)))
     await load()
-    setMoving(false)
   }
+  const { handleProps, rowProps } = useDragReorder(visibleItems, persistOrder)
 
   async function remove(id) {
     if (!confirm('Delete this training item?')) return
@@ -232,79 +231,73 @@ export default function ShopTrainingDatabasePage() {
             )
           ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {visibleItems.map((item, idx) => (
-            // Jeff, 2026-09-29: "手機板的shop training database介面要好操作
-            // 一點，都超出螢幕了" — title + ↑/↓ + (admin's) "Copy to store…"
-            // + "Delete" used to sit forced onto one line (no wrap), so on a
-            // phone the button cluster ran off the right edge of the
-            // screen. flex-wrap on the row + min-w-0 on the title button
-            // (so it can actually shrink/wrap instead of forcing the row
-            // wide) lets the button cluster drop to its own line on a
-            // narrow screen instead; ml-auto keeps it right-aligned either
-            // way (single line on desktop, its own line on mobile).
-            <div key={item.id} className="px-4 py-2.5">
-              <div onClick={() => setEditing(item)} className="cursor-pointer text-left">
-                <ClampedText text={item.title} title="Item title" className="font-medium text-gray-800" />
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                  {item.is_must_know && (
-                    <span className="text-amber-500" title="Must Know Item">
-                      ⭐
-                    </span>
-                  )}
-                  {item.training_journey_phase && (
-                    <span
-                      className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700"
-                      title="Training Journey phase"
-                    >
-                      {item.training_journey_phase === 4 ? 'Phase 4 (Master)' : `Phase ${item.training_journey_phase}`}
-                    </span>
-                  )}
-                  {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
-                  {item.copy_group_id && <Badge color="brand">🔗 Linked across stores</Badge>}
+          {visibleItems.map((item) => {
+            const { isDragging, isDropTarget, ...dragRowProps } = rowProps(item.id)
+            return (
+              // Jeff, 2026-09-29: "手機板的shop training database介面要好操作
+              // 一點，都超出螢幕了" — title + (admin's) "Copy to store…" +
+              // "Delete" used to sit forced onto one line (no wrap), so on a
+              // phone the button cluster ran off the right edge of the
+              // screen. flex-wrap on the row + min-w-0 on the title button
+              // (so it can actually shrink/wrap instead of forcing the row
+              // wide) lets the button cluster drop to its own line on a
+              // narrow screen instead; ml-auto keeps it right-aligned either
+              // way (single line on desktop, its own line on mobile).
+              <div
+                key={item.id}
+                {...dragRowProps}
+                className={`px-4 py-2.5 transition-colors ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'bg-brand-50' : ''}`}
+              >
+                <div className="flex items-center gap-1">
+                  <DragHandle {...handleProps(item.id)} />
+                  <div onClick={() => setEditing(item)} className="min-w-0 flex-1 cursor-pointer text-left">
+                    <ClampedText text={item.title} title="Item title" className="font-medium text-gray-800" />
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    disabled={idx === 0 || moving}
-                    onClick={() => move(item, -1)}
-                    className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
-                    aria-label="Move up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    disabled={idx === visibleItems.length - 1 || moving}
-                    onClick={() => move(item, 1)}
-                    className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
-                    aria-label="Move down"
-                  >
-                    ↓
-                  </button>
-                  {isAdmin && (
+                <div className="mt-1 flex items-center gap-2 pl-7">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                    {item.is_must_know && (
+                      <span className="text-amber-500" title="Must Know Item">
+                        ⭐
+                      </span>
+                    )}
+                    {item.training_journey_phase && (
+                      <span
+                        className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700"
+                        title="Training Journey phase"
+                      >
+                        {item.training_journey_phase === 4 ? 'Phase 4 (Master)' : `Phase ${item.training_journey_phase}`}
+                      </span>
+                    )}
+                    {item.visible_to_training && <Badge color="green">Visible to Training</Badge>}
+                    {item.copy_group_id && <Badge color="brand">🔗 Linked across stores</Badge>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setCopyingItem(item)}
+                        className="rounded-lg border border-brand-200 p-1.5 text-brand-700 hover:bg-brand-50"
+                        title="Copy to store…"
+                        aria-label="Copy to store"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
+                      </button>
+                    )}
                     <button
-                    type="button"
-                    onClick={() => setCopyingItem(item)}
-                    className="rounded-lg border border-brand-200 p-1.5 text-brand-700 hover:bg-brand-50"
-                    title="Copy to store…"
-                    aria-label="Copy to store"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
-                  </button>
-                  )}
-                  <button
-                    type="button"
-                    title="Delete"
-                    aria-label="Delete"
-                    onClick={() => remove(item.id)}
-                    className="rounded-md px-1.5 py-0.5 text-xs text-red-500 hover:bg-red-50"
-                  >
-                    ✕
-                  </button>
+                      type="button"
+                      title="Delete"
+                      aria-label="Delete"
+                      onClick={() => remove(item.id)}
+                      className="rounded-md px-1.5 py-0.5 text-xs text-red-500 hover:bg-red-50"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
           )}
         </>
