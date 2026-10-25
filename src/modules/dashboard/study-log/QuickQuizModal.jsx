@@ -8,6 +8,7 @@ import { isAnswerAccepted } from '../../../lib/answerMatching'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import { weightedSample } from '../../../lib/quizSelection'
 import { buildQuantityChoiceQuestion } from '../../../lib/formulaChoiceQuestion'
+import { QuizAttemptReview } from './AttemptDetailModal'
 
 function shuffle(arr) {
   const a = [...arr]
@@ -389,7 +390,7 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
       // in the browser console instead of just vanishing.
       if (error) console.error('Failed to save quiz answer detail:', error)
     }
-    setResult({ correct, total: questions.length })
+    setResult({ correct, total: questions.length, attemptId: attempt?.id })
     setSubmitting(false)
   }
 
@@ -403,14 +404,23 @@ export default function QuickQuizModal({ onClose, forced = false, progressPercen
       {loading ? (
         <LoadingSpinner />
       ) : result ? (
-        <div className="py-6 text-center">
-          <p className="text-3xl font-bold text-brand-600">
-            {result.correct} out of {result.total}
+        <div className="space-y-4 py-2">
+          <div className="text-center">
+            <p className="text-3xl font-bold text-brand-600">
+              {result.correct} out of {result.total}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">correct answers</p>
+          </div>
+          {/* Jeff, 2026-10-25: "考試完除了結果以外，也要跳出該次考試的內容" —
+              show this attempt's full question-by-question breakdown right
+              here, not just later in Quiz History. */}
+          {result.attemptId && <QuizAttemptReview attemptId={result.attemptId} />}
+          <p className="text-center text-xs text-gray-400">
+            You can view this quiz's content again later in Quiz History.
           </p>
-          <p className="mt-1 text-sm text-gray-500">correct answers</p>
-          <Button className="mt-4" onClick={finish}>
-            Done
-          </Button>
+          <div className="text-center">
+            <Button onClick={finish}>Done</Button>
+          </div>
         </div>
       ) : !questions.length ? (
         <div className="space-y-3">

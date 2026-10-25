@@ -7,6 +7,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import { buildLevelUpExamQuestionSet } from '../../../lib/examBuilders'
 import { gradeQuestion } from '../../../lib/quizGrading'
 import { startAdvancedDefenseClock } from '../../../lib/trainingJourney'
+import { QuizAttemptReview } from './AttemptDetailModal'
 
 // A Phase 1-3 Level-Up Exam — self-graded. Drawn from must-know items across
 // every phase up to and including `phaseNumber`. On pass, bumps
@@ -86,7 +87,7 @@ export default function LevelUpExamModal({ phaseNumber, phaseLabel, errorToleran
         .eq('id', profile.id)
       if (recoversQualified) await startAdvancedDefenseClock(profile.id)
     }
-    setResult({ correct, total, passed })
+    setResult({ correct, total, passed, attemptId: attempt?.id })
     setSubmitting(false)
   }
 
@@ -100,20 +101,29 @@ export default function LevelUpExamModal({ phaseNumber, phaseLabel, errorToleran
       {loading ? (
         <LoadingSpinner />
       ) : result ? (
-        <div className="py-6 text-center">
-          <p className="text-3xl font-bold text-brand-600">
-            {result.correct} out of {result.total}
+        <div className="space-y-4 py-2">
+          <div className="text-center">
+            <p className="text-3xl font-bold text-brand-600">
+              {result.correct} out of {result.total}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              {result.passed
+                ? 'You leveled up!'
+                : errorTolerance > 0
+                  ? `Up to ${errorTolerance} wrong answer${errorTolerance === 1 ? '' : 's'} is OK, but you missed more than that this time — give it another go once you review.`
+                  : 'Every question needs to be correct to level up — give it another go once you review.'}
+            </p>
+          </div>
+          {/* Jeff, 2026-10-25: "考試完除了結果以外，也要跳出該次考試的內容" —
+              show this attempt's full question-by-question breakdown right
+              here, not just later in Quiz History. */}
+          {result.attemptId && <QuizAttemptReview attemptId={result.attemptId} />}
+          <p className="text-center text-xs text-gray-400">
+            You can view this exam's content again later in Quiz History.
           </p>
-          <p className="mt-1 text-sm text-gray-500">
-            {result.passed
-              ? 'You leveled up!'
-              : errorTolerance > 0
-                ? `Up to ${errorTolerance} wrong answer${errorTolerance === 1 ? '' : 's'} is OK, but you missed more than that this time — give it another go once you review.`
-                : 'Every question needs to be correct to level up — give it another go once you review.'}
-          </p>
-          <Button className="mt-4" onClick={finish}>
-            {result.passed ? 'Continue' : 'Close'}
-          </Button>
+          <div className="text-center">
+            <Button onClick={finish}>{result.passed ? 'Continue' : 'Close'}</Button>
+          </div>
         </div>
       ) : !questions.length ? (
         <EmptyState label={reason === 'no_questions' ? 'No Level-Up Exam questions set up yet for this phase.' : 'Nothing to quiz on yet.'} />

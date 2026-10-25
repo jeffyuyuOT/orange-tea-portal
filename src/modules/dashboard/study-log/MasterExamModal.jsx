@@ -7,6 +7,7 @@ import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinne
 import { buildMasterExamQuestionSet } from '../../../lib/examBuilders'
 import { gradeQuestion } from '../../../lib/quizGrading'
 import { recordMasterExamResult } from '../../../lib/trainingJourney'
+import { QuizAttemptReview } from './AttemptDetailModal'
 
 // The real Master Exam — reachable once phase 6 is 100% memorized (first
 // attempt) or whenever a Master-titled profile wants to re-earn Master after
@@ -75,7 +76,14 @@ export default function MasterExamModal({ isDefense = false, onClose, onResult }
       if (error) console.error('Failed to save quiz answer detail:', error)
     }
     const outcome = await recordMasterExamResult(profile.id, passed, { wasDefense: isDefense })
-    setResult({ correct, total, passed, lostMaster: outcome.lostMaster, attemptsRemaining: outcome.attemptsRemaining })
+    setResult({
+      correct,
+      total,
+      passed,
+      lostMaster: outcome.lostMaster,
+      attemptsRemaining: outcome.attemptsRemaining,
+      attemptId: attempt?.id,
+    })
     setSubmitting(false)
   }
 
@@ -89,22 +97,31 @@ export default function MasterExamModal({ isDefense = false, onClose, onResult }
       {loading ? (
         <LoadingSpinner />
       ) : result ? (
-        <div className="py-6 text-center">
-          <p className="text-3xl font-bold text-brand-600">
-            {result.correct} out of {result.total}
+        <div className="space-y-4 py-2">
+          <div className="text-center">
+            <p className="text-3xl font-bold text-brand-600">
+              {result.correct} out of {result.total}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              {result.passed
+                ? '🏆 Passed — you hold the Master title.'
+                : !isDefense
+                  ? 'Not quite — every must-know question needs to be correct. Review and try again when ready.'
+                  : result.lostMaster
+                    ? "That defense didn't pass, and you're out of attempts — you've lost the Master title and are back to Advanced. You can retake the Master Exam any time to earn it back."
+                    : `That defense didn't pass, but you still hold the Master title — you have ${result.attemptsRemaining} more attempt${result.attemptsRemaining === 1 ? '' : 's'} before you'd lose it.`}
+            </p>
+          </div>
+          {/* Jeff, 2026-10-25: "考試完除了結果以外，也要跳出該次考試的內容" —
+              show this attempt's full question-by-question breakdown right
+              here, not just later in Quiz History. */}
+          {result.attemptId && <QuizAttemptReview attemptId={result.attemptId} />}
+          <p className="text-center text-xs text-gray-400">
+            You can view this exam's content again later in Quiz History.
           </p>
-          <p className="mt-1 text-sm text-gray-500">
-            {result.passed
-              ? '🏆 Passed — you hold the Master title.'
-              : !isDefense
-                ? 'Not quite — every must-know question needs to be correct. Review and try again when ready.'
-                : result.lostMaster
-                  ? "That defense didn't pass, and you're out of attempts — you've lost the Master title and are back to Advanced. You can retake the Master Exam any time to earn it back."
-                  : `That defense didn't pass, but you still hold the Master title — you have ${result.attemptsRemaining} more attempt${result.attemptsRemaining === 1 ? '' : 's'} before you'd lose it.`}
-          </p>
-          <Button className="mt-4" onClick={finish}>
-            Done
-          </Button>
+          <div className="text-center">
+            <Button onClick={finish}>Done</Button>
+          </div>
         </div>
       ) : !questions.length ? (
         <EmptyState label={reason === 'no_questions' ? 'No quiz questions available yet.' : 'Nothing to quiz on yet.'} />
