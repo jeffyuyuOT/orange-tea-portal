@@ -3,7 +3,7 @@
 // exceljs is loaded on demand (via bkExcel) so it stays out of the main bundle.
 import { download, newWorkbook } from './bkExcel'
 import { loadSalesRange, loadSfPostRange } from './bkSalesData'
-import { addDays, bizDayRow, bizTotals, datesBetween, isMonday } from './bkSalesUtils'
+import { addDays, bizDayRow, bizTotals, datesBetween, dmy, isMonday } from './bkSalesUtils'
 import { weekdayOf } from './bkUtils'
 
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFED7AA' } } // 日期 / 總營業額 / 總杯數
