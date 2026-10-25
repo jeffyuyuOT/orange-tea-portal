@@ -21,12 +21,12 @@ import RosterWeekTable from '../../roster-hub/shared/RosterWeekTable'
 // notifyManagersOfTrainingHours below.)
 const FILTERS = [
   { key: 'roster', label: 'Roster' },
-  { key: 'announcement', label: 'Store Announcement' },
+  { key: 'announcement', label: 'Store Notice' },
   { key: 'customer_complaint', label: 'Customer Complaint' },
 ]
 
 const TYPE_BADGE = {
-  announcement: { label: 'Announcement', color: 'brand' },
+  announcement: { label: 'Notice', color: 'brand' },
   roster: { label: 'Roster', color: 'green' },
   quiz_reminder: { label: 'Quiz Reminder', color: 'red' },
   customer_complaint: { label: 'Customer Complaint', color: 'red' },
@@ -568,7 +568,7 @@ export default function BulletinPage() {
                   type="button"
                   onClick={toggleImportant}
                   aria-pressed={importantOnly}
-                  title={importantOnly ? 'Showing important announcements only — click to show all' : 'Show important announcements only'}
+                  title={importantOnly ? 'Showing important notices only — click to show all' : 'Show important notices only'}
                   className={`px-1.5 text-lg leading-none ${
                     importantOnly ? 'text-yellow-400' : 'text-brand-300 hover:text-brand-500'
                   }`}
@@ -580,7 +580,7 @@ export default function BulletinPage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          {canPost && <Button onClick={() => setOpenAnnouncementId('new')}>+ New Announcement</Button>}
+          {canPost && <Button onClick={() => setOpenAnnouncementId('new')}>+ New Notice</Button>}
         </div>
       </div>
 
@@ -643,12 +643,24 @@ export default function BulletinPage() {
           announcementId={openAnnouncementId === 'new' ? null : openAnnouncementId}
           storeId={currentStoreId}
           onClose={() => {
+            // Jeff, 2026-10-25: "store announcement跟customer complain每次
+            // 點進去讀，再跳出來就要再loading一次...體驗會比較不好" — just
+            // VIEWING an existing item (no edit) used to call the same full
+            // load() as a real save does, re-running all 9 of this page's
+            // parallel queries just to pick up this one item's own New/
+            // Update flag clearing. That clearing is actually already known
+            // locally the moment the modal is closing — the modal marks it
+            // read as soon as it loads an existing item (migration 0056),
+            // so just patch THIS item's own flags directly, same optimistic-
+            // update shape the Roster branch in openItem above already uses,
+            // instead of refetching everything. An actual edit still goes
+            // through onSaved below, which keeps the real reload — title/
+            // content/updated_at genuinely changed there.
+            const closedId = openAnnouncementId
             setOpenAnnouncementId(null)
-            // Just viewing (no save) can still have cleared this item's own
-            // New/Update flag — the modal marks it read as soon as it loads
-            // an existing item (migration 0056) — so refresh to pick that up,
-            // same as the onSaved reload just below already does for edits.
-            load()
+            setItems((prev) =>
+              prev.map((i) => (i.id === `announcement-${closedId}` ? { ...i, isNewItem: false, hasUpdate: false } : i))
+            )
             refreshBulletinUpdates?.()
           }}
           onSaved={() => {

@@ -379,7 +379,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       open
       onClose={onClose}
       wide
-      title={isNew ? 'New Announcement' : editing ? 'Edit Announcement' : title}
+      title={isNew ? 'New Notice' : editing ? 'Edit Notice' : title}
       footer={
         canManageThis &&
         (editing ? (
@@ -435,7 +435,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           <SimpleRichTextEditor
             value={content}
             onChange={setContent}
-            placeholder="Announcement content…"
+            placeholder="Notice content…"
             imageUploadPath={`announcements/${storeId}`}
           />
           <label className="flex items-center gap-2 text-sm text-gray-600">
