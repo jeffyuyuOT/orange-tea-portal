@@ -4,14 +4,17 @@ import Modal from '../../../../components/ui/Modal'
 import { Field, Notice, inputCls } from '../bkUi'
 import { brisbaneTodayStr, monthStart } from '../bkUtils'
 import { addDays, datesBetween, dmy, isDateStr, lastDayOfMonth, mondayOnOrBefore } from '../bkSalesUtils'
-import { exportBizExcel, exportBizWeek } from '../bkSalesExcel'
+import { buildBizWeekImage, downloadBizWeekImageBlob, exportBizExcel, exportBizWeek } from '../bkSalesExcel'
 
 const MAX_DAYS = 366
 
 // 匯出 for the 營業 tab. mode 'excel': pick stores and a date range (start date,
 // end date defaulting to the end of the month on screen but editable); the
 // file has one tab per store. mode 'week': pick which Monday the week starts
-// on and the stores; the file is the side-by-side weekly report.
+// on and the stores; the file is the side-by-side weekly report — plus, Jeff
+// 2026-10-25, an image version of that same report (`copyImage` below) that
+// copies straight to the clipboard so it can be pasted directly into a LINE
+// chat instead of attaching the .xlsx.
 export default function BizExportModal({ open, mode, stores, year, month, onClose }) {
   const [checked, setChecked] = useState(() => new Set())
   const [from, setFrom] = useState('')
@@ -19,6 +22,13 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
   const [monday, setMonday] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Image-copy state, 'week' mode only. `copyState`: null (nothing tried
+  // yet) | 'copied' (clipboard write succeeded) | 'unsupported' (this
+  // browser/context won't let a page write an image to the clipboard —
+  // Safari/older browsers, or a non-HTTPS context — so the preview + a
+  // plain download link are shown instead).
+  const [preview, setPreview] = useState(null) // { dataUrl, blob, filename, width, height }
+  const [copyState, setCopyState] = useState(null)
 
   // The last 60 Mondays, newest first (this week's Monday included).
   const mondays = useMemo(() => {
@@ -34,7 +44,18 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
     setMonday(mondays[1]) // last week's Monday: the usual one to report on
     setError('')
     setBusy(false)
+    setPreview(null)
+    setCopyState(null)
   }, [open, stores, year, month, mondays])
+
+  // A stale preview (from a different week/store selection) would be
+  // misleading if left on screen — drop it the moment either changes, so
+  // "複製圖片" always has to be pressed again for the selection actually
+  // showing.
+  useEffect(() => {
+    setPreview(null)
+    setCopyState(null)
+  }, [monday, checked])
 
   const picked = stores.filter((s) => checked.has(s.id))
 
@@ -57,11 +78,46 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
     }
     setBusy(true)
     try {
-      if (mode === 'excel') await exportBizExcel({ stores: picked, from, to })
-      else await exportBizWeek({ stores: picked, monday })
-      onClose()
+      if (mode === 'excel') {
+        await exportBizExcel({ stores: picked, from, to })
+        onClose()
+      } else {
+        // Unlike the 'excel' mode, this doesn't close the modal — 週匯出 now
+        // also offers 複製圖片 right below, so downloading the Excel file
+        // shouldn't dismiss the chance to also copy the image version.
+        await exportBizWeek({ stores: picked, monday })
+      }
     } catch (e) {
       setError(`匯出失敗：${e.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copyImage() {
+    setError('')
+    if (picked.length === 0) return setError('請至少勾選一間分店。')
+    setBusy(true)
+    setCopyState(null)
+    try {
+      const built = await buildBizWeekImage({ stores: picked, monday })
+      setPreview(built)
+      if (navigator.clipboard?.write && typeof window.ClipboardItem === 'function') {
+        try {
+          await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': built.blob })])
+          setCopyState('copied')
+        } catch {
+          // Most often a browser that only allows clipboard-image writes
+          // from a real user gesture in a secure (HTTPS) context, or one
+          // that doesn't support it at all — the preview + 下載圖片 below
+          // is the fallback either way.
+          setCopyState('unsupported')
+        }
+      } else {
+        setCopyState('unsupported')
+      }
+    } catch (e) {
+      setError(`產生圖片失敗：${e.message}`)
     } finally {
       setBusy(false)
     }
@@ -72,15 +128,30 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
       open={open}
       onClose={onClose}
       title={mode === 'excel' ? 'Excel 匯出' : '週匯出'}
+      extraWide={mode === 'week'}
       footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            取消
-          </Button>
-          <Button onClick={run} disabled={busy || picked.length === 0}>
-            {busy ? '匯出中…' : '匯出'}
-          </Button>
-        </>
+        mode === 'excel' ? (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              取消
+            </Button>
+            <Button onClick={run} disabled={busy || picked.length === 0}>
+              {busy ? '匯出中…' : '匯出'}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              取消
+            </Button>
+            <Button variant="secondary" onClick={run} disabled={busy || picked.length === 0}>
+              {busy ? '匯出中…' : '下載 Excel'}
+            </Button>
+            <Button onClick={copyImage} disabled={busy || picked.length === 0}>
+              {busy ? '產生圖片中…' : '📋 複製圖片'}
+            </Button>
+          </>
+        )
       }
     >
       <div className="space-y-4 text-sm">
@@ -130,6 +201,34 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
 
         {mode === 'excel' && (
           <p className="text-xs text-gray-400">每間分店一個分頁；P杯數、POS、CV、Self O、SO杯數 與 日期、總營業額、總杯數 之間用粗線隔開。</p>
+        )}
+
+        {mode === 'week' && copyState === 'copied' && <Notice kind="ok">圖片已複製，可以直接到 LINE 貼上了。</Notice>}
+        {mode === 'week' && copyState === 'unsupported' && (
+          <Notice kind="info">這個瀏覽器沒辦法直接複製圖片——長按（手機）或右鍵（電腦）下面的圖片即可複製，或用「下載圖片」。</Notice>
+        )}
+        {mode === 'week' && preview && (
+          <div>
+            <div className="overflow-x-auto rounded-lg border border-brand-100 bg-gray-50 p-2">
+              <img
+                src={preview.dataUrl}
+                alt="週報預覽"
+                width={preview.width}
+                height={preview.height}
+                className="block"
+                style={{ width: preview.width, height: preview.height }}
+              />
+            </div>
+            <div className="mt-2 text-right">
+              <Button
+                variant="secondary"
+                className="!px-3 !py-1.5 text-xs"
+                onClick={() => downloadBizWeekImageBlob(preview.blob, preview.filename)}
+              >
+                下載圖片
+              </Button>
+            </div>
+          </div>
         )}
         {error && <Notice kind="error">{error}</Notice>}
       </div>

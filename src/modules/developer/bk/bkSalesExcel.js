@@ -177,3 +177,131 @@ export async function exportBizWeek({ stores, monday }) {
   const wb = await buildBizWeekWorkbook({ blocks, monday })
   await download(wb, `營業週報_${safeName(monday)}.xlsx`)
 }
+
+// ---------------------------------------------------------------------------
+// 週匯出 — 圖片 (Jeff, 2026-10-25: "能直接產生圖片可以複製圖片直接貼在line聊天
+// 裡嗎? 圖片格式就跟之前匯出excel檔格式一樣就好") — same side-by-side layout as
+// buildBizWeekWorkbook above, drawn onto a plain <canvas> instead of an
+// .xlsx sheet (no extra library), so BizExportModal can copy it straight to
+// the clipboard for pasting into a LINE chat, with a PNG download as the
+// fallback for a browser that won't let a page write an image to the
+// clipboard.
+// ---------------------------------------------------------------------------
+
+const IMG_COL_DATE = 100
+const IMG_COL_NUM = 85
+const IMG_ROW_NAME = 30
+const IMG_ROW_HEADER = 28
+const IMG_ROW_DATA = 26
+const IMG_PAD = 10
+const IMG_SCALE = 2 // drawn at 2x so the pasted image stays sharp, not blurry
+
+const imgMoney = (n) => (n === null || n === undefined ? '' : n.toFixed(2))
+const imgCups = (n) => (n === null || n === undefined ? '' : String(Math.round(n)))
+
+// Draws the week's blocks onto a canvas at IMG_SCALE pixel density. Returns
+// the canvas plus its logical (unscaled) CSS width/height, for the caller to
+// size an <img> preview with.
+export function renderBizWeekCanvas(blocks, monday) {
+  const dates = datesBetween(monday, addDays(monday, 6))
+  const blockW = IMG_COL_DATE + IMG_COL_NUM * 2
+  const width = IMG_PAD * 2 + blockW * blocks.length
+  const bodyTop = IMG_PAD + IMG_ROW_NAME + IMG_ROW_HEADER
+  const height = bodyTop + IMG_ROW_DATA * dates.length + IMG_PAD
+
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(width * IMG_SCALE)
+  canvas.height = Math.round(height * IMG_SCALE)
+  const ctx = canvas.getContext('2d')
+  ctx.scale(IMG_SCALE, IMG_SCALE)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, width, height)
+  ctx.textBaseline = 'middle'
+
+  blocks.forEach(({ store, rows }, bi) => {
+    const x0 = IMG_PAD + bi * blockW
+    const colX = [x0, x0 + IMG_COL_DATE, x0 + IMG_COL_DATE + IMG_COL_NUM, x0 + blockW]
+    const headerY = IMG_PAD + IMG_ROW_NAME
+
+    // store name — left-aligned over the block, same as the template
+    ctx.font = 'bold 13px "Segoe UI", Arial, sans-serif'
+    ctx.fillStyle = '#111827'
+    ctx.textAlign = 'left'
+    ctx.fillText(store.name, x0 + 6, IMG_PAD + IMG_ROW_NAME / 2)
+
+    // header band (日期 / 營業額 / 杯數) — same fill as the Excel header cells
+    ctx.fillStyle = '#FED7AA'
+    ctx.fillRect(x0, headerY, blockW, IMG_ROW_HEADER)
+    ctx.fillStyle = '#111827'
+    ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif'
+    ctx.textAlign = 'center'
+    ;['日期', '營業額', '杯數'].forEach((h, ci) => ctx.fillText(h, (colX[ci] + colX[ci + 1]) / 2, headerY + IMG_ROW_HEADER / 2))
+
+    // 7 day rows, d/mm/yyyy | 營業額 (2dp) | 杯數 (whole number) — same
+    // formatting buildBizWeekWorkbook's numFmt uses, just drawn as text
+    ctx.font = '12px "Segoe UI", Arial, sans-serif'
+    dates.forEach((date, ri) => {
+      const y = bodyTop + ri * IMG_ROW_DATA
+      if (ri % 2 === 1) {
+        ctx.fillStyle = '#F4FAFE'
+        ctx.fillRect(x0, y, blockW, IMG_ROW_DATA)
+        ctx.fillStyle = '#111827'
+      }
+      ctx.textAlign = 'left'
+      ctx.fillText(dmy(date), colX[0] + 6, y + IMG_ROW_DATA / 2)
+      ctx.textAlign = 'right'
+      ctx.fillText(imgMoney(rows[ri].total), colX[2] - 6, y + IMG_ROW_DATA / 2)
+      ctx.fillText(imgCups(rows[ri].cups), colX[3] - 6, y + IMG_ROW_DATA / 2)
+    })
+
+    // gridlines for this block
+    ctx.strokeStyle = '#BFBFBF'
+    ctx.lineWidth = 1
+    const hLines = [headerY, headerY + IMG_ROW_HEADER]
+    for (let r = 1; r <= dates.length; r++) hLines.push(bodyTop + r * IMG_ROW_DATA)
+    hLines.forEach((y) => {
+      ctx.beginPath()
+      ctx.moveTo(x0, Math.round(y) + 0.5)
+      ctx.lineTo(x0 + blockW, Math.round(y) + 0.5)
+      ctx.stroke()
+    })
+    colX.forEach((x) => {
+      ctx.beginPath()
+      ctx.moveTo(Math.round(x) + 0.5, headerY)
+      ctx.lineTo(Math.round(x) + 0.5, bodyTop + dates.length * IMG_ROW_DATA)
+      ctx.stroke()
+    })
+  })
+
+  return { canvas, width, height }
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('canvas.toBlob failed'))), 'image/png')
+  )
+}
+
+// Collects the same data exportBizWeek uses and draws it as a PNG — returns
+// the blob plus a data URL for an inline preview and the logical width/
+// height to size that preview with, without triggering any download itself
+// (BizExportModal decides whether to copy it to the clipboard or fall back
+// to downloadBizWeekImageBlob below).
+export async function buildBizWeekImage({ stores, monday }) {
+  if (!isMonday(monday)) throw new Error('週匯出要從星期一開始。')
+  const blocks = await collect(stores, monday, addDays(monday, 6))
+  const { canvas, width, height } = renderBizWeekCanvas(blocks, monday)
+  const blob = await canvasToPngBlob(canvas)
+  return { blob, dataUrl: canvas.toDataURL('image/png'), filename: `營業週報_${safeName(monday)}.png`, width, height }
+}
+
+export function downloadBizWeekImageBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
