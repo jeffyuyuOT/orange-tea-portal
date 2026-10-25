@@ -3590,7 +3590,22 @@ async function exportSheetToXlsx(sheet, opts){
   const periodDays = dateRangeArray(sheet.dateFrom, sheet.dateTo).length;
   const weekendSplit = currentSettings.weekendSplit;
   const cols = bucketCols(weekendSplit);
-  const sheets = Object.values(sheet.stores).map(sd=>{
+  // Jeff, 2026-10-26: "匯出會計excel表，分頁順序沒有照分店順序" -- sheet.stores'
+  // own key order is whatever sequence stores were imported/added to this
+  // specific calc sheet (roster file order etc.), not 分店管理's configured
+  // order -- same underlying issue tab1Html()'s storeIds already solved for
+  // the on-screen calc-sheet tabs (see its own comment, Jeff 2026-09-30:
+  // "計算薪水紀錄表的tab順序按照這裡的順序"), just never applied here too.
+  // Same fix: sort by currentStores' `.order` (分店管理, see sortStores()),
+  // a storeId with no match (shouldn't normally happen) sorting after every
+  // matched store, in its original order, rather than crashing or jumping
+  // to the front.
+  const storeOrderIndex = new Map(currentStores.map((s,i)=>[s.id,i]));
+  const sheets = Object.entries(sheet.stores).sort(([a],[b])=>{
+    const ia = storeOrderIndex.has(a) ? storeOrderIndex.get(a) : Infinity;
+    const ib = storeOrderIndex.has(b) ? storeOrderIndex.get(b) : Infinity;
+    return ia-ib;
+  }).map(([, sd])=>{
     refreshUnknownAgeRows(sd.rows, currentSettings, sheet.dateTo);
     sd.rows.forEach(r=>recalcRow(r, periodDays));
     sortRowsByEmployeeOrder(sd.rows);
