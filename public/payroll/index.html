@@ -114,6 +114,7 @@ label.chk{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;
   <div class="main" id="main"></div>
 </div>
 <div id="modalRoot"></div>
+<div id="infoPopupRoot"></div>
 <div id="toastRoot"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
@@ -1823,6 +1824,25 @@ function openModal(innerHtml, opts){
   return root.querySelector(".modal");
 }
 function closeModal(){ document.getElementById("modalRoot").innerHTML=""; }
+
+// Jeff, 2026-10-25: 把 School student 勾選旁邊常駐顯示的 QLD Child
+// Employment Regulation 說明文字改成標註符號，點擊才跳出視窗顯示。openModal()
+// 是單一全域 modal（第二次呼叫會把 #modalRoot 整個 innerHTML 換掉），如果從
+// 已經開著的「編輯員工」視窗裡再呼叫一次 openModal()，會把編輯員工那個視窗整
+// 個砍掉、正在編輯但還沒存檔的內容就不見了——所以這裡另外用一個獨立的
+// #infoPopupRoot，疊在原本的 modal 上面（z-index 200，介於 .modal-backdrop
+// 的 100 跟 .toast 的 300 之間），而不是沿用 openModal/closeModal。視覺上沿
+// 用同一套 .modal-backdrop/.modal 樣式，維持跟其他視窗一致的外觀。
+function openInfoPopup(title, bodyHtml){
+  const root = document.getElementById("infoPopupRoot");
+  root.innerHTML = `<div class="modal-backdrop" style="z-index:200;"><div class="modal" style="max-width:480px;">
+    <div class="modal-header"><h3>${escapeHtml(title)}</h3><button class="close-x" id="infoPopupClose">✕</button></div>
+    <div class="small muted" style="margin-top:4px;">${bodyHtml}</div>
+  </div></div>`;
+  root.querySelector(".modal-backdrop").addEventListener("mousedown",(e)=>{ if(e.target.classList.contains("modal-backdrop")) closeInfoPopup(); });
+  root.querySelector("#infoPopupClose").onclick = closeInfoPopup;
+}
+function closeInfoPopup(){ document.getElementById("infoPopupRoot").innerHTML=""; }
 
 async function loadAllData(){
   currentSettings = await idbGet("settings","app");
@@ -4535,8 +4555,10 @@ function openEmployeeEditModal(empId){
       <div class="field">
         <label>可報時數上限 (未填預設 ${DEFAULT_HOUR_CAP} hr)</label>
         <input id="ehourcap" type="number" step="0.5" placeholder="${DEFAULT_HOUR_CAP}" value="${emp.hourCap==null?'':emp.hourCap}" ${emp.isSchoolStudent?'disabled':''}>
-        <label class="chk" style="margin-top:4px;"><input type="checkbox" id="eschoolstudent" ${emp.isSchoolStudent?'checked':''}> School student</label>
-        <div class="small muted" style="margin-top:2px;">勾選後上限自動依 QLD Child Employment Regulation 判定，不用手動填：每個日曆週（一~日）只要當週有上學日就算 ${SCHOOL_STUDENT_WEEK_CAP_TERM}hr，整週都在學校假期則算 ${SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}hr，整個薪水期間的上限＝各週上限加總（例如兩週橫跨學期最後一週＋假期第一週，就是 ${SCHOOL_STUDENT_WEEK_CAP_TERM}+${SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}=${SCHOOL_STUDENT_WEEK_CAP_TERM+SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}hr，不是單一固定數字）。適用 18 歲以下、就讀高中以下的在學員工。行事曆目前收錄 ${Object.keys(QLD_SCHOOL_TERMS).join("、")} 年，其他年份會先以學期中的較低上限計算，請自行核對。</div>
+        <div class="row" style="margin-top:4px; align-items:center;">
+          <label class="chk" style="margin:0;"><input type="checkbox" id="eschoolstudent" ${emp.isSchoolStudent?'checked':''}> School student</label>
+          <button type="button" class="iconbtn" id="eschoolstudentInfo" title="查看說明" style="font-size:14px;">ⓘ</button>
+        </div>
       </div>
       <div class="field"><label>Tax type</label><select id="etaxtype">
         <option value="with" ${emp.taxType==="with"?'selected':''}>With tax-free threshold</option>
@@ -4607,6 +4629,9 @@ function openEmployeeEditModal(empId){
   };
   $("#eschoolstudent",m).onchange = ()=>{
     $("#ehourcap",m).disabled = $("#eschoolstudent",m).checked;
+  };
+  $("#eschoolstudentInfo",m).onclick = ()=>{
+    openInfoPopup("School student 上限說明", `勾選後上限自動依 QLD Child Employment Regulation 判定，不用手動填：每個日曆週（一~日）只要當週有上學日就算 ${SCHOOL_STUDENT_WEEK_CAP_TERM}hr，整週都在學校假期則算 ${SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}hr，整個薪水期間的上限＝各週上限加總（例如兩週橫跨學期最後一週＋假期第一週，就是 ${SCHOOL_STUDENT_WEEK_CAP_TERM}+${SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}=${SCHOOL_STUDENT_WEEK_CAP_TERM+SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}hr，不是單一固定數字）。適用 18 歲以下、就讀高中以下的在學員工。行事曆目前收錄 ${Object.keys(QLD_SCHOOL_TERMS).join("、")} 年，其他年份會先以學期中的較低上限計算，請自行核對。`);
   };
   function renderDocs(){
     $("#docsBox",m).innerHTML = docFields.map(([k,label])=>{
