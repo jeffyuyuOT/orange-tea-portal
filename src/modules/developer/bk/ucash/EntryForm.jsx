@@ -167,7 +167,7 @@ export default function EntryForm({ storeId, stores = [], initial = null, onSave
           isCost
             ? '可以輸入負數，負數代表收入。'
             : group === 'other_income'
-              ? '會加到當天「可 D 的最大金額」（O.CA + 其他收入）。'
+              ? '會加到當天「可耗損的最大金額」（O.CA + 其他收入）。'
               : group === 'ruju'
                 ? '可以輸入負數，代表從金庫提取：金額會加回 UCOH，並依「入金對象」扣除金庫概覽裡的金額。'
                 : isTransfer

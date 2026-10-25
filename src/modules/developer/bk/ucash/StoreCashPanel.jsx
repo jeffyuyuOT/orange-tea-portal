@@ -399,8 +399,8 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     if (over.length > 0) {
       setMsg('')
       setError(
-        `D 不能超過可 D 的最大金額（O.CA + 其他收入），請先修正：${over
-          .map((r) => `${r.date.slice(5)}（D ${fmtMoney(r.d)} > 可 D ${fmtMoney(r.maxD)}）`)
+        `耗損不能超過可耗損的最大金額（O.CA + 其他收入），請先修正：${over
+          .map((r) => `${r.date.slice(5)}（耗損 ${fmtMoney(r.d)} > 可耗損 ${fmtMoney(r.maxD)}）`)
           .join('、')}`
       )
       return false
@@ -432,7 +432,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           }))
           const bad = dLimitProblems(rows)
           if (bad.length > 0) {
-            failures.push(`${label}（D 超過可 D 的最大金額：${bad.map((r) => r.date.slice(5)).join('、')}）`)
+            failures.push(`${label}（耗損超過可耗損的最大金額：${bad.map((r) => r.date.slice(5)).join('、')}）`)
             continue
           }
           await saveCashDays(sid, draft.cashDays)
@@ -619,8 +619,8 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                             <button
                               type="button"
                               onClick={() => setDInfo(r.date)}
-                              title="這天有其他收入，點一下看可 D 金額"
-                              aria-label="這天有其他收入，查看可 D 金額"
+                              title="這天有其他收入，點一下看可耗損金額"
+                              aria-label="這天有其他收入，查看可耗損金額"
                               className="mr-1 rounded px-1 text-xs text-teal-600 hover:bg-teal-50"
                             >
                               ⓘ
@@ -643,7 +643,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                             value={cd.d_amount}
                             onChange={(v) => setField(r.date, 'd_amount', v)}
                             className={overLimit.has(r.date) ? '!border-red-400 !bg-red-50 !text-red-700' : ''}
-                            title={overLimit.has(r.date) ? 'D 超過可 D 的最大金額（O.CA + 其他收入）' : undefined}
+                            title={overLimit.has(r.date) ? '耗損超過可耗損的最大金額（O.CA + 其他收入）' : undefined}
                           />
                         </td>
                         <td className={`${td} text-center`}>
@@ -654,7 +654,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
                             title="勾選後，這天以前的日期也會自動勾選"
                           />
                         </td>
-                        <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-700`} title="O.CA + 其他收入 − D">
+                        <td className={`${td} px-2 py-1 text-right tabular-nums text-gray-700`} title="O.CA + 其他收入 − 耗損">
                           {fmtMoney(r.sfCash)}
                         </td>
                       </tr>
@@ -714,7 +714,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         />
       )}
 
-      <Modal open={!!dInfo} onClose={() => setDInfo(null)} title={`可 D 金額 — ${dInfo ?? ''}`} footer={<Button onClick={() => setDInfo(null)}>關閉</Button>}>
+      <Modal open={!!dInfo} onClose={() => setDInfo(null)} title={`可耗損金額 — ${dInfo ?? ''}`} footer={<Button onClick={() => setDInfo(null)}>關閉</Button>}>
         {dInfo && (
           <div className="space-y-3 text-sm">
             {(() => {
@@ -723,7 +723,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
               return (
                 <>
                   <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3">
-                    <div className="text-xs font-medium text-teal-800">可 D 金額（D 不能超過）</div>
+                    <div className="text-xs font-medium text-teal-800">可耗損金額（耗損不能超過）</div>
                     <div className="text-2xl font-semibold tabular-nums text-teal-900">{fmtMoney(r.maxD)}</div>
                     <div className="text-[11px] text-gray-500">= O.CA {fmtMoney(r.oCa ?? 0)} + 其他收入 {fmtMoney(r.income)}</div>
                   </div>

@@ -147,8 +147,8 @@ export function parseSfRows(rows, { year, month, columns }) {
   const typed = new Map() // name -> { id, label }
   const computed = new Map() // name -> reason
   for (const col of columns) {
-    if (col.name === 'Cash') computed.set(norm(col.name), 'Cash = O.CA − D，由系統計算')
-    else if (col.name === 'Pos total') computed.set(norm(col.name), 'Pos total = O.POST − D，由系統計算，請匯入 O.POST')
+    if (col.name === 'Cash') computed.set(norm(col.name), 'Cash = O.CA − 耗損，由系統計算')
+    else if (col.name === 'Pos total') computed.set(norm(col.name), 'Pos total = O.POST − 耗損，由系統計算，請匯入 O.POST')
     else if (col.subs.length > 0) {
       computed.set(norm(col.name), '由 sub payment type 加總，請匯入它的 sub 欄位')
       for (const sub of col.subs) typed.set(norm(sub.name), { id: sub.id, label: `${sub.name}（${col.name}）` })
@@ -335,7 +335,7 @@ export function filterKeepExistingCashDays(entries, cashDays) {
 }
 
 const ACTUAL_CA_HEADERS = new Set(['實ca', '實際ca', 'actual ca', 'actualca'])
-const D_AMOUNT_HEADERS = new Set(['d', 'd欄', 'd 欄', 'd amount'])
+const D_AMOUNT_HEADERS = new Set(['d', 'd欄', 'd 欄', 'd amount', '耗損', '耗損欄'])
 const STOCKED_HEADERS = new Set(['入庫', 'stocked', 'd_stocked'])
 const TRUE_WORDS = new Set(['1', 'true', 'yes', 'y', '是', '✓', 'v'])
 
@@ -366,11 +366,11 @@ export function parseCashDayRows(rows, { year, month }) {
       mapped.push({ header: label, target: '實 CA' })
     } else if (D_AMOUNT_HEADERS.has(n)) {
       targets[i] = { kind: 'd_amount' }
-      mapped.push({ header: label, target: 'D' })
+      mapped.push({ header: label, target: '耗損' })
     } else if (STOCKED_HEADERS.has(n)) {
       targets[i] = { kind: 'd_stocked' }
       mapped.push({ header: label, target: '入庫' })
-    } else ignored.push({ header: label, reason: '沒有對應的欄位（需要 實CA / D / 入庫）' })
+    } else ignored.push({ header: label, reason: '沒有對應的欄位（需要 實CA / 耗損 / 入庫）' })
   })
   if (dateCol < 0) dateCol = headers.findIndex((h) => typeof h === 'string' && DATE_HEADERS.has(norm(h)))
   if (dateCol < 0) return { error: '找不到「Date」或「日期」欄。', entries: {}, mapped, ignored, otherMonths: [], unreadable: 0, badCells: 0, notes: [], dayCount: 0, cellCount: 0 }

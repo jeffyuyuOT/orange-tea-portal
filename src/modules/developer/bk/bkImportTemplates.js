@@ -81,7 +81,7 @@ export async function downloadUAccountTemplate() {
     {
       name: '分店現金',
       note: 'U > 分店現金的每日數字（只支援通用欄位，不含期初餘額）。',
-      headers: ['Date', 'Store', '實CA', 'D', '入庫'],
+      headers: ['Date', 'Store', '實CA', '耗損', '入庫'],
       example: ['2026-10-05', 'Sunnybank', 2000, 500, '是'],
     },
     {

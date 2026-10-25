@@ -42,7 +42,7 @@ const ITEM_KINDS = [
   ['dw', 'deposit / withdraw'],
   ['ruju', '入金'],
   ['transfer', '分店transfer'],
-  ['d', 'D 欄'],
+  ['d', '耗損欄'],
   ['pm', '+/− 欄'],
 ]
 
@@ -195,7 +195,7 @@ function StoreMonths({ stores, initialStoreId, active, onLoad }) {
             <thead className="bg-brand-100 text-left text-xs text-gray-700">
               <tr>
                 <th className="px-3 py-2">月份</th>
-                <th className="px-3 py-2 text-right">D 欄 Total</th>
+                <th className="px-3 py-2 text-right">耗損欄 Total</th>
                 <th className="px-3 py-2 text-right">操作</th>
               </tr>
             </thead>
@@ -307,7 +307,7 @@ function ItemHistory({ stores, initialStoreId, active }) {
           for (const c of cashDays) {
             const d = toNum(c.d_amount)
             if (buckets.d && d !== null) {
-              buckets.d.push({ key: `d-${c.store_id}-${c.day}`, date: c.day, store: c.store_id, type: 'D 欄', desc: c.d_stocked ? '已入庫' : '未入庫', amount: d })
+              buckets.d.push({ key: `d-${c.store_id}-${c.day}`, date: c.day, store: c.store_id, type: '耗損欄', desc: c.d_stocked ? '已入庫' : '未入庫', amount: d })
             }
             const actual = toNum(c.actual_ca)
             if (buckets.pm && actual !== null) {
