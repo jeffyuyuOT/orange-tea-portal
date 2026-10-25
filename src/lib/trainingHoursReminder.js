@@ -7,21 +7,39 @@
 // developer). Keeping the band math and wording here in one place means
 // those two can't quietly drift apart.
 //
-// Jeff's original spec, unchanged: "未qualified的員工在工作超過50個小時後会
-// 開始跳出提示...每增加10小時会跳出一個提示,超過100小時候每超過10小時也會有
-// 提示" — same 100-hour target the Progress Chart's average learning curve
-// and Learning Tracker's 70h warning are both built around.
+// Jeff, 2026-10-25: replaced the original 10-hour-band design ("每增加10小時
+// 会跳出一個提示") with a simpler 3-stage spec — "剩20hr提醒一次，跟時間到提醒
+// 一次，之後每超過20hr也提醒一次": one reminder when 20 hours remain, one when
+// the 100-hour target is reached, then one more every additional 20 hours
+// worked past that. Reminders before the 20-hours-remaining point (i.e.
+// below 80 hours) no longer fire at all.
 export const TRAINING_TARGET_HOURS = 100
-export const TRAINING_REMINDER_START_HOURS = 50
+export const TRAINING_PRE_WARNING_HOURS = 20 // fire once this many hours out from the target
+export const TRAINING_REPEAT_INTERVAL_HOURS = 20 // then again every this many hours past the target
 
 // hours worked -> null (not yet worth a reminder) | { band, remaining, overHours }.
 // `band` is the value both of the *_band tracking columns below are
 // compared against to detect "this is a NEW threshold, not one already
-// acted on" — floor(hours/10)*10, so it only changes every 10 hours.
+// acted on" (consumers only ever check `newBand > storedBand`, so the exact
+// numbers below don't need any migration of previously-stored band values —
+// see trainingHoursReminder.js's history for the old 10-hour-band scheme
+// this replaced). The three stages map to three band values:
+//   80            -> the "20 hours left" pre-warning (fires once)
+//   100           -> the "target reached" reminder (fires once)
+//   120, 140, ...  -> "over by N hours", repeating every 20h past 100
 export function trainingHoursBandInfo(hours) {
-  const band = Math.floor(hours / 10) * 10
-  if (band < TRAINING_REMINDER_START_HOURS) return null
-  return { band, remaining: Math.max(0, TRAINING_TARGET_HOURS - band), overHours: band - TRAINING_TARGET_HOURS }
+  const preWarningBand = TRAINING_TARGET_HOURS - TRAINING_PRE_WARNING_HOURS // 80
+  if (hours < preWarningBand) return null
+  const band =
+    hours < TRAINING_TARGET_HOURS
+      ? preWarningBand
+      : TRAINING_TARGET_HOURS +
+        Math.floor((hours - TRAINING_TARGET_HOURS) / TRAINING_REPEAT_INTERVAL_HOURS) * TRAINING_REPEAT_INTERVAL_HOURS
+  return {
+    band,
+    remaining: Math.max(0, TRAINING_TARGET_HOURS - band),
+    overHours: Math.max(0, band - TRAINING_TARGET_HOURS),
+  }
 }
 
 // Same three-way wording the old Bulletin card used. `isSelf` picks between
