@@ -1936,15 +1936,27 @@ function findRealStore(payrollStore){
   return realStores.find(s=>(s.name||"").trim().toLowerCase()===name) || null;
 }
 // 抓這個真實分店目前「在職」、且不是 NON_PAYROLL_STAFF_ROLES 裡角色的員工，
-// 對應到 syncEmployeesFromStaffInfo 需要的 8 個共通欄位 + cash-in-hand 狀態。
+// 對應到 syncEmployeesFromStaffInfo 需要的欄位 + cash-in-hand 狀態。
 // Jeff, 2026-10-25: 銀行資訊（bankAccountName/bsb/accountNumber）加入同步 ——
 // 原本這 3 個是 Payroll 自己獨立維護、完全不跟 Staff Information 同步的（見
 // syncEmployeesFromStaffInfo 下面舊註解），現在改成比照 dob/tfn/email/phone/
 // hireDate 一樣的做法。
+//
+// Jeff, 2026-10-25 (同一天，第二次追問): "Renita Ho在staff information裡的
+// display name就是Renita...同步的時候沒辦法讀display name直接修正顯示名稱
+// 嗎" -- name 原本不管 Staff Information 那邊設了什麼 display name，一律用
+// `{first} {last}` 全名組出來，這就是「🏷 修正顯示名稱」那個按鈕存在的原因
+// （Annabelle Ho 那次就是同一個狀況，見該按鈕上方的長註解）：新同步建立的員
+// 工一律是全名，但班表上顯示的通常是 roster_display_name 覆寫值或單純名字，
+// 兩者對不起來，每次匯入班表都要手動點一次「🏷 修正顯示名稱」才會好。現在改
+// 成跟 otPortalPersonName()（班表那邊本來就在用的同一套優先順序：per-store
+// 覆寫 roster_display_name → 名字 → 全名 → email）算出一樣的名字，新建立的
+// 員工從一開始就會正確；已連結的既有員工名稱是否也跟著自動修正，見
+// syncEmployeesFromStaffInfo 下面的註解。
 async function fetchRealStaffForStore(realStoreId){
   const { data, error } = await sb
     .from("user_stores")
-    .select("profile_id, profiles(*)")
+    .select("profile_id, roster_display_name, profiles(*)")
     .eq("store_id", realStoreId);
   if(error){ console.error("fetchRealStaffForStore failed", error); return []; }
   const seen = new Set();
@@ -1957,7 +1969,7 @@ async function fetchRealStaffForStore(realStoreId){
     seen.add(p.id);
     out.push({
       profileId: p.id,
-      name: `${p.first_name||""} ${p.last_name||""}`.trim() || p.email || "(未命名)",
+      name: otPortalPersonName(p, row.roster_display_name),
       dob: p.date_of_birth || null,
       tfn: p.tax_file_number || "",
       email: p.email || "",
@@ -1977,11 +1989,18 @@ async function fetchRealStaffForStore(realStoreId){
 //    連結的員工，付款方式預設 FT，除非勾了 cash-in-hand 就直接帶入 "CA"（這個
 //    app 原本就有的「整筆薪水都算 cash-in-hand」付款方式，不是新類別）。
 //  - 已連結的 → 更新 dob/tfn/email/phone/hireDate/bankAccountName/bankBsb/
-//    bankAccountNumber 這 8 個共通欄位（Jeff, 2026-10-25：銀行資訊 3 個欄位
-//    加入同步，之前是 Payroll 自己獨立維護、完全不同步）；若目前勾了
-//    cash-in-hand 但 paymentType 還不是 "CA"，強制改成 "CA" 並把費率歸零。
-//    姓名、費率等其他欄位不受影響 —— 這些不在 Jeff 要求同步的欄位裡，仍由
-//    Payroll 這邊自己維護。
+//    bankAccountNumber/name 這幾個欄位（Jeff, 2026-10-25：銀行資訊 3 個欄位
+//    加入同步，之前是 Payroll 自己獨立維護、完全不同步；同一天第二次追問後
+//    name 也加進來 —— 原本姓名是刻意不同步的，"由 Payroll 這邊自己維護"，但
+//    這導致每次 Staff Information 那邊改了 display name，Payroll 這邊都要靠
+//    手動點「🏷 修正顯示名稱」才會跟上，Jeff 確認過他要的就是自動保持一致，
+//    所以現在 name 也比照其他欄位、只要跟 fetchRealStaffForStore() 算出來的
+//    不一樣就覆蓋過去。這代表如果之後想讓某個員工在 Payroll 裡顯示跟 Staff
+//    Information 不同的名字，必須透過 Staff Information 的「Display name at
+//    ⟨分店⟩」欄位去改，而不是直接改 Payroll 這邊 —— 改了也會在下次同步時被
+//    蓋回去）；若目前勾了 cash-in-hand 但 paymentType 還不是 "CA"，強制改成
+//    "CA" 並把費率歸零。費率等其他欄位不受影響 —— 這些不在 Jeff 要求同步的
+//    欄位裡，仍由 Payroll 這邊自己維護。
 //  - 之前連結過、但這次抓回來的名單裡已經沒有（整個人從 Staff Information /
 //    這個分店移除，或被設為非在職）的 → 比照「離職」按鈕的做法，設定
 //    resignDate（用今天日期），不會直接刪除，保留過去的薪水計算紀錄。
@@ -2000,7 +2019,7 @@ async function syncEmployeesFromStaffInfo(store, real){
     const existing = byProfileId.get(rs.profileId);
     if(existing){
       let changed = false;
-      ["dob","tfn","email","phone","bankAccountName","bankBsb","bankAccountNumber"].forEach(k=>{ if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; } });
+      ["dob","tfn","email","phone","bankAccountName","bankBsb","bankAccountNumber","name"].forEach(k=>{ if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; } });
       if(existing.hireDate!==rs.hireDate){ existing.hireDate = rs.hireDate; changed=true; }
       if(existing.resignDate){ existing.resignDate = null; changed=true; } // Staff Information 那邊重新在職了
       if(rs.cashInHand && existing.paymentType!=="CA"){
@@ -4319,6 +4338,17 @@ async function mergeEmployees(survivor, duplicate){
 // (see its own comment above showFuzzyNameModal) -- nothing is ever saved
 // back to the employee record itself, so "already synced" doesn't help:
 // syncing only ever touches dob/tfn/email/phone/hireDate, never the name.
+//
+// ⚠️ UPDATE, Jeff 2026-10-25 (Renita Ho hit the exact same thing): the
+// paragraph above is no longer accurate -- fetchRealStaffForStore() now
+// builds the synced name the same way (override → first name → full name →
+// email, via otPortalPersonName()), and syncEmployeesFromStaffInfo DOES now
+// overwrite an existing linked employee's `.name` whenever it no longer
+// matches that (see its own comment). So going forward this situation
+// should self-heal on the next sync instead of asking forever. This button
+// is kept as a manual/visible way to fix it immediately rather than wait
+// for the next sync (and still matters for someone not synced via
+// Staff Information at all, e.g. no profileId).
 //
 // "🏷 修正顯示名稱" finds every LINKED employee at this store whose payroll
 // `.name` doesn't match what OT Portal actually shows for them on the
