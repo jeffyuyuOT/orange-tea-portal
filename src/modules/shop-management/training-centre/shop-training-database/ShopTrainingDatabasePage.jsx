@@ -55,12 +55,40 @@ import FileRepositoryPicker from '../../../../components/ui/FileRepositoryPicker
 // row in place (and joins it into this item's copy_group_id) instead of
 // creating a second item with the same name; declining leaves that one store
 // untouched and still copies to any other selected stores with no conflict.
+//
+// Jeff, 2026-10-26: "shop training頁面,有的內容想做分類...想新增New
+// collection...item編輯頁面title下面新增移至colleciton...collectio名稱後面
+// 也會有編輯頁面,可以編輯collection的名字跟刪除" (then, mid-build: "colleciton
+// 都改成category") — items can optionally belong to a Category
+// (`shop_training_categories`, migration 0143; `shop_training_items
+// .category_id`, nullable, on delete set null — deleting a category never
+// deletes its items, they just become uncategorized again). "+ New Category"
+// sits next to "+ New Item"; a category row (📁 icon) shows at the top level
+// alongside any items that aren't in a category ("照常" — uncategorized items
+// render exactly as before); clicking one drills into just that category's
+// items (same pattern as `openCollectionId`... now `openCategoryId` below).
+// Its ✎ edit button opens CategoryModal to rename (the name is only ever
+// stored once, on the category row itself, so every item's "Move to
+// Category" dropdown picks up a rename automatically — nothing else needed)
+// or delete (confirms, with a stronger warning naming how many items are in
+// it, since deleting still only un-sets those items' category_id, never the
+// items themselves). EditModal gets a "Move to Category" dropdown right
+// under Title. Categories are per-store rows like everything else here, so
+// neither "Save to Multiple Stores" nor "Copy to store…" carries a
+// category_id across stores — a destination store's categories are a
+// completely different set of rows, even if one happens to share a name.
 export default function ShopTrainingDatabasePage() {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [items, setItems] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
   const [copyingItem, setCopyingItem] = useState(null)
+  // null = top-level view (categories + uncategorized items). Set to a
+  // category's id to drill into just that category's items.
+  const [openCategoryId, setOpenCategoryId] = useState(null)
+  const [creatingCategory, setCreatingCategory] = useState(false)
+  const [editingCategory, setEditingCategory] = useState(null)
   // Locks BOTH ↑/↓ buttons for every row while a reorder is in flight — not
   // just the one clicked — since a reorder is a two-step swap (two
   // sequential updates) and a second click landing mid-swap could race it
@@ -77,22 +105,34 @@ export default function ShopTrainingDatabasePage() {
   async function load() {
     if (!currentStoreId) return
     setLoading(true)
-    const { data } = await supabase
-      .from('shop_training_items')
-      .select('*')
-      .eq('store_id', currentStoreId)
-      .order('sort_order')
-    setItems(data ?? [])
+    const [{ data: itemRows }, { data: categoryRows }] = await Promise.all([
+      supabase.from('shop_training_items').select('*').eq('store_id', currentStoreId).order('sort_order'),
+      supabase.from('shop_training_categories').select('*').eq('store_id', currentStoreId).order('sort_order'),
+    ])
+    setItems(itemRows ?? [])
+    setCategories(categoryRows ?? [])
     setLoading(false)
   }
   useEffect(() => {
+    setOpenCategoryId(null) // switching stores — the open category belonged to the old one
     load()
   }, [currentStoreId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The items shown right now: either the open category's items, or (at the
+  // top level) the ones not in any category — categorized items only ever
+  // show inside their own category, never alongside the uncategorized list.
+  const visibleItems = openCategoryId
+    ? items.filter((i) => i.category_id === openCategoryId)
+    : items.filter((i) => !i.category_id)
+
   async function move(item, dir) {
     if (moving) return
-    const idx = items.findIndex((i) => i.id === item.id)
-    const swapWith = items[idx + dir]
+    // Swaps within visibleItems, not the full items list, so reordering
+    // never crosses from one category (or the uncategorized list) into
+    // another — an item can only trade places with its own neighbor in the
+    // same group that's actually on screen.
+    const idx = visibleItems.findIndex((i) => i.id === item.id)
+    const swapWith = visibleItems[idx + dir]
     if (!swapWith) return
     setMoving(true)
     await supabase.from('shop_training_items').update({ sort_order: swapWith.sort_order }).eq('id', item.id)
@@ -118,15 +158,81 @@ export default function ShopTrainingDatabasePage() {
         {isAdmin && ' As an admin, you can also copy an item from here straight into other stores.'}
       </p>
 
-      <div className="mb-3 flex justify-end">
-        <Button onClick={() => setEditing({})}>+ New Item</Button>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        {openCategoryId ? (
+          <button
+            type="button"
+            onClick={() => setOpenCategoryId(null)}
+            className="flex items-center gap-1 text-sm text-brand-600 hover:underline"
+          >
+            ‹ Back to all items
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex gap-2">
+          {!openCategoryId && (
+            <Button variant="secondary" onClick={() => setCreatingCategory(true)}>
+              + New Category
+            </Button>
+          )}
+          <Button onClick={() => setEditing(openCategoryId ? { category_id: openCategoryId } : {})}>
+            + New Item
+          </Button>
+        </div>
       </div>
 
-      {loading ? null : !items.length ? (
-        <EmptyState label="No shop training items yet for this store." />
-      ) : (
+      {openCategoryId && (
+        <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700">
+          <span>📁</span>
+          {categories.find((c) => c.id === openCategoryId)?.name}
+        </h2>
+      )}
+
+      {loading ? null : (
+        <>
+          {!openCategoryId && categories.length > 0 && (
+            <div className="mb-3 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+              {categories.map((c) => {
+                const count = items.filter((i) => i.category_id === c.id).length
+                return (
+                  <div key={c.id} className="flex items-center gap-2 px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCategoryId(c.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-brand-600"
+                    >
+                      <span>📁</span>
+                      <ClampedText text={c.name} title="Category name" className="min-w-0 flex-1 font-medium text-gray-800" />
+                      <span className="shrink-0 text-xs text-gray-400">
+                        {count} item{count === 1 ? '' : 's'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingCategory(c)}
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                      title="Edit category"
+                      aria-label="Edit category"
+                    >
+                      ✎
+                    </button>
+                    <span className="shrink-0 text-gray-300">›</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {!visibleItems.length ? (
+            (openCategoryId || !categories.length) && (
+              <EmptyState
+                label={openCategoryId ? 'No items in this category yet.' : 'No shop training items yet for this store.'}
+              />
+            )
+          ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
-          {items.map((item, idx) => (
+          {visibleItems.map((item, idx) => (
             // Jeff, 2026-09-29: "手機板的shop training database介面要好操作
             // 一點，都超出螢幕了" — title + ↑/↓ + (admin's) "Copy to store…"
             // + "Delete" used to sit forced onto one line (no wrap), so on a
@@ -168,7 +274,7 @@ export default function ShopTrainingDatabasePage() {
                     ↑
                   </button>
                   <button
-                    disabled={idx === items.length - 1 || moving}
+                    disabled={idx === visibleItems.length - 1 || moving}
                     onClick={() => move(item, 1)}
                     className="px-1.5 py-1 text-gray-400 hover:text-brand-600 disabled:opacity-30"
                     aria-label="Move down"
@@ -200,6 +306,8 @@ export default function ShopTrainingDatabasePage() {
             </div>
           ))}
         </div>
+          )}
+        </>
       )}
 
       {editing && (
@@ -211,6 +319,7 @@ export default function ShopTrainingDatabasePage() {
           profileName={`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email}
           isAdmin={isAdmin}
           accessibleStores={accessibleStores}
+          categories={categories}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -234,6 +343,39 @@ export default function ShopTrainingDatabasePage() {
           }}
         />
       )}
+
+      {creatingCategory && (
+        <CategoryModal
+          category={null}
+          currentStoreId={currentStoreId}
+          nextSortOrder={categories.length}
+          onClose={() => setCreatingCategory(false)}
+          onSaved={() => {
+            setCreatingCategory(false)
+            load()
+          }}
+        />
+      )}
+
+      {editingCategory && (
+        <CategoryModal
+          category={editingCategory}
+          currentStoreId={currentStoreId}
+          itemCount={items.filter((i) => i.category_id === editingCategory.id).length}
+          onClose={() => setEditingCategory(null)}
+          onSaved={() => {
+            setEditingCategory(null)
+            load()
+          }}
+          onDeleted={() => {
+            // If the category we just deleted was the one open, back out to
+            // the top level — it no longer exists to show.
+            setOpenCategoryId((prev) => (prev === editingCategory.id ? null : prev))
+            setEditingCategory(null)
+            load()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -244,13 +386,31 @@ export default function ShopTrainingDatabasePage() {
 // without the person needing to resize/compress first).
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
-function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName, isAdmin, accessibleStores, onClose, onSaved }) {
+function EditModal({
+  item,
+  nextSortOrder,
+  currentStoreId,
+  profileId,
+  profileName,
+  isAdmin,
+  accessibleStores,
+  categories,
+  onClose,
+  onSaved,
+}) {
   const isNew = !item.id
   // Set once this item has ever been through "Copy to store…" (by itself or
   // by whichever copy it came from) — null for an item that's never been
   // copied anywhere, in which case there's nothing else to push an edit to.
   const copyGroupId = item.copy_group_id ?? null
   const [title, setTitle] = useState(item.title ?? '')
+  // Jeff, 2026-10-26: "item編輯頁面title下面新增移至category" — null means no
+  // category (shows at the top level, same as before categories existed).
+  // Starts pre-selected when a new item is created from inside an open
+  // category (ShopTrainingDatabasePage passes `{ category_id: openCategoryId }`
+  // as `item` for "+ New Item" in that case) so it lands back in the same
+  // category instead of needing a manual re-pick.
+  const [categoryId, setCategoryId] = useState(item.category_id ?? null)
   const [content, setContent] = useState(item.content_html ?? '')
   const [visible, setVisible] = useState(item.visible_to_training ?? false)
   // Jeff, 2026-09-30 (migration 0082): same "Must-Know Items" concept as
@@ -334,6 +494,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           visible_to_training: visible,
           is_must_know: mustKnow,
           training_journey_phase: trainingPhase,
+          category_id: categoryId,
           sort_order: nextSortOrder,
           store_id: currentStoreId,
           created_by: profileId,
@@ -356,6 +517,7 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
           visible_to_training: visible,
           is_must_know: mustKnow,
           training_journey_phase: trainingPhase,
+          category_id: categoryId,
           updated_by: profileId,
           updated_by_name: profileName,
         })
@@ -383,6 +545,10 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
   // the item it was itself copied from) — everything "Save" would write for
   // this one row, written to all of them in one go. Never touches store_id
   // or sort_order, so each store keeps its own position in its own list.
+  // Also never touches category_id: categories are per-store rows, so this
+  // item's category at THIS store has no meaning at another store (even one
+  // with a same-named category — that's a different row, a different id).
+  // Each linked copy keeps whatever category it's already filed under there.
   async function saveToMultiple() {
     if (!copyGroupId) return
     if (mustKnow && !trainingPhase) {
@@ -466,6 +632,17 @@ function EditModal({ item, nextSortOrder, currentStoreId, profileId, profileName
     >
       <div className="space-y-3">
         <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <label className="block max-w-xs">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Move to Category</span>
+          <select className="input" value={categoryId ?? ''} onChange={(e) => setCategoryId(e.target.value || null)}>
+            <option value="">— No Category —</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <SimpleRichTextEditor value={content} onChange={setContent} placeholder="Training content…" />
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
@@ -660,6 +837,12 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onC
           skippedCount += 1
           continue
         }
+        // category_id is deliberately left out of both this update and the
+        // insert below — it's never copied across stores. This destination
+        // store's categories are entirely different rows from the source
+        // store's, so there's nothing correct to carry over; an overwritten
+        // item just keeps whatever category it's already filed under here,
+        // and a brand-new copy starts with no category.
         const { error } = await supabase
           .from('shop_training_items')
           .update({
@@ -762,6 +945,88 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onC
             </label>
           ))}
         </div>
+      )}
+    </Modal>
+  )
+}
+
+// Create (category === null) or rename/delete (category === the row) one
+// category. Renaming only ever writes the name here, on this one row — every
+// item's "Move to Category" dropdown reads it fresh each time EditModal
+// opens, so there's nothing else to go update. Deleting the category never
+// deletes its items (the FK is ON DELETE SET NULL): they just fall back to
+// "no category", same as if no one had ever filed them under it.
+function CategoryModal({ category, currentStoreId, nextSortOrder, itemCount, onClose, onSaved, onDeleted }) {
+  const isNew = !category
+  const [name, setName] = useState(category?.name ?? '')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setSaving(true)
+    const { error } = isNew
+      ? await supabase.from('shop_training_categories').insert({
+          name: trimmed,
+          store_id: currentStoreId,
+          sort_order: nextSortOrder,
+        })
+      : await supabase.from('shop_training_categories').update({ name: trimmed }).eq('id', category.id)
+    setSaving(false)
+    if (error) {
+      alert(error.message)
+      return
+    }
+    onSaved()
+  }
+
+  async function remove() {
+    // Jeff, 2026-10-26: "刪除時裡面有內容會有警示視窗提醒並確認" — a category
+    // with items in it gets a stronger warning naming the count (and makes
+    // clear the items themselves are safe, just uncategorized afterwards);
+    // an empty category just gets a plain confirm.
+    const warning = itemCount
+      ? `"${category.name}" has ${itemCount} item${itemCount === 1 ? '' : 's'} in it. Deleting the category does NOT delete those items — they'll move back to having no category. Delete "${category.name}"?`
+      : `Delete the empty category "${category.name}"?`
+    if (!confirm(warning)) return
+    setSaving(true)
+    const { error } = await supabase.from('shop_training_categories').delete().eq('id', category.id)
+    setSaving(false)
+    if (error) {
+      alert(error.message)
+      return
+    }
+    onDeleted()
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isNew ? 'New Category' : 'Edit Category'}
+      footer={
+        <div className="flex w-full items-center justify-between gap-2">
+          {isNew ? (
+            <span />
+          ) : (
+            <Button variant="danger" onClick={remove} disabled={saving}>
+              Delete
+            </Button>
+          )}
+          <Button onClick={save} disabled={saving || !name.trim()}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      }
+    >
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-gray-500">Category name</span>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      </label>
+      {!isNew && (
+        <p className="mt-2 text-xs text-gray-400">
+          Renaming updates every item's "Move to Category" dropdown automatically — nothing else to change by hand.
+        </p>
       )}
     </Modal>
   )
