@@ -68,16 +68,38 @@ import { useDragReorder, DragHandle } from '../../../../lib/useDragReorder'
 // alongside any items that aren't in a category ("照常" — uncategorized items
 // render exactly as before); clicking one drills into just that category's
 // items (same pattern as `openCollectionId`... now `openCategoryId` below).
-// Its ✎ edit button opens CategoryModal to rename (the name is only ever
-// stored once, on the category row itself, so every item's "Move to
-// Category" dropdown picks up a rename automatically — nothing else needed)
-// or delete (confirms, with a stronger warning naming how many items are in
-// it, since deleting still only un-sets those items' category_id, never the
-// items themselves). EditModal gets a "Move to Category" dropdown right
-// under Title. Categories are per-store rows like everything else here, so
-// neither "Save to Multiple Stores" nor "Copy to store…" carries a
-// category_id across stores — a destination store's categories are a
-// completely different set of rows, even if one happens to share a name.
+// Its ✎ edit button opens CategoryModal to rename or delete (confirms, with
+// a stronger warning naming how many items are in it, since deleting still
+// only un-sets those items' category_id, never the items themselves).
+// EditModal gets a "Move to Category" dropdown right under Title.
+//
+// Jeff, 2026-10-26 (same day, third follow-up): "如果要將category也copy to
+// other store and link store要怎麼處理? 還有如果category跟裡面item都是link
+// to other store，改的時候也要都改" — categories get their own
+// `copy_group_id` now too (migration 0144), same mechanism as items'. Three
+// places use it:
+// 1. CategoryModal: renaming a linked category (category.copy_group_id set)
+//    now updates every category sharing that group id in one go — not just
+//    this row — so a category's name can't drift out of sync across stores.
+//    This is the "the name is only ever stored once" comment from the first
+//    Category round, now true across stores too, not just within one store.
+// 2. CopyToStoreModal (per-item copy): if the item being copied has a
+//    category, that category is resolved/linked at each destination store
+//    too (see `resolveLinkedCategoryAtStore` below) — reusing an existing
+//    linked copy there, else linking a same-named category it finds, else
+//    creating a brand-new one — and the copied item lands in it. Previously
+//    this deliberately left `category_id` out and every copy landed
+//    uncategorized; that's no longer true.
+// 3. New `CopyCategoryToStoreModal` (the 📋 button on a category row,
+//    admin/developer only like the item one): copies the category itself
+//    AND every item currently in it to the selected store(s) in one action,
+//    linking the category and running the exact same per-item copy logic
+//    (`copyItemToStore`, factored out of CopyToStoreModal so both share it)
+//    — including the same same-name-overwrite confirm per item per store.
+// "Save to Multiple Stores" (pushing an item's content to its linked copies)
+// deliberately still does NOT touch category_id — that stays store-specific
+// placement, same as sort_order, so each store can file a synced item under
+// whatever locally-relevant category it wants without the push fighting it.
 //
 // Jeff, 2026-10-26 (same day, follow-up): "shop training data base裡的排序
 // 改成用拉的，不是用箭頭上下" — item reordering is now drag-and-drop (the same
@@ -97,6 +119,7 @@ export default function ShopTrainingDatabasePage() {
   const [openCategoryId, setOpenCategoryId] = useState(null)
   const [creatingCategory, setCreatingCategory] = useState(false)
   const [editingCategory, setEditingCategory] = useState(null)
+  const [copyingCategory, setCopyingCategory] = useState(null)
 
   // Jeff, 2026-09: "developer也要像admin一樣可以copy到其他分店" — developer
   // is meant to be admin's superset everywhere (RLS already treats it that
@@ -203,10 +226,22 @@ export default function ShopTrainingDatabasePage() {
                     >
                       <span>📁</span>
                       <ClampedText text={c.name} title="Category name" className="min-w-0 flex-1 font-medium text-gray-800" />
+                      {c.copy_group_id && <Badge color="brand">🔗 Linked</Badge>}
                       <span className="shrink-0 text-xs text-gray-400">
                         {count} item{count === 1 ? '' : 's'}
                       </span>
                     </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setCopyingCategory(c)}
+                        className="shrink-0 rounded-lg border border-brand-200 p-1.5 text-brand-700 hover:bg-brand-50"
+                        title="Copy to store…"
+                        aria-label="Copy category to store"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setEditingCategory(c)}
@@ -326,12 +361,27 @@ export default function ShopTrainingDatabasePage() {
           item={copyingItem}
           currentStoreId={currentStoreId}
           accessibleStores={accessibleStores}
+          categories={categories}
           onClose={() => setCopyingItem(null)}
           onCopied={() => {
             setCopyingItem(null)
             // Refreshes this store's own list so the source item's new
             // "🔗 Linked across stores" badge (set the first time an item is
             // copied) shows up immediately, without a manual page refresh.
+            load()
+          }}
+        />
+      )}
+
+      {copyingCategory && (
+        <CopyCategoryToStoreModal
+          category={copyingCategory}
+          categoryItems={items.filter((i) => i.category_id === copyingCategory.id)}
+          currentStoreId={currentStoreId}
+          accessibleStores={accessibleStores}
+          onClose={() => setCopyingCategory(null)}
+          onCopied={() => {
+            setCopyingCategory(null)
             load()
           }}
         />
@@ -749,6 +799,148 @@ function EditModal({
   )
 }
 
+// Finds (or creates) the category at `destStoreId` linked to `groupId`:
+// reuses a category already in that group there if one exists, else links a
+// same-named category it finds at that store (no destructive change — just
+// setting its copy_group_id), else creates a brand-new one with that name.
+// Returns the destination category's id, or null if creating it failed.
+// Shared by CopyToStoreModal (a single item's category) and
+// CopyCategoryToStoreModal (copying the whole category at once).
+async function resolveLinkedCategoryAtStore(name, groupId, destStoreId) {
+  const { data: linked } = await supabase
+    .from('shop_training_categories')
+    .select('id')
+    .eq('store_id', destStoreId)
+    .eq('copy_group_id', groupId)
+    .limit(1)
+  if (linked?.[0]) return linked[0].id
+
+  const trimmed = name.trim()
+  const { data: sameName } = await supabase
+    .from('shop_training_categories')
+    .select('id')
+    .eq('store_id', destStoreId)
+    .ilike('name', trimmed)
+    .limit(1)
+  if (sameName?.[0]) {
+    await supabase.from('shop_training_categories').update({ copy_group_id: groupId }).eq('id', sameName[0].id)
+    return sameName[0].id
+  }
+
+  const { count } = await supabase
+    .from('shop_training_categories')
+    .select('id', { count: 'exact', head: true })
+    .eq('store_id', destStoreId)
+  const { data: newCategory, error } = await supabase
+    .from('shop_training_categories')
+    .insert({ name: trimmed, store_id: destStoreId, sort_order: count ?? 0, copy_group_id: groupId })
+    .select()
+    .single()
+  return error || !newCategory ? null : newCategory.id
+}
+
+// Copies one item to one destination store, into `destCategoryId` (or
+// uncategorized if null) — the same per-item/per-store step CopyToStoreModal
+// always did, factored out so CopyCategoryToStoreModal can run it once per
+// item when copying a whole category at once. Returns 'copied', 'overwritten',
+// 'skipped' (the same-name overwrite confirm was declined) or 'failed'.
+async function copyItemToStore(item, groupId, storeId, storeName, destCategoryId) {
+  const title = item.title.trim()
+  // Jeff, 2026-10-22: "如果有同名的item，先視窗提醒有同名item是否覆蓋，確認
+  // 則覆蓋" — look for an item already sitting at this destination store
+  // under the same name (case-insensitive) before adding a second one.
+  // .limit(1) rather than .single()/.maybeSingle(), since a store could in
+  // principle already have more than one same-named item (e.g. from before
+  // this check existed) — overwriting just the first match is enough to
+  // stop a brand-new duplicate from being created here.
+  const { data: existingRows } = await supabase
+    .from('shop_training_items')
+    .select('id')
+    .eq('store_id', storeId)
+    .ilike('title', title)
+    .limit(1)
+  const existing = existingRows?.[0]
+
+  const { data: sourceFiles } = await supabase
+    .from('shop_training_item_files')
+    .select('*')
+    .eq('shop_training_item_id', item.id)
+    .order('sort_order')
+
+  if (existing) {
+    if (
+      !confirm(
+        `${storeName} already has a training item named "${item.title}". Overwrite it with this copy? (Choosing Cancel leaves it untouched and skips this store.)`
+      )
+    ) {
+      return 'skipped'
+    }
+    const { error } = await supabase
+      .from('shop_training_items')
+      .update({
+        title: item.title,
+        content_html: item.content_html,
+        visible_to_training: item.visible_to_training,
+        is_must_know: item.is_must_know,
+        training_journey_phase: item.training_journey_phase,
+        category_id: destCategoryId,
+        copy_group_id: groupId,
+      })
+      .eq('id', existing.id)
+    if (error) return 'failed'
+    await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', existing.id)
+    if (sourceFiles?.length) {
+      await supabase.from('shop_training_item_files').insert(
+        sourceFiles.map((f) => ({
+          shop_training_item_id: existing.id,
+          display_name: f.display_name,
+          file_path: f.file_path,
+          sort_order: f.sort_order,
+        }))
+      )
+    }
+    return 'overwritten'
+  }
+
+  const { count } = await supabase
+    .from('shop_training_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('store_id', storeId)
+  const { data: newItem, error } = await supabase
+    .from('shop_training_items')
+    .insert({
+      title: item.title,
+      content_html: item.content_html,
+      visible_to_training: item.visible_to_training,
+      is_must_know: item.is_must_know,
+      // Jeff, 2026-10-07: "copy to store也會將phase assign設定copy過去" — the
+      // Training Journey phase assignment travels with the copy, same as
+      // is_must_know right above it (the two always went together
+      // conceptually — a phase without this would silently vanish at the
+      // destination store, leaving the copy's Training Journey placement to
+      // be redone by hand).
+      training_journey_phase: item.training_journey_phase,
+      category_id: destCategoryId,
+      copy_group_id: groupId,
+      sort_order: count ?? 0,
+      store_id: storeId,
+    })
+    .select()
+    .single()
+  if (error || !newItem) return 'failed'
+  if (sourceFiles?.length) {
+    await supabase.from('shop_training_item_files').insert(
+      sourceFiles.map((f) => ({
+        shop_training_item_id: newItem.id,
+        display_name: f.display_name,
+        file_path: f.file_path,
+        sort_order: f.sort_order,
+      }))
+    )
+  }
+  return 'copied'
+}
+
 // Admin-only: duplicates one item (title, content, "visible to training",
 // and every attached file) straight into one or more other stores, each as
 // its own brand-new row/id — the same as if that store's manager had
@@ -756,8 +948,111 @@ function EditModal({
 // afterwards, but it now shares a `copy_group_id` with the item it was
 // copied from (and with every other copy made from that same item), so
 // EditModal's "Save to Multiple Stores" button can find and update them
-// all together later.
-function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onCopied }) {
+// all together later. If the item has a category, that category is
+// resolved/linked at each destination store too (see
+// `resolveLinkedCategoryAtStore` above) and the copy lands in it.
+function CopyToStoreModal({ item, currentStoreId, accessibleStores, categories, onClose, onCopied }) {
+  const targets = accessibleStores.filter((s) => s.id !== currentStoreId)
+  const [selected, setSelected] = useState(new Set())
+  const [copying, setCopying] = useState(false)
+  const sourceCategory = item.category_id ? categories.find((c) => c.id === item.category_id) : null
+
+  function toggle(id) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function copy() {
+    if (!selected.size) return
+    if (
+      !confirm(
+        `Copy "${item.title}" to ${selected.size} store(s)? Each store gets its own copy you can still edit separately — but afterwards, "Save to Multiple Stores" on any of them (including this one) pushes an edit to every linked copy at once.${
+          sourceCategory ? ` Its category "${sourceCategory.name}" is linked/created at each destination store too.` : ''
+        }`
+      )
+    ) {
+      return
+    }
+    setCopying(true)
+
+    // Give the source item a group id (shared by every copy made from it)
+    // the first time it's ever copied, so this copy — and any later one —
+    // can all be found and updated together via "Save to Multiple Stores".
+    let groupId = item.copy_group_id
+    if (!groupId) {
+      groupId = crypto.randomUUID()
+      await supabase.from('shop_training_items').update({ copy_group_id: groupId }).eq('id', item.id)
+    }
+
+    // Jeff, 2026-10-26: "如果要將category也copy to other store and link
+    // store要怎麼處理?" — give the item's category its own group id too (if
+    // it doesn't already have one), the same way items get one above.
+    let categoryGroupId = null
+    if (sourceCategory) {
+      categoryGroupId = sourceCategory.copy_group_id
+      if (!categoryGroupId) {
+        categoryGroupId = crypto.randomUUID()
+        await supabase.from('shop_training_categories').update({ copy_group_id: categoryGroupId }).eq('id', sourceCategory.id)
+      }
+    }
+
+    const counts = { copied: 0, overwritten: 0, skipped: 0, failed: 0 }
+    for (const storeId of selected) {
+      const storeName = accessibleStores.find((s) => s.id === storeId)?.name ?? 'that store'
+      const destCategoryId = sourceCategory
+        ? await resolveLinkedCategoryAtStore(sourceCategory.name, categoryGroupId, storeId)
+        : null
+      const result = await copyItemToStore(item, groupId, storeId, storeName, destCategoryId)
+      counts[result] += 1
+    }
+    setCopying(false)
+    onCopied()
+    const parts = []
+    if (counts.copied) parts.push(`copied to ${counts.copied} store(s)`)
+    if (counts.overwritten) parts.push(`overwrote the same-named item at ${counts.overwritten} store(s)`)
+    if (counts.skipped) parts.push(`left ${counts.skipped} store(s) unchanged`)
+    if (counts.failed) parts.push(`${counts.failed} store(s) failed`)
+    alert(parts.length ? `${parts.join(', ')}.` : 'Nothing was copied.')
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Copy "${item.title}" to…`}
+      footer={
+        <Button onClick={copy} disabled={copying || !selected.size}>
+          {copying ? 'Copying…' : `Copy to ${selected.size || ''} store(s)`}
+        </Button>
+      }
+    >
+      {!targets.length ? (
+        <p className="text-sm text-gray-500">No other stores to copy to.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {targets.map((s) => (
+            <label key={s.id} className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+              {s.name}
+            </label>
+          ))}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+// Admin-only: copies a whole category — itself, linked/created at each
+// destination store via `resolveLinkedCategoryAtStore` — AND every item
+// currently in it, via the same `copyItemToStore` step CopyToStoreModal uses
+// for a single item, run once per item per destination store (including the
+// same same-name overwrite confirm, per item per store). Saves clicking
+// "Copy to store…" on every item in the category one at a time.
+function CopyCategoryToStoreModal({ category, categoryItems, currentStoreId, accessibleStores, onClose, onCopied }) {
   const targets = accessibleStores.filter((s) => s.id !== currentStoreId)
   const [selected, setSelected] = useState(new Set())
   const [copying, setCopying] = useState(false)
@@ -775,144 +1070,52 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onC
     if (!selected.size) return
     if (
       !confirm(
-        `Copy "${item.title}" to ${selected.size} store(s)? Each store gets its own copy you can still edit separately — but afterwards, "Save to Multiple Stores" on any of them (including this one) pushes an edit to every linked copy at once.`
+        `Copy the category "${category.name}" and its ${categoryItems.length} item${categoryItems.length === 1 ? '' : 's'} to ${selected.size} store(s)? Each store gets a linked copy of the category and every item in it. Renaming "${category.name}" later updates every linked store's copy too.`
       )
     ) {
       return
     }
     setCopying(true)
 
-    // Give the source item a group id (shared by every copy made from it)
-    // the first time it's ever copied, so this copy — and any later one —
-    // can all be found and updated together via "Save to Multiple Stores".
-    let groupId = item.copy_group_id
+    let groupId = category.copy_group_id
     if (!groupId) {
       groupId = crypto.randomUUID()
-      await supabase.from('shop_training_items').update({ copy_group_id: groupId }).eq('id', item.id)
+      await supabase.from('shop_training_categories').update({ copy_group_id: groupId }).eq('id', category.id)
     }
 
-    const { data: sourceFiles } = await supabase
-      .from('shop_training_item_files')
-      .select('*')
-      .eq('shop_training_item_id', item.id)
-      .order('sort_order')
-
-    let copiedCount = 0
-    let overwrittenCount = 0
-    let skippedCount = 0
-    let failCount = 0
-    const title = item.title.trim()
+    let categoryFailCount = 0
+    const itemCounts = { copied: 0, overwritten: 0, skipped: 0, failed: 0 }
 
     for (const storeId of selected) {
       const storeName = accessibleStores.find((s) => s.id === storeId)?.name ?? 'that store'
-
-      // Jeff, 2026-10-22: "如果有同名的item，先視窗提醒有同名item是否覆蓋，
-      // 確認則覆蓋" — look for an item already sitting at this destination
-      // store under the same name (case-insensitive) before adding a second
-      // one. .limit(1) rather than .single()/.maybeSingle(), since a store
-      // could in principle already have more than one same-named item (e.g.
-      // from before this check existed) — overwriting just the first match
-      // is enough to stop a brand-new duplicate from being created here.
-      const { data: existingRows } = await supabase
-        .from('shop_training_items')
-        .select('id')
-        .eq('store_id', storeId)
-        .ilike('title', title)
-        .limit(1)
-      const existing = existingRows?.[0]
-
-      if (existing) {
-        if (
-          !confirm(
-            `${storeName} already has a training item named "${item.title}". Overwrite it with this copy? (Choosing Cancel leaves it untouched and skips this store.)`
-          )
-        ) {
-          skippedCount += 1
-          continue
-        }
-        // category_id is deliberately left out of both this update and the
-        // insert below — it's never copied across stores. This destination
-        // store's categories are entirely different rows from the source
-        // store's, so there's nothing correct to carry over; an overwritten
-        // item just keeps whatever category it's already filed under here,
-        // and a brand-new copy starts with no category.
-        const { error } = await supabase
-          .from('shop_training_items')
-          .update({
-            title: item.title,
-            content_html: item.content_html,
-            visible_to_training: item.visible_to_training,
-            is_must_know: item.is_must_know,
-            training_journey_phase: item.training_journey_phase,
-            copy_group_id: groupId,
-          })
-          .eq('id', existing.id)
-        if (error) {
-          failCount += 1
-          continue
-        }
-        await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', existing.id)
-        if (sourceFiles?.length) {
-          await supabase.from('shop_training_item_files').insert(
-            sourceFiles.map((f) => ({
-              shop_training_item_id: existing.id,
-              display_name: f.display_name,
-              file_path: f.file_path,
-              sort_order: f.sort_order,
-            }))
-          )
-        }
-        overwrittenCount += 1
+      const destCategoryId = await resolveLinkedCategoryAtStore(category.name, groupId, storeId)
+      if (!destCategoryId) {
+        categoryFailCount += 1
         continue
       }
-
-      const { count } = await supabase
-        .from('shop_training_items')
-        .select('id', { count: 'exact', head: true })
-        .eq('store_id', storeId)
-      const { data: newItem, error } = await supabase
-        .from('shop_training_items')
-        .insert({
-          title: item.title,
-          content_html: item.content_html,
-          visible_to_training: item.visible_to_training,
-          is_must_know: item.is_must_know,
-          // Jeff, 2026-10-07: "copy to store也會將phase assign設定copy過去" —
-          // the Training Journey phase assignment travels with the copy, same
-          // as is_must_know right above it (the two always went together
-          // conceptually — a phase without this would silently vanish at the
-          // destination store, leaving the copy's Training Journey placement
-          // to be redone by hand).
-          training_journey_phase: item.training_journey_phase,
-          copy_group_id: groupId,
-          sort_order: count ?? 0,
-          store_id: storeId,
-        })
-        .select()
-        .single()
-      if (error || !newItem) {
-        failCount += 1
-        continue
+      // Every item in the category also needs its OWN item-level
+      // copy_group_id (separate from the category's), same as a single-item
+      // copy via CopyToStoreModal — so "Save to Multiple Stores" on any one
+      // of these items still finds just its own linked copies, not every
+      // item in the category.
+      for (const item of categoryItems) {
+        let itemGroupId = item.copy_group_id
+        if (!itemGroupId) {
+          itemGroupId = crypto.randomUUID()
+          await supabase.from('shop_training_items').update({ copy_group_id: itemGroupId }).eq('id', item.id)
+        }
+        const result = await copyItemToStore(item, itemGroupId, storeId, storeName, destCategoryId)
+        itemCounts[result] += 1
       }
-      if (sourceFiles?.length) {
-        await supabase.from('shop_training_item_files').insert(
-          sourceFiles.map((f) => ({
-            shop_training_item_id: newItem.id,
-            display_name: f.display_name,
-            file_path: f.file_path,
-            sort_order: f.sort_order,
-          }))
-        )
-      }
-      copiedCount += 1
     }
     setCopying(false)
     onCopied()
     const parts = []
-    if (copiedCount) parts.push(`copied to ${copiedCount} store(s)`)
-    if (overwrittenCount) parts.push(`overwrote the same-named item at ${overwrittenCount} store(s)`)
-    if (skippedCount) parts.push(`left ${skippedCount} store(s) unchanged`)
-    if (failCount) parts.push(`${failCount} store(s) failed`)
+    if (categoryFailCount) parts.push(`the category itself failed to set up at ${categoryFailCount} store(s)`)
+    if (itemCounts.copied) parts.push(`copied ${itemCounts.copied} item(s)`)
+    if (itemCounts.overwritten) parts.push(`overwrote ${itemCounts.overwritten} same-named item(s)`)
+    if (itemCounts.skipped) parts.push(`left ${itemCounts.skipped} item(s) unchanged`)
+    if (itemCounts.failed) parts.push(`${itemCounts.failed} item(s) failed`)
     alert(parts.length ? `${parts.join(', ')}.` : 'Nothing was copied.')
   }
 
@@ -920,7 +1123,7 @@ function CopyToStoreModal({ item, currentStoreId, accessibleStores, onClose, onC
     <Modal
       open
       onClose={onClose}
-      title={`Copy "${item.title}" to…`}
+      title={`Copy category "${category.name}" to…`}
       footer={
         <Button onClick={copy} disabled={copying || !selected.size}>
           {copying ? 'Copying…' : `Copy to ${selected.size || ''} store(s)`}
@@ -958,13 +1161,22 @@ function CategoryModal({ category, currentStoreId, nextSortOrder, itemCount, onC
     const trimmed = name.trim()
     if (!trimmed) return
     setSaving(true)
+    // Jeff, 2026-10-26: "如果category跟裡面item都是link to other store，改的
+    // 時候也要都改" — a linked category (copy_group_id set) renames every
+    // row sharing that group id in one go, not just this one, so the name
+    // can't drift out of sync across stores.
     const { error } = isNew
       ? await supabase.from('shop_training_categories').insert({
           name: trimmed,
           store_id: currentStoreId,
           sort_order: nextSortOrder,
         })
-      : await supabase.from('shop_training_categories').update({ name: trimmed }).eq('id', category.id)
+      : category.copy_group_id
+        ? await supabase
+            .from('shop_training_categories')
+            .update({ name: trimmed })
+            .eq('copy_group_id', category.copy_group_id)
+        : await supabase.from('shop_training_categories').update({ name: trimmed }).eq('id', category.id)
     setSaving(false)
     if (error) {
       alert(error.message)
@@ -977,10 +1189,15 @@ function CategoryModal({ category, currentStoreId, nextSortOrder, itemCount, onC
     // Jeff, 2026-10-26: "刪除時裡面有內容會有警示視窗提醒並確認" — a category
     // with items in it gets a stronger warning naming the count (and makes
     // clear the items themselves are safe, just uncategorized afterwards);
-    // an empty category just gets a plain confirm.
+    // an empty category just gets a plain confirm. Deleting only ever
+    // removes THIS store's row — a linked category at another store is a
+    // separate row and is left alone.
+    const linkedNote = category.copy_group_id
+      ? " (This only removes this store's copy — any linked copies at other stores are left as they are.)"
+      : ''
     const warning = itemCount
-      ? `"${category.name}" has ${itemCount} item${itemCount === 1 ? '' : 's'} in it. Deleting the category does NOT delete those items — they'll move back to having no category. Delete "${category.name}"?`
-      : `Delete the empty category "${category.name}"?`
+      ? `"${category.name}" has ${itemCount} item${itemCount === 1 ? '' : 's'} in it. Deleting the category does NOT delete those items — they'll move back to having no category.${linkedNote} Delete "${category.name}"?`
+      : `Delete the empty category "${category.name}"?${linkedNote}`
     if (!confirm(warning)) return
     setSaving(true)
     const { error } = await supabase.from('shop_training_categories').delete().eq('id', category.id)
@@ -1018,7 +1235,10 @@ function CategoryModal({ category, currentStoreId, nextSortOrder, itemCount, onC
       </label>
       {!isNew && (
         <p className="mt-2 text-xs text-gray-400">
-          Renaming updates every item's "Move to Category" dropdown automatically — nothing else to change by hand.
+          Renaming updates every item's "Move to Category" dropdown automatically.
+          {category.copy_group_id
+            ? ' This category is linked across stores, so the new name also updates every linked copy there.'
+            : ''}
         </p>
       )}
     </Modal>
