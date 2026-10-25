@@ -415,8 +415,8 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
                     {c.name}
                     {!c.is_active && <div className="text-[10px] font-normal text-gray-400">(已停用)</div>}
                     {c.subs.length > 0 && <div className="text-[10px] font-normal text-gray-500">= sub 加總</div>}
-                    {isCashColumn(c) && <div className="text-[10px] font-normal text-gray-500">= O.CA − D</div>}
-                    {isPosTotalColumn(c) && <div className="text-[10px] font-normal text-gray-500">= O.POST − D（不計入 Sum）</div>}
+                    {isCashColumn(c) && <div className="text-[10px] font-normal text-gray-500">= O.CA − 耗損</div>}
+                    {isPosTotalColumn(c) && <div className="text-[10px] font-normal text-gray-500">= O.POST − 耗損（不計入 Sum）</div>}
                   </th>
                 ))}
                 <th className={`${th} bg-brand-200`}>
@@ -456,7 +456,7 @@ export default function SfSheet({ stores, salesStores, store, year, month, types
                             <div
                               className="px-1 py-1 text-right tabular-nums text-gray-700"
                               title={
-                                c.subs.length ? '由 sub payment type 加總' : isPosTotalColumn(c) ? 'O.POST − D' : 'O.CA − D'
+                                c.subs.length ? '由 sub payment type 加總' : isPosTotalColumn(c) ? 'O.POST − 耗損' : 'O.CA − 耗損'
                               }
                             >
                               {fmtMoney(r.mains[c.id])}
