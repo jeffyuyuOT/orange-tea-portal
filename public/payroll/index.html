@@ -4537,6 +4537,43 @@ function openResignModal(empId){
     renderMain();
   };
 }
+// Jeff, 2026-10-25: "員工上傳的TFN跟Super form也沒有同步到員工資料管理裡，
+// 如果不要同步附加檔案至少要有連結可以連到這個檔案" -- 下面「文件」區塊
+// (docFields) 是 Payroll 自己獨立的上傳欄位，存在本機 IndexedDB 裡
+// (emp.documents)，從來沒跟 OT Portal My Information／Staff Information 的
+// 上傳（user_documents 表 + "documents" storage bucket，見
+// src/components/StaffDocumentsSection.jsx）有任何關聯，兩邊是各自獨立的檔
+// 案。不複製檔案本身過來（要多存一份、兩邊得保持同步，而且這個純靜態頁面
+// 目前沒有、也不需要 Storage 的寫入/下載權限），改成只查 user_documents 抓
+// 連結已上傳檔案的 file_path/original_name，组出跟 StaffDocumentsSection.jsx
+// 自己一樣的 public URL（supabase.storage.from('documents').getPublicUrl()
+// —— bucket 本來就是 public，My Information/Staff Information 能打開檔案靠
+// 的也是這個）。
+// ⚠️ 這個查詢會受 user_documents 的 RLS 限制 —— 只有 Staff Information 那邊
+// 的 manager/admin/developer（或檔案本人）才能讀到。Payroll 這個靜態頁面本
+// 身沒有登入機制，但因為跟 OT Portal 主站同一個 Supabase 專案、同一個網域，
+// supabase-js 預設把 session 存在 localStorage，所以如果操作 Payroll 的瀏覽
+// 器同時也登入了 OT Portal（通常就是這樣），會自動沿用那個登入狀態；如果該
+// 帳號權限不夠或沒登入，這裡就是抓不到資料，但不會整個噴錯 —— 每個欄位就只
+// 是不顯示連結、文件上傳欄位本身完全不受影響。
+const OT_PORTAL_DOC_TYPE_BY_FIELD = { tfnForm: "tfn", superForm: "super", parentConsentForm: "parent_consent" };
+async function fetchUserDocumentsForProfile(profileId){
+  if(!profileId) return {};
+  const { data, error } = await sb
+    .from("user_documents")
+    .select("doc_type, file_path, original_name, uploaded_at")
+    .eq("profile_id", profileId)
+    .order("uploaded_at", {ascending:true}); // 同一類型若重複上傳過，後面的（較新）蓋過前面的
+  if(error){ console.error("fetchUserDocumentsForProfile failed", error); return {}; }
+  const out = {};
+  (data||[]).forEach(d=>{
+    out[d.doc_type] = {
+      name: d.original_name || d.file_path,
+      url: sb.storage.from("documents").getPublicUrl(d.file_path).data.publicUrl,
+    };
+  });
+  return out;
+}
 function openEmployeeEditModal(empId){
   let emp = currentEmployees.find(e=>e.id===empId);
   emp = JSON.parse(JSON.stringify(emp));
@@ -4663,13 +4700,43 @@ function openEmployeeEditModal(empId){
   $("#eschoolstudentInfo",m).onclick = ()=>{
     openInfoPopup("School student 上限說明", `勾選後上限自動依 QLD Child Employment Regulation 判定，不用手動填：每個日曆週（一~日）只要當週有上學日就算 ${SCHOOL_STUDENT_WEEK_CAP_TERM}hr，整週都在學校假期則算 ${SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}hr，整個薪水期間的上限＝各週上限加總（例如兩週橫跨學期最後一週＋假期第一週，就是 ${SCHOOL_STUDENT_WEEK_CAP_TERM}+${SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}=${SCHOOL_STUDENT_WEEK_CAP_TERM+SCHOOL_STUDENT_WEEK_CAP_HOLIDAY}hr，不是單一固定數字）。適用 18 歲以下、就讀高中以下的在學員工。行事曆目前收錄 ${Object.keys(QLD_SCHOOL_TERMS).join("、")} 年，其他年份會先以學期中的較低上限計算，請自行核對。`);
   };
+  // otDocs: null = 還沒查過 user_documents（連結員工，查詢中）；{} 或帶內容
+  // 的物件 = 查完了（REST key 是 OT_PORTAL_DOC_TYPE_BY_FIELD 的值，例如
+  // "tfn"）。未連結員工（沒有 profileId）不會去查，維持 null 也沒差，因為
+  // otDocHtml() 一開始就會直接跳過。
+  let otDocs = null;
+  // 查到的那個 type 的 {name,url}，查詢中或沒有都回傳 null（不分「還沒查完」
+  // 跟「查完了但沒有」，呼叫端自己用 otDocs===null 去分辨查詢中的狀態）。
+  function getOtDoc(k){
+    if(!emp.profileId) return null;
+    const otType = OT_PORTAL_DOC_TYPE_BY_FIELD[k];
+    if(!otType || !otDocs) return null;
+    return otDocs[otType] || null;
+  }
+  function otDocHtml(k){
+    if(!emp.profileId) return "";
+    const otType = OT_PORTAL_DOC_TYPE_BY_FIELD[k];
+    if(!otType) return "";
+    if(otDocs===null) return `<span class="muted small" style="margin-left:8px;">(Staff Information 查詢中…)</span>`;
+    const otDoc = otDocs[otType];
+    if(otDoc) return `<a class="small" href="${escapeHtml(otDoc.url)}" target="_blank" rel="noreferrer" style="margin-left:8px;">🔗 Staff Information: ${escapeHtml(otDoc.name)}</a>`;
+    return `<span class="muted small" style="margin-left:8px;">(Staff Information：尚未上傳)</span>`;
+  }
   function renderDocs(){
     $("#docsBox",m).innerHTML = docFields.map(([k,label])=>{
       const doc = emp.documents && emp.documents[k];
-      return `<div class="row" style="margin-bottom:6px;">
+      // Jeff, 2026-10-25: "如果有同步檔案連結的話，旁邊的choose file No file
+      // chosen欄可以取消" -- Staff Information 那邊已經有連結可以直接打開檔
+      // 案了，Payroll 這邊再放一個「Choose file」讓人重傳一次沒有意義，容易
+      // 讓人誤以為兩邊是不同份、兩邊都要傳。查到連結後就不再顯示上傳欄位；
+      // 如果 Payroll 這邊先前已經自己傳過一份（doc 存在，這個功能上線前就
+      // 有的情況），下載/移除那份的按鈕還是保留，只是不再給新的上傳欄位。
+      const hasOtLink = !!getOtDoc(k);
+      return `<div class="row" style="margin-bottom:6px; align-items:center;">
         <span style="width:150px;">${label}</span>
-        <input type="file" data-docupload="${k}">
-        ${doc ? `<button class="ghost small filelink" data-docdl="${k}">⬇ ${escapeHtml(doc.name)}</button><button class="iconbtn" data-docrm="${k}">✕</button>` : `<span class="muted small">尚未上傳</span>`}
+        ${hasOtLink ? '' : `<input type="file" data-docupload="${k}">`}
+        ${doc ? `<button class="ghost small filelink" data-docdl="${k}">⬇ ${escapeHtml(doc.name)}</button><button class="iconbtn" data-docrm="${k}">✕</button>` : (hasOtLink ? '' : `<span class="muted small">尚未上傳</span>`)}
+        ${otDocHtml(k)}
       </div>`;
     }).join("");
     $all("[data-docupload]",m).forEach(inp=>{
@@ -4693,6 +4760,9 @@ function openEmployeeEditModal(empId){
     });
   }
   renderDocs();
+  if(emp.profileId){
+    fetchUserDocumentsForProfile(emp.profileId).then(map=>{ otDocs = map; renderDocs(); });
+  }
   $("#msave",m).onclick = async ()=>{
     emp.name = $("#ename",m).value.trim();
     emp.paymentType = $("#eptype",m).value;
