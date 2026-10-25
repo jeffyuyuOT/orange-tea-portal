@@ -1916,7 +1916,11 @@ function findRealStore(payrollStore){
   return realStores.find(s=>(s.name||"").trim().toLowerCase()===name) || null;
 }
 // 抓這個真實分店目前「在職」、且不是 NON_PAYROLL_STAFF_ROLES 裡角色的員工，
-// 對應到 syncEmployeesFromStaffInfo 需要的 5 個共通欄位 + cash-in-hand 狀態。
+// 對應到 syncEmployeesFromStaffInfo 需要的 8 個共通欄位 + cash-in-hand 狀態。
+// Jeff, 2026-10-25: 銀行資訊（bankAccountName/bsb/accountNumber）加入同步 ——
+// 原本這 3 個是 Payroll 自己獨立維護、完全不跟 Staff Information 同步的（見
+// syncEmployeesFromStaffInfo 下面舊註解），現在改成比照 dob/tfn/email/phone/
+// hireDate 一樣的做法。
 async function fetchRealStaffForStore(realStoreId){
   const { data, error } = await sb
     .from("user_stores")
@@ -1939,6 +1943,9 @@ async function fetchRealStaffForStore(realStoreId){
       email: p.email || "",
       phone: p.phone || "",
       hireDate: p.hire_date || null,
+      bankAccountName: p.bank_account_name || "",
+      bankBsb: p.bsb || "",
+      bankAccountNumber: p.account_number || "",
       cashInHand: !!p.cash_in_hand,
     });
   });
@@ -1949,10 +1956,12 @@ async function fetchRealStaffForStore(realStoreId){
 //  - Staff Information 有、這邊還沒登記過的（用 profileId 比對）→ 新增一筆已
 //    連結的員工，付款方式預設 FT，除非勾了 cash-in-hand 就直接帶入 "CA"（這個
 //    app 原本就有的「整筆薪水都算 cash-in-hand」付款方式，不是新類別）。
-//  - 已連結的 → 更新 dob/tfn/email/phone/hireDate 這 5 個共通欄位；若目前勾了
+//  - 已連結的 → 更新 dob/tfn/email/phone/hireDate/bankAccountName/bankBsb/
+//    bankAccountNumber 這 8 個共通欄位（Jeff, 2026-10-25：銀行資訊 3 個欄位
+//    加入同步，之前是 Payroll 自己獨立維護、完全不同步）；若目前勾了
 //    cash-in-hand 但 paymentType 還不是 "CA"，強制改成 "CA" 並把費率歸零。
-//    姓名、銀行資訊、費率等其他欄位不受影響 —— 這些不在 Jeff 要求同步的欄位裡，
-//    仍由 Payroll 這邊自己維護。
+//    姓名、費率等其他欄位不受影響 —— 這些不在 Jeff 要求同步的欄位裡，仍由
+//    Payroll 這邊自己維護。
 //  - 之前連結過、但這次抓回來的名單裡已經沒有（整個人從 Staff Information /
 //    這個分店移除，或被設為非在職）的 → 比照「離職」按鈕的做法，設定
 //    resignDate（用今天日期），不會直接刪除，保留過去的薪水計算紀錄。
@@ -1971,7 +1980,7 @@ async function syncEmployeesFromStaffInfo(store, real){
     const existing = byProfileId.get(rs.profileId);
     if(existing){
       let changed = false;
-      ["dob","tfn","email","phone"].forEach(k=>{ if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; } });
+      ["dob","tfn","email","phone","bankAccountName","bankBsb","bankAccountNumber"].forEach(k=>{ if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; } });
       if(existing.hireDate!==rs.hireDate){ existing.hireDate = rs.hireDate; changed=true; }
       if(existing.resignDate){ existing.resignDate = null; changed=true; } // Staff Information 那邊重新在職了
       if(rs.cashInHand && existing.paymentType!=="CA"){
@@ -2002,7 +2011,7 @@ async function syncEmployeesFromStaffInfo(store, real){
         tfn: rs.tfn, email: rs.email, phone: rs.phone, hireDate: rs.hireDate || toISO(new Date()),
         resignDate: null, paymentType, level, taxType: "with", rateMode: "award",
         rates, cashRates, hourCap: null,
-        bankAccountName: "", bankBsb: "", bankAccountNumber: "",
+        bankAccountName: rs.bankAccountName, bankBsb: rs.bankBsb, bankAccountNumber: rs.bankAccountNumber,
         documents: {}, order,
       };
       await saveEmployee(emp);
@@ -4212,7 +4221,7 @@ function openMergeDuplicatesModal(storeId, onDone){
   </tr>`).join("");
   const m = openModal(`
     <div class="modal-header"><h3>🔀 合併重複員工</h3><button class="close-x" id="mclose">✕</button></div>
-    <p class="small muted">下列配對看起來是同一個人重複登記了兩筆資料（手動輸入的舊資料 + 從 Staff Information 同步進來的新資料）。確認合併後會保留「保留」那欄的資料（姓名、付款方式、Level、費率、銀行資訊都不變），把「併入後刪除」那欄的 Staff Information 連結、生日、TFN、Email、電話、入職日期併進去，再把那筆重複的刪除。已提交/儲存的薪水計算表紀錄不受影響。請勾選要合併的項目：</p>
+    <p class="small muted">下列配對看起來是同一個人重複登記了兩筆資料（手動輸入的舊資料 + 從 Staff Information 同步進來的新資料）。確認合併後會保留「保留」那欄的資料（姓名、付款方式、Level、費率都不變），把「併入後刪除」那欄的 Staff Information 連結、生日、TFN、Email、電話、入職日期、銀行資訊併進去，再把那筆重複的刪除。已提交/儲存的薪水計算表紀錄不受影響。請勾選要合併的項目：</p>
     <div class="table-wrap" style="max-height:320px;"><table><thead><tr><th></th><th>保留</th><th>併入後刪除</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
     <div class="toolbar"><button class="primary" id="mconfirm">確認合併</button><button id="mcancel">取消</button></div>
   `);
@@ -4261,6 +4270,12 @@ async function mergeEmployees(survivor, duplicate){
   survivor.email = duplicate.email;
   survivor.phone = duplicate.phone;
   survivor.hireDate = duplicate.hireDate;
+  // Jeff, 2026-10-25: 銀行資訊併入同步欄位清單後，合併時也要跟著帶過去——不然
+  // 合併完的存活紀錄 profileId 雖然是對的，銀行資訊卻還停在舊的（保留那欄原本
+  // 手動輸入的）值，要等下一次 syncEmployeesFromStaffInfo 才會更新，徒增困惑。
+  survivor.bankAccountName = duplicate.bankAccountName;
+  survivor.bankBsb = duplicate.bankBsb;
+  survivor.bankAccountNumber = duplicate.bankAccountNumber;
   await saveEmployee(survivor);
   await repointEmployeeIdInDraftSheets(duplicate.id, survivor.id);
   await idbDelete("employees", duplicate.id);
@@ -4338,7 +4353,7 @@ async function openFixDisplayNamesModal(storeId, onDone){
   </tr>`).join("");
   const m = openModal(`
     <div class="modal-header"><h3>🏷 修正顯示名稱</h3><button class="close-x" id="mclose">✕</button></div>
-    <p class="small muted">下列已連結 Staff Information 的員工，Payroll 這邊登記的姓名跟 OT Portal 班表上實際顯示的名稱不一樣，會導致每次匯入班表都被當成「可能拼字誤植」要你確認。改成跟班表一致可以一次解決，之後 Staff Information 同步也不會再把名稱改回去（同步只會更新生日/TFN/Email/電話/入職日期，不會動姓名）。請勾選要修正的項目：</p>
+    <p class="small muted">下列已連結 Staff Information 的員工，Payroll 這邊登記的姓名跟 OT Portal 班表上實際顯示的名稱不一樣，會導致每次匯入班表都被當成「可能拼字誤植」要你確認。改成跟班表一致可以一次解決，之後 Staff Information 同步也不會再把名稱改回去（同步只會更新生日/TFN/Email/電話/入職日期/銀行資訊，不會動姓名）。請勾選要修正的項目：</p>
     <div class="table-wrap" style="max-height:320px;"><table><thead><tr><th></th><th>目前 Payroll 姓名</th><th>班表實際顯示名稱</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
     <div class="toolbar"><button class="primary" id="mconfirm">確認修正</button><button id="mcancel">取消</button></div>
   `);
@@ -4530,12 +4545,12 @@ function openEmployeeEditModal(empId){
       </select></div>
     </div>
     <div class="small muted" style="margin:-4px 0 10px;">員工若出現在其他分店的班表裡，時數會計算到此「主要記錄分店」，並在支援款項紀錄中產生分店間的積欠款項（可於匯入班表時選擇是否啟用）。Working holiday visa 員工的稅額固定為 bank amount 的 ${WORKING_HOLIDAY_TAX_RATE*100}%（不套用 tax-free threshold 或級距表）。</div>
-    ${emp.profileId ? `<div class="small muted" style="margin:-4px 0 10px;">🔗 此員工已與 Staff Information 帳號連結，標示 🔗 的欄位（生日/TFN/Email/電話/入職日期）改為唯讀，由 Staff Information（或該員工自己的 My Information）維護，這邊會自動同步過來；若該帳號勾了 cash-in-hand，Payment type 也會自動同步為 CA。</div>` : ''}
-    <h4 style="margin-top:14px;">銀行資訊 (選填)</h4>
+    ${emp.profileId ? `<div class="small muted" style="margin:-4px 0 10px;">🔗 此員工已與 Staff Information 帳號連結，標示 🔗 的欄位（生日/TFN/Email/電話/入職日期/銀行資訊）改為唯讀，由 Staff Information（或該員工自己的 My Information）維護，這邊會自動同步過來；若該帳號勾了 cash-in-hand，Payment type 也會自動同步為 CA。</div>` : ''}
+    <h4 style="margin-top:14px;">銀行資訊 ${emp.profileId?'🔗':'(選填)'}</h4>
     <div class="grid2">
-      <div class="field"><label>Bank account name</label><input id="ebankname" value="${escapeHtml(emp.bankAccountName||'')}"></div>
-      <div class="field"><label>BSB</label><input id="ebankbsb" value="${escapeHtml(emp.bankBsb||'')}"></div>
-      <div class="field"><label>Account number</label><input id="ebankacc" value="${escapeHtml(emp.bankAccountNumber||'')}"></div>
+      <div class="field"><label>Bank account name</label><input id="ebankname" value="${escapeHtml(emp.bankAccountName||'')}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
+      <div class="field"><label>BSB</label><input id="ebankbsb" value="${escapeHtml(emp.bankBsb||'')}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
+      <div class="field"><label>Account number</label><input id="ebankacc" value="${escapeHtml(emp.bankAccountNumber||'')}" ${emp.profileId?'disabled title="與 Staff Information 連動，請至該處修改"':''}></div>
     </div>
     <div id="ratesSection" style="${emp.paymentType==='Direct'?'display:none;':''}">
       <h4 style="margin-top:14px;">時薪費率</h4>
@@ -4629,25 +4644,26 @@ function openEmployeeEditModal(empId){
     emp.level = $("#elevel",m).value;
     const homeSel = $("#ehomestore",m);
     if(homeSel && homeSel.value) emp.storeId = homeSel.value;
-    // The 5 fields below are read-only (disabled, see the 🔗 markers above)
+    // The 8 fields below are read-only (disabled, see the 🔗 markers above)
     // once profileId is set — they're owned by Staff Information and kept
     // in sync by syncEmployeesFromStaffInfo(), not editable from here. The
     // inputs are disabled so their .value can't actually have changed, but
     // this guard keeps that true even if the modal markup ever changes.
+    // Jeff, 2026-10-25: 銀行資訊 3 個欄位併入這個已連結就唯讀的清單。
     if(!emp.profileId){
       emp.dob = $("#edob",m).value || null;
       emp.tfn = $("#etfn",m).value.trim();
       emp.email = $("#eemail",m).value.trim();
       emp.phone = $("#ephone",m).value.trim();
       emp.hireDate = $("#ehire",m).value;
+      emp.bankAccountName = $("#ebankname",m).value.trim();
+      emp.bankBsb = $("#ebankbsb",m).value.trim();
+      emp.bankAccountNumber = $("#ebankacc",m).value.trim();
     }
     emp.taxType = $("#etaxtype",m).value;
     emp.isSchoolStudent = $("#eschoolstudent",m).checked;
     const capVal = $("#ehourcap",m).value;
     emp.hourCap = emp.isSchoolStudent ? null : (capVal===""? null : Number(capVal));
-    emp.bankAccountName = $("#ebankname",m).value.trim();
-    emp.bankBsb = $("#ebankbsb",m).value.trim();
-    emp.bankAccountNumber = $("#ebankacc",m).value.trim();
     if(emp.paymentType==="Direct"){
       emp.directCashRate = Number($("#edirectcashrate",m).value)||0;
       const phMultVal = Number($("#edirectphmult",m).value);
@@ -4930,7 +4946,7 @@ function renderSysSettings(container){
 
   <div class="panel">
     <h3>Staff Information 同步設定</h3>
-    <div class="small muted" style="margin-bottom:8px;">「員工資料管理」頁會自動把每個分店對應到的 OT Portal 真實分店（依分店名稱完全相符配對）的 Staff Information 資料（生日/TFN/Email/電話/入職日期，以及 cash-in-hand 狀態）同步進來，見該頁的 🔗 標示員工。新增/更新一律都會同步；下面這個勾選只影響「Payroll 這邊已經有、但目前 Staff Information 那邊抓不到」的員工要怎麼處理。</div>
+    <div class="small muted" style="margin-bottom:8px;">「員工資料管理」頁會自動把每個分店對應到的 OT Portal 真實分店（依分店名稱完全相符配對）的 Staff Information 資料（生日/TFN/Email/電話/入職日期/銀行資訊，以及 cash-in-hand 狀態）同步進來，見該頁的 🔗 標示員工。新增/更新一律都會同步；下面這個勾選只影響「Payroll 這邊已經有、但目前 Staff Information 那邊抓不到」的員工要怎麼處理。</div>
     <label class="chk"><input type="checkbox" id="syncStaffFully" ${s.syncStaffInfoFully?'checked':''}> 同步 OT Portal Staff 資料</label>
     <div class="small muted" style="margin:4px 0 0 26px;">
       <b>未勾選（預設）</b>：因為現在 Staff Information 的資料還不齊全，Payroll 這邊已經有、但目前在 Staff Information 找不到的員工會維持原樣保留，不會被自動設為離職。<br>

@@ -30,23 +30,26 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
   const [preview, setPreview] = useState(null) // { dataUrl, blob, filename, width, height }
   const [copyState, setCopyState] = useState(null)
 
-  // The last 60 Mondays, newest first (this week's Monday included).
-  const mondays = useMemo(() => {
-    const thisMonday = mondayOnOrBefore(brisbaneTodayStr())
-    return Array.from({ length: 60 }, (_, i) => addDays(thisMonday, -7 * i))
-  }, [])
+  // Jeff, 2026-10-25: "選從哪一個周一開始能用一般選日期的日曆嗎? 因為現在下拉
+  // 方式資料越多越拉很長" — was a <select> listing the last 60 Mondays
+  // (newest first), which only grows every week; now a plain date input,
+  // snapped to that date's own Monday (see setMonday below) so you never
+  // actually need to pick the exact Monday — pick any day in the target
+  // week.
+  const thisMonday = useMemo(() => mondayOnOrBefore(brisbaneTodayStr()), [])
+  const lastMonday = useMemo(() => addDays(thisMonday, -7), [thisMonday])
 
   useEffect(() => {
     if (!open) return
     setChecked(new Set(stores.map((s) => s.id)))
     setFrom(monthStart(year, month))
     setTo(lastDayOfMonth(year, month))
-    setMonday(mondays[1]) // last week's Monday: the usual one to report on
+    setMonday(lastMonday) // last week's Monday: the usual one to report on
     setError('')
     setBusy(false)
     setPreview(null)
     setCopyState(null)
-  }, [open, stores, year, month, mondays])
+  }, [open, stores, year, month, lastMonday])
 
   // A stale preview (from a different week/store selection) would be
   // misleading if left on screen — drop it the moment either changes, so
@@ -187,15 +190,26 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
             </Field>
           </div>
         ) : (
-          <Field label="哪一個星期一開始" hint={monday ? `${dmy(monday)}（週一）到 ${dmy(addDays(monday, 6))}（週日）` : ''}>
-            <select className={`${inputCls} w-full`} value={monday} onChange={(e) => setMonday(e.target.value)}>
-              {mondays.map((m, i) => (
-                <option key={m} value={m}>
-                  {dmy(m)}
-                  {i === 0 ? '（本週）' : i === 1 ? '（上週）' : ''}
-                </option>
-              ))}
-            </select>
+          <Field
+            label="哪一個星期一開始"
+            hint={
+              monday
+                ? `${dmy(monday)}（週一）到 ${dmy(addDays(monday, 6))}（週日）` +
+                  (monday === thisMonday ? '（本週）' : monday === lastMonday ? '（上週）' : '')
+                : ''
+            }
+          >
+            <input
+              type="date"
+              className={inputCls}
+              value={monday}
+              // Picking any day snaps to that week's own Monday, so there's
+              // no need to land on a Monday exactly — the calendar picker
+              // itself has no day-of-week filter to enforce that.
+              onChange={(e) => {
+                if (e.target.value) setMonday(mondayOnOrBefore(e.target.value))
+              }}
+            />
           </Field>
         )}
 
