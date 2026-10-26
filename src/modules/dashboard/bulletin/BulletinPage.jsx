@@ -594,6 +594,24 @@ export default function BulletinPage() {
             const badge = TYPE_BADGE[item.type]
             const clickable = item.type !== 'quiz_reminder'
             const Wrapper = clickable ? 'button' : 'div'
+            // Jeff, 2026-10-27: "Bulletin的未讀跟已讀訊息也可以比較清楚
+            // 區分...已讀未讀用粗體可以明顯區分的話，標題前面也不需要加New
+            // 標籤了" — same bold-vs-normal treatment as Message
+            // (MessagePage.jsx), replacing the red "New"/"Update" badge that
+            // used to sit next to the date on the right. A roster item is
+            // "unread" while isNew; an announcement/complaint while either
+            // never-opened (isNewItem) or opened-then-edited-again
+            // (hasUpdate); a quiz reminder has no read state at all, so it's
+            // never bold. The small dot on the filter tabs themselves
+            // (hasUnviewedRoster/Announcement/Complaint below) is unchanged
+            // — that's a different, aggregate "something's new in this
+            // category" signal, not a per-row label.
+            const isUnread =
+              item.type === 'roster'
+                ? item.isNew
+                : item.type === 'announcement' || item.type === 'customer_complaint'
+                  ? item.isNewItem || item.hasUpdate
+                  : false
             return (
               <Wrapper
                 key={item.id}
@@ -605,7 +623,7 @@ export default function BulletinPage() {
                 <div className="flex items-center gap-2">
                   <Badge color={badge.color}>{badge.label}</Badge>
                   {item.isImportant && <Badge color="red">Important</Badge>}
-                  <span className="font-medium text-gray-800">{item.title}</span>
+                  <span className={isUnread ? 'font-semibold text-gray-900' : 'font-normal text-gray-500'}>{item.title}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   {/* Status/notification badges sit here, immediately left of
@@ -613,13 +631,6 @@ export default function BulletinPage() {
                       tag + title on the left — same slot for both: which
                       week's roster just changed, and whether a complaint's
                       been solved. */}
-                  {item.type === 'roster' && item.isNew && <Badge color="red">New</Badge>}
-                  {(item.type === 'announcement' || item.type === 'customer_complaint') && item.isNewItem && (
-                    <Badge color="red">New</Badge>
-                  )}
-                  {(item.type === 'announcement' || item.type === 'customer_complaint') && item.hasUpdate && (
-                    <Badge color="red">Update</Badge>
-                  )}
                   {item.type === 'customer_complaint' &&
                     (item.solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
                   <span className="shrink-0 text-xs text-gray-400">{item.subtitle}</span>

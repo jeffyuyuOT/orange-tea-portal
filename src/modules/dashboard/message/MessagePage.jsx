@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
@@ -22,10 +22,21 @@ function nameOf(p, storeId, nameByStoreProfile) {
 // Jeff, 2026-10-01: "message裡除了inbox跟sent，新增Important tab" — Important
 // shows starred items from EITHER side (received or sent), so it sits after
 // both source tabs rather than being its own separate data source.
+//
+// Jeff, 2026-10-27: "Important那裡新增可以下拉未讀跟已讀篩選，所以可以下拉
+// 選擇Important, unread, read" — Important is now one of three options in a
+// dropdown (MORE_FILTERS below) instead of its own fixed pill, alongside two
+// new ones: Unread/Read only ever look at INBOX items (origin==='received')
+// — a sent message has no "read by me" concept — see unreadItems/readItems
+// below.
 const TABS = [
   { key: 'inbox', label: 'Inbox' },
   { key: 'sent', label: 'Sent' },
+]
+const MORE_FILTERS = [
   { key: 'important', label: 'Important' },
+  { key: 'unread', label: 'Unread' },
+  { key: 'read', label: 'Read' },
 ]
 
 // Jeff, 2026-09: Message moved out of Bulletin Board into its own "My
@@ -45,7 +56,10 @@ const TABS = [
 // (subject, or the other party's name) so someone managing several stores
 // can still find one message ("以方便多家店的user去管理"). Also surfaces a
 // Complete/Incomplete badge for a Support-request message (migration
-// 0069_support_requests.sql) alongside the existing New/Update badge.
+// 0069_support_requests.sql) alongside the unread/read bold-weight
+// treatment (see renderRow — the "New"/"Update" badge this used to sit
+// next to is gone since 2026-10-27, Jeff: "已讀未讀用粗體可以明顯區分的
+// 話，標題前面也不需要加New 標籤了").
 //
 // Jeff, 2026-10-01: "message可以刪除，並支持多重選擇的功能。...訊息清單的
 // 訊息左邊顯示星星跟垃圾桶圖案。星星代表將此訊息標註成important...垃圾桶代
@@ -87,6 +101,21 @@ export default function MessagePage() {
   // tab switches (see the tab button's onClick below) so a selection made
   // in one tab can't silently carry into another.
   const [selectedIds, setSelectedIds] = useState(new Set())
+  // Jeff, 2026-10-27: "全選勾選框新增可以下拉要選擇的種類，all, unread, read"
+  // — the select-all checkbox above the list (added earlier the same day)
+  // gets a little ▾ caret next to it, Gmail-style, opening a small menu that
+  // selects a specific subset of the CURRENTLY VISIBLE (filtered) rows
+  // instead of only all-or-nothing. Closed on any outside click.
+  const [selectMenuOpen, setSelectMenuOpen] = useState(false)
+  const selectMenuRef = useRef(null)
+  useEffect(() => {
+    if (!selectMenuOpen) return
+    function onDocMouseDown(e) {
+      if (selectMenuRef.current && !selectMenuRef.current.contains(e.target)) setSelectMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    return () => document.removeEventListener('mousedown', onDocMouseDown)
+  }, [selectMenuOpen])
 
   const storeNameById = useMemo(() => new Map(accessibleStores.map((s) => [s.id, s.name])), [accessibleStores])
 
@@ -234,8 +263,31 @@ export default function MessagePage() {
     })
   }
 
+  // Selects a specific subset of the currently-filtered `items` (see
+  // selectMenuOpen's comment above) — 'all' is the same as ticking the plain
+  // checkbox, 'unread'/'read' only ever match inbox items (origin==='received'),
+  // same restriction as the Unread/Read filter itself.
+  function selectBy(kind) {
+    let pool = items
+    if (kind === 'unread') pool = items.filter((i) => i.origin === 'received' && !i.readAt)
+    else if (kind === 'read') pool = items.filter((i) => i.origin === 'received' && !!i.readAt)
+    setSelectedIds(new Set(pool.map((i) => i.id)))
+    setSelectMenuOpen(false)
+  }
+
   const importantItems = useMemo(() => [...inboxItems, ...sentItems].filter((i) => i.isImportant), [inboxItems, sentItems])
-  const rawItems = tab === 'inbox' ? inboxItems : tab === 'sent' ? sentItems : importantItems
+  const unreadItems = useMemo(() => inboxItems.filter((i) => !i.readAt), [inboxItems])
+  const readItems = useMemo(() => inboxItems.filter((i) => !!i.readAt), [inboxItems])
+  const rawItems =
+    tab === 'inbox'
+      ? inboxItems
+      : tab === 'sent'
+        ? sentItems
+        : tab === 'unread'
+          ? unreadItems
+          : tab === 'read'
+            ? readItems
+            : importantItems
   const items = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rawItems.filter((item) => {
@@ -334,7 +386,6 @@ export default function MessagePage() {
   // elements without illegally nesting a button inside a button.
   function renderRow(item, { nested = false, supportBadge = null, threadCount = 0, expanded = false, onToggle = null } = {}) {
     const unread = item.origin === 'received' && !item.readAt
-    const isReply = !!item.in_reply_to
     // Jeff, 2026-10-08: "developer的sent裡如果有系統公告信，後面的to誰統一寫
     // 成to all user" — a developer's "All" broadcast (sender_name stamped
     // 'System' — see ComposeMessageModal) fans out to every active user at
@@ -392,11 +443,15 @@ export default function MessagePage() {
               {expanded ? '▾' : '▸'}
             </span>
           )}
-          {unread && <Badge color="red">{isReply ? 'Update' : 'New'}</Badge>}
           {supportBadge && (
             <Badge color={supportBadge.completed ? 'green' : 'red'}>{supportBadge.completed ? 'Complete' : 'Incomplete'}</Badge>
           )}
-          <span className={`font-medium ${unread ? 'text-gray-900' : 'text-gray-700'}`}>{item.subject}</span>
+          {/* Jeff, 2026-10-27: "未讀跟已讀的郵件區分明顯一點...可以像Gmail那
+              樣，未讀的是粗體字，已讀的則不是粗體...標題前面也不需要加New
+              標籤了" — bold vs normal weight now carries the unread/read
+              distinction on its own, so the red "New"/"Update" badge that
+              used to sit here is gone. */}
+          <span className={unread ? 'font-semibold text-gray-900' : 'font-normal text-gray-500'}>{item.subject}</span>
           {/* Which store this message belongs to — helps someone
               managing several stores tell them apart at a glance. */}
           <Badge color="gray">{storeNameById.get(item.store_id) ?? 'Unknown store'}</Badge>
@@ -418,7 +473,7 @@ export default function MessagePage() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-brand-200 bg-brand-50 p-1">
+          <div className="inline-flex items-center rounded-lg border border-brand-200 bg-brand-50 p-1">
             {TABS.map((t) => (
               <button
                 key={t.key}
@@ -433,6 +488,30 @@ export default function MessagePage() {
                 {t.label}
               </button>
             ))}
+            {/* Jeff, 2026-10-27: Important merged with two new options into one
+                dropdown (MORE_FILTERS) — the select's own displayed value only
+                ever matches one of these three; while tab is 'inbox'/'sent' it
+                falls back to the empty placeholder option so re-picking
+                whichever of these three was last active still fires onChange. */}
+            <select
+              value={MORE_FILTERS.some((f) => f.key === tab) ? tab : ''}
+              onChange={(e) => {
+                setTab(e.target.value)
+                setSelectedIds(new Set())
+              }}
+              className={`rounded-md border-none bg-transparent px-2 py-1.5 text-sm font-medium focus:outline-none focus:ring-0 ${
+                MORE_FILTERS.some((f) => f.key === tab) ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
+              }`}
+            >
+              <option value="" disabled hidden>
+                More ▾
+              </option>
+              {MORE_FILTERS.map((f) => (
+                <option key={f.key} value={f.key}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
           </div>
           {/* Jeff, 2026-10-01: "如果多重選擇訊息的時候刪除選項會出現在
               important tab旁邊" — a bulk-delete button appears right next to
@@ -524,11 +603,53 @@ export default function MessagePage() {
                 ? 'No messages received yet.'
                 : tab === 'sent'
                   ? 'No messages sent yet.'
-                  : 'No important messages.'
+                  : tab === 'unread'
+                    ? 'No unread messages.'
+                    : tab === 'read'
+                      ? 'No read messages.'
+                      : 'No important messages.'
           }
         />
       ) : (
         <div className="divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
+          {/* Jeff, 2026-10-27: "勾選框上面也新增全選勾選框" then, same day,
+              "全選勾選框新增可以下拉要選擇的種類，all, unread, read" — a plain
+              click still toggles select-all/none of the currently filtered
+              `items`; the ▾ caret opens a small Gmail-style menu to select
+              just the unread or just the read ones among them instead. */}
+          <div ref={selectMenuRef} className="relative flex items-center gap-1 bg-gray-50 px-4 py-2">
+            <input
+              type="checkbox"
+              checked={items.length > 0 && items.every((i) => selectedIds.has(i.id))}
+              onChange={(e) => setSelectedIds(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())}
+            />
+            <button
+              type="button"
+              onClick={() => setSelectMenuOpen((v) => !v)}
+              className="px-1 text-xs text-gray-400 hover:text-gray-600"
+              title="Select…"
+            >
+              ▾
+            </button>
+            {selectMenuOpen && (
+              <div className="absolute left-4 top-8 z-10 w-28 rounded-lg border border-brand-100 bg-white py-1 shadow-lg">
+                {[
+                  ['all', 'All'],
+                  ['unread', 'Unread'],
+                  ['read', 'Read'],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => selectBy(key)}
+                    className="block w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-brand-50"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {groupedItems.map(({ rootId, primary, replies }) => {
             const expanded = expandedRootIds.has(rootId)
             const supportBadge = supportByRoot.get(rootId)
