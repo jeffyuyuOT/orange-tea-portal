@@ -624,19 +624,29 @@ function EditModal({
     }
     const { data: group, error: groupError } = await supabase
       .from('shop_training_items')
-      .select('id, store_id')
+      .select('id, store_id, title, content_html, visible_to_training, is_must_know, training_journey_phase, category_id')
       .eq('copy_group_id', copyGroupId)
     if (groupError || !group?.length) {
       alert(groupError?.message || 'Could not find the linked copies.')
       return
     }
+    // Jeff, 2026-10-26: "如果原本連動的資料有分店自己做更改時...要有提示視窗" —
+    // flag any linked store whose copy has been changed on its own since it was
+    // linked (i.e. differs from this item as last saved), so the admin knows
+    // the overwrite below will throw those local edits away.
+    const diverged = await findDivergedCopies(group, item.id)
+    const divergedNote = diverged.length
+      ? `\n\n⚠ These stores have their own changes that will be overwritten:\n${diverged
+          .map((d) => `• ${accessibleStores?.find((s) => s.id === d.storeId)?.name ?? 'Another store'} — ${d.fields.join(', ')}`)
+          .join('\n')}`
+      : ''
     const storeNames = group
       .map((row) => accessibleStores?.find((s) => s.id === row.store_id)?.name)
       .filter(Boolean)
     const storeList = storeNames.length === group.length ? ` (${storeNames.join(', ')})` : ''
     if (
       !confirm(
-        `Save this content to all ${group.length} linked store cop${group.length === 1 ? 'y' : 'ies'}${storeList}? This overwrites the title, content, flags, category and attached files at every one of them — each store's own sort order is left as-is.`
+        `Save this content to all ${group.length} linked store cop${group.length === 1 ? 'y' : 'ies'}${storeList}? This overwrites the title, content, flags, category and attached files at every one of them — each store's own sort order is left as-is.${divergedNote}`
       )
     ) {
       return
@@ -884,6 +894,44 @@ async function resolveLinkedCategoryAtStore(name, groupId, destStoreId) {
     .select()
     .single()
   return error || !newCategory ? null : newCategory.id
+}
+
+// Jeff, 2026-10-26: for "Save to Multiple Stores" — which OTHER linked rows
+// no longer match the item being edited as it was last saved (`selfId`'s own
+// row)? Compares title, content, flags, Training Journey phase, category (by
+// name — each store has its own category rows) and attached files. Returns
+// [{ storeId, fields: ['content', 'files', …] }] for the ones that differ.
+async function findDivergedCopies(group, selfId) {
+  const self = group.find((r) => r.id === selfId)
+  if (!self) return []
+  const ids = group.map((r) => r.id)
+  const catIds = [...new Set(group.map((r) => r.category_id).filter(Boolean))]
+  const [{ data: files }, { data: cats }] = await Promise.all([
+    supabase.from('shop_training_item_files').select('shop_training_item_id, file_path').in('shop_training_item_id', ids),
+    catIds.length ? supabase.from('shop_training_categories').select('id, name').in('id', catIds) : Promise.resolve({ data: [] }),
+  ])
+  const catName = (id) => (id ? (cats ?? []).find((c) => c.id === id)?.name?.trim().toLowerCase() ?? '' : '')
+  const fileSig = (id) =>
+    (files ?? [])
+      .filter((f) => f.shop_training_item_id === id)
+      .map((f) => f.file_path)
+      .sort()
+      .join('|')
+  const norm = (v) => (v ?? '').toString().trim()
+  const out = []
+  for (const r of group) {
+    if (r.id === selfId) continue
+    const fields = []
+    if (norm(r.title) !== norm(self.title)) fields.push('title')
+    if (norm(r.content_html) !== norm(self.content_html)) fields.push('content')
+    if (!!r.visible_to_training !== !!self.visible_to_training) fields.push('visible to training')
+    if (!!r.is_must_know !== !!self.is_must_know) fields.push('must-know')
+    if ((r.training_journey_phase ?? null) !== (self.training_journey_phase ?? null)) fields.push('training journey phase')
+    if (catName(r.category_id) !== catName(self.category_id)) fields.push('category')
+    if (fileSig(r.id) !== fileSig(self.id)) fields.push('files')
+    if (fields.length) out.push({ storeId: r.store_id, fields })
+  }
+  return out
 }
 
 // Pushes an item's category to every OTHER row sharing its copy_group_id —

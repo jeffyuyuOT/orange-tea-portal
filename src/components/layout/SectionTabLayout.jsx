@@ -52,6 +52,7 @@ import NavBadge from '../ui/NavBadge'
 // because a more specific layout already covers them.
 const GROUP_SUBPAGE = {
   training_centre: '/shop-management/training-centre',
+  maintenance: '/operations-training/maintenance',
 }
 
 function pillClass(isActive) {

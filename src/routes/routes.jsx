@@ -25,6 +25,9 @@ const SectionSubpageHome = lazy(() => import('../components/layout/SectionSubpag
 const FormulaPage = lazy(() => import('../modules/operations-training/formula/FormulaPage'))
 const ShopTrainingPage = lazy(() => import('../modules/operations-training/shop-training/ShopTrainingPage'))
 
+const MaintenanceLayout = lazy(() => import('../modules/operations-training/maintenance/MaintenanceLayout'))
+const MaintenanceLogPage = lazy(() => import('../modules/operations-training/maintenance/MaintenanceLogPage'))
+const MaintenanceSettingPage = lazy(() => import('../modules/operations-training/maintenance/MaintenanceSettingPage'))
 const DashboardLayout = lazy(() => import('../modules/dashboard/DashboardLayout'))
 const BulletinPage = lazy(() => import('../modules/dashboard/bulletin/BulletinPage'))
 const MessagePage = lazy(() => import('../modules/dashboard/message/MessagePage'))
@@ -131,6 +134,20 @@ export default function AppRoutes() {
           <Route path="/operations-training" element={<SectionSubpageHome />} />
           <Route path="/operations-training/formula" element={guarded('operations_training.formula', <FormulaPage />)} />
           <Route path="/operations-training/shop-training" element={guarded('operations_training.shop_training', <ShopTrainingPage />)} />
+
+          {/* Jeff, 2026-10-26: Maintenance Log + Setting share MaintenanceLayout's own sub-tab bar (same nesting as Training Centre). */}
+          <Route element={<MaintenanceLayout />}>
+            <Route path="/operations-training/maintenance" element={<SectionSubpageHome />} />
+            <Route path="/operations-training/maintenance-log" element={guarded('operations_training.maintenance_log', <MaintenanceLogPage />)} />
+            <Route
+              path="/operations-training/maintenance-manager-log"
+              element={guarded('operations_training.maintenance_manager_log', <MaintenanceLogPage logType="manager" />)}
+            />
+            <Route
+              path="/operations-training/maintenance-setting"
+              element={guarded('operations_training.maintenance_setting', <MaintenanceSettingPage />)}
+            />
+          </Route>
         </Route>
 
         <Route path="/dashboard" element={<DashboardLayout />}>

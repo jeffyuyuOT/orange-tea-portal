@@ -11,6 +11,12 @@ export const SECTIONS = {
     pages: {
       formula: 'Formula',
       shop_training: 'Shop Training',
+      // Jeff, 2026-10-26: Maintenance Log (+ its Setting sub-tab, shop
+      // manager and up only — staff get the log table alone).
+      maintenance_log: 'Maintenance Log',
+      // Jeff, 2026-10-26: manager-only checklist next to the general log.
+      maintenance_manager_log: "Manager's Log",
+      maintenance_setting: 'Maintenance Setting',
     },
   },
   dashboard: {
@@ -229,6 +235,7 @@ const ROLE_DEFAULTS = {
   staff: [
     'operations_training.formula',
     'operations_training.shop_training',
+    'operations_training.maintenance_log',
     'dashboard.bulletin',
     'dashboard.message',
     'dashboard.study_log',

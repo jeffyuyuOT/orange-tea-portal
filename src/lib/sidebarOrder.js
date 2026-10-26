@@ -90,6 +90,10 @@ export function orderedPageEntries(sectionKey, order) {
 // which both move/fold the group as a single unit rather than the member
 // keys separately).
 export const PAGE_GROUPS = {
+  // Jeff, 2026-10-26: Maintenance Log + its Setting sub-tab fold into one row.
+  operations_training: [
+    { key: 'maintenance', label: 'Maintenance Log', pages: ['maintenance_log', 'maintenance_manager_log', 'maintenance_setting'] },
+  ],
   shop_management: [
     {
       key: 'training_centre',
