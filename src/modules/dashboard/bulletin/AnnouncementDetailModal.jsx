@@ -462,7 +462,13 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             {isComplaint && <Badge color="red">Customer Complaint</Badge>}
-            {isImportant && <Badge color="red">Important</Badge>}
+            {/* Jeff, 2026-10-27: "bulletin notice裡的important標籤改成星星
+                顯示" — same ★ marker as the list row (BulletinPage.jsx). */}
+            {isImportant && (
+              <span className="shrink-0 text-base leading-none text-amber-400" title="Important" aria-label="Important">
+                ★
+              </span>
+            )}
             {isComplaint && (solved ? <Badge color="green">Solved</Badge> : <Badge color="gray">Unsolved</Badge>)}
           </div>
 

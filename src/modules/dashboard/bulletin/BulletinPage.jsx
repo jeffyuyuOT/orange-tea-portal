@@ -622,7 +622,15 @@ export default function BulletinPage() {
               >
                 <div className="flex items-center gap-2">
                   <Badge color={badge.color}>{badge.label}</Badge>
-                  {item.isImportant && <Badge color="red">Important</Badge>}
+                  {/* Jeff, 2026-10-27: "bulletin notice裡的important標籤改成
+                      星星顯示" — same ★ Important marker Message's own rows
+                      use (MessagePage.jsx's toggleImportant button), instead
+                      of a red "Important" badge. */}
+                  {item.isImportant && (
+                    <span className="shrink-0 text-base leading-none text-amber-400" title="Important" aria-label="Important">
+                      ★
+                    </span>
+                  )}
                   <span className={isUnread ? 'font-semibold text-gray-900' : 'font-normal text-gray-500'}>{item.title}</span>
                 </div>
                 <div className="flex items-center gap-3">
