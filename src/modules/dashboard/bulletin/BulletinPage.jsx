@@ -627,7 +627,11 @@ export default function BulletinPage() {
                       use (MessagePage.jsx's toggleImportant button), instead
                       of a red "Important" badge. */}
                   {item.isImportant && (
-                    <span className="shrink-0 text-base leading-none text-amber-400" title="Important" aria-label="Important">
+                    <span
+                      className="shrink-0 text-xl leading-none text-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.9)]"
+                      title="Important"
+                      aria-label="Important"
+                    >
                       ★
                     </span>
                   )}
