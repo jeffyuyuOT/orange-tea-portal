@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import Button from '../../../../components/ui/Button'
+import { supabase } from '../../../../lib/supabaseClient'
 import { saveEntry, saveStoreTransfer } from '../bkData'
 import { brisbaneTodayStr, numToInput, toNum } from '../bkUtils'
 import { Field, MoneyInput, Notice, inputCls } from '../bkUi'
@@ -27,6 +28,20 @@ function groupOf(kind) {
   return kind === 'deposit' || kind === 'withdraw' ? 'dw' : kind
 }
 
+// Past descriptions for the Description box's suggestion list: every
+// description ever typed on an Icost / Ucost / 其他收入 row (all stores), most
+// used first, ties broken by most recent. Loaded once per form.
+async function loadDescriptionHistory() {
+  const { data, error } = await supabase
+    .from('bk_cash_entries')
+    .select('kind, description, entry_date')
+    .not('description', 'is', null)
+    .order('entry_date', { ascending: false })
+    .limit(5000)
+  if (error) return []
+  return data ?? []
+}
+
 export default function EntryForm({ storeId, stores = [], initial = null, onSaved, onCancel }) {
   const editing = !!initial?.id
   const [group, setGroup] = useState(initial ? groupOf(initial.kind) : 'icost')
@@ -41,6 +56,16 @@ export default function EntryForm({ storeId, stores = [], initial = null, onSave
   const [amount, setAmount] = useState(initial ? numToInput(initial.amount) : '')
   const [note, setNote] = useState(initial?.note ?? '')
   const [error, setError] = useState('')
+  const [history, setHistory] = useState([])
+  const listId = useId()
+
+  useEffect(() => {
+    let alive = true
+    loadDescriptionHistory().then((rows) => alive && setHistory(rows))
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const isCost = group === 'icost' || group === 'ucost' // may be negative
   const isTransfer = group === 'transfer'
@@ -48,6 +73,25 @@ export default function EntryForm({ storeId, stores = [], initial = null, onSave
   // 入金 may also go negative: it means a withdrawal from the vault, added
   // back into UCOH and deducted from the chosen 入金對象 in 金庫概覽.
   const allowNegativeAmount = isCost || group === 'ruju'
+
+  // Suggestions for the current 類型 (Icost / Ucost / 其他收入 each keep their
+  // own list), de-duplicated case-insensitively, most-used first.
+  const suggestions = useMemo(() => {
+    const stats = new Map()
+    history.forEach((r, i) => {
+      if (r.kind !== group) return
+      const text = String(r.description ?? '').trim()
+      if (!text) return
+      const key = text.toLowerCase()
+      const cur = stats.get(key) ?? { text, count: 0, first: i }
+      cur.count += 1
+      stats.set(key, cur)
+    })
+    return [...stats.values()]
+      .sort((a, b) => b.count - a.count || a.first - b.first)
+      .slice(0, 300)
+      .map((x) => x.text)
+  }, [history, group])
 
   async function submit() {
     setError('')
@@ -158,7 +202,18 @@ export default function EntryForm({ storeId, stores = [], initial = null, onSave
       </Field>
       {hasDescription && (
         <Field label="Description">
-          <input className={`${inputCls} w-full`} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <input
+            className={`${inputCls} w-full`}
+            value={description}
+            list={listId}
+            autoComplete="off"
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <datalist id={listId}>
+            {suggestions.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
         </Field>
       )}
       <Field
