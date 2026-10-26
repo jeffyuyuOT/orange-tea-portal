@@ -79,6 +79,14 @@ export default function MessagePage() {
   const [loading, setLoading] = useState(true)
   const [inboxItems, setInboxItems] = useState([])
   const [sentItems, setSentItems] = useState([])
+  // Jeff, 2026-10-27: "more旁邊再多一個trash...刪除的message到trash，trash
+  // 裡的message保留30天自動刪除" — the already-existing soft-delete columns
+  // (message_recipients.deleted_at / messages.sender_deleted_at) now feed a
+  // dedicated Trash tab instead of just disappearing. These two hold the
+  // trashed rows the same shape as inboxItems/sentItems, but filtered the
+  // other way (IS NOT NULL instead of IS NULL) — see the loading effect.
+  const [trashInboxItems, setTrashInboxItems] = useState([])
+  const [trashSentItems, setTrashSentItems] = useState([])
   const [nameByStoreProfile, setNameByStoreProfile] = useState(new Map())
   const [openMessageId, setOpenMessageId] = useState(null)
   const [composing, setComposing] = useState(false)
@@ -124,7 +132,7 @@ export default function MessagePage() {
     let cancelled = false
     setLoading(true)
     ;(async () => {
-      const [{ data: receivedRows }, { data: sent }] = await Promise.all([
+      const [{ data: receivedRows }, { data: sentRowsRaw }, { data: trashReceivedRows }, { data: trashSentRowsRaw }] = await Promise.all([
         supabase
           .from('message_recipients')
           .select('read_at, is_important, message:messages(*, support_request:support_requests(id, case_number, completed))')
@@ -136,6 +144,20 @@ export default function MessagePage() {
           .eq('sender_id', profile.id)
           .is('sender_deleted_at', null)
           .order('created_at', { ascending: false }),
+        // Jeff, 2026-10-27: Trash tab's own two sources — same shape as the
+        // live queries above but the IS NOT NULL side of the same
+        // deleted_at/sender_deleted_at columns.
+        supabase
+          .from('message_recipients')
+          .select('deleted_at, read_at, is_important, message:messages(*, support_request:support_requests(id, case_number, completed))')
+          .eq('profile_id', profile.id)
+          .not('deleted_at', 'is', null),
+        supabase
+          .from('messages')
+          .select('*, support_request:support_requests(id, case_number, completed)')
+          .eq('sender_id', profile.id)
+          .not('sender_deleted_at', 'is', null)
+          .order('sender_deleted_at', { ascending: false }),
       ])
 
       const received = (receivedRows ?? [])
@@ -143,18 +165,25 @@ export default function MessagePage() {
         .map((r) => ({ ...r.message, readAt: r.read_at, isImportant: r.is_important, origin: 'received' }))
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
-      const sentRows = sent ?? []
-      // "To:" list for sent items — a separate query since Supabase can't
-      // follow messages -> message_recipients -> profiles the other
-      // direction in one select.
+      const trashReceivedAll = (trashReceivedRows ?? [])
+        .filter((r) => r.message)
+        .map((r) => ({ ...r.message, readAt: r.read_at, isImportant: r.is_important, origin: 'received', deletedAt: r.deleted_at }))
+        .sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt))
+
+      const sentRows = sentRowsRaw ?? []
+      const trashSentRows = trashSentRowsRaw ?? []
+      const allSentRows = [...sentRows, ...trashSentRows]
+      // "To:" list for sent items (live AND trashed) — a separate query
+      // since Supabase can't follow messages -> message_recipients ->
+      // profiles the other direction in one select.
       let recipientNamesByMessage = new Map()
-      if (sentRows.length) {
+      if (allSentRows.length) {
         const { data: recRows } = await supabase
           .from('message_recipients')
           .select('message_id, profiles(id, first_name, last_name, email)')
           .in(
             'message_id',
-            sentRows.map((m) => m.id)
+            allSentRows.map((m) => m.id)
           )
         recipientNamesByMessage = new Map()
         ;(recRows ?? []).forEach((r) => {
@@ -169,7 +198,7 @@ export default function MessagePage() {
       // already a permanent snapshot (sender_name) so this is really only
       // for Sent's "To:" list, but fetching for both sides' store_ids
       // keeps this correct if that ever changes.
-      const storeIds = Array.from(new Set([...received, ...sentRows].map((m) => m.store_id).filter(Boolean)))
+      const storeIds = Array.from(new Set([...received, ...trashReceivedAll, ...allSentRows].map((m) => m.store_id).filter(Boolean)))
       let nameMap = new Map()
       if (storeIds.length) {
         const { data: nameRows } = await supabase
@@ -177,6 +206,40 @@ export default function MessagePage() {
           .select('store_id, profile_id, roster_display_name')
           .in('store_id', storeIds)
         nameMap = new Map((nameRows ?? []).map((r) => [`${r.store_id}:${r.profile_id}`, r.roster_display_name]))
+      }
+
+      const trashSentAll = trashSentRows.map((m) => ({
+        ...m,
+        toProfiles: recipientNamesByMessage.get(m.id) ?? [],
+        isImportant: m.sender_is_important,
+        origin: 'sent',
+        deletedAt: m.sender_deleted_at,
+      }))
+
+      // Jeff, 2026-10-27: "trash裡的message保留30天自動刪除" — there's no
+      // server-side scheduled job for this (a pg_cron job needs its own
+      // separate sign-off — see the chat), so the 30-day retention is
+      // enforced opportunistically instead: every time Trash is loaded,
+      // anything past 30 days in trash is hard-deleted right here before
+      // it's shown. A received item's own copy always succeeds (fully
+      // isolated — see migration 0145). A sent item only actually
+      // disappears once no recipient still has a live copy (same RLS
+      // condition as the manual "Permanently delete" button below); until
+      // then the delete call is a safe no-op and it's simply re-checked
+      // the next time this page loads.
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+      const cutoff = Date.now() - THIRTY_DAYS_MS
+      const expiredReceived = trashReceivedAll.filter((i) => new Date(i.deletedAt).getTime() < cutoff)
+      const expiredSent = trashSentAll.filter((i) => new Date(i.deletedAt).getTime() < cutoff)
+      const expiredReceivedIds = new Set(expiredReceived.map((i) => i.id))
+      const expiredSentIds = new Set(expiredSent.map((i) => i.id))
+      const trashReceived = trashReceivedAll.filter((i) => !expiredReceivedIds.has(i.id))
+      const trashSent = trashSentAll.filter((i) => !expiredSentIds.has(i.id))
+      if (expiredReceived.length) {
+        supabase.from('message_recipients').delete().eq('profile_id', profile.id).in('message_id', Array.from(expiredReceivedIds))
+      }
+      if (expiredSent.length) {
+        supabase.from('messages').delete().eq('sender_id', profile.id).in('id', Array.from(expiredSentIds))
       }
 
       if (!cancelled) {
@@ -189,6 +252,8 @@ export default function MessagePage() {
             origin: 'sent',
           }))
         )
+        setTrashInboxItems(trashReceived)
+        setTrashSentItems(trashSent)
         setNameByStoreProfile(nameMap)
         setLoading(false)
       }
@@ -253,6 +318,83 @@ export default function MessagePage() {
     await deleteItems(toDelete)
   }
 
+  // Looks a selected id up across every list this page holds (live AND
+  // trash) — restore/permanent-delete are only ever invoked from the Trash
+  // tab, but selectedIds itself doesn't carry which tab it came from.
+  function selectedTrashItems() {
+    const byId = new Map([...trashInboxItems, ...trashSentItems].map((i) => [i.id, i]))
+    return Array.from(selectedIds)
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+  }
+
+  // Un-deletes (clears deleted_at/sender_deleted_at) — the Trash
+  // counterpart of deleteItems above.
+  async function restoreItems(itemsToRestore) {
+    const receivedIds = itemsToRestore.filter((i) => i.origin === 'received').map((i) => i.id)
+    const sentIds = itemsToRestore.filter((i) => i.origin === 'sent').map((i) => i.id)
+    await Promise.all([
+      receivedIds.length
+        ? supabase.from('message_recipients').update({ deleted_at: null }).eq('profile_id', profile.id).in('message_id', receivedIds)
+        : Promise.resolve(),
+      sentIds.length
+        ? supabase.from('messages').update({ sender_deleted_at: null }).eq('sender_id', profile.id).in('id', sentIds)
+        : Promise.resolve(),
+    ])
+    setSelectedIds(new Set())
+    reload()
+  }
+
+  async function restoreSelected() {
+    const toRestore = selectedTrashItems()
+    if (!toRestore.length) return
+    await restoreItems(toRestore)
+  }
+
+  // Jeff, 2026-10-27: "在trash裡也可以勾選直接選擇permenant delete直接刪
+  // 除" — hard-deletes, split by origin same as deleteItems/restoreItems.
+  // A received copy is fully isolated (my own message_recipients row —
+  // see migration 0145) and always succeeds. A sent copy can only
+  // actually remove the shared `messages` row once no recipient still has
+  // a live copy (same migration's RLS policy); when that's not yet true
+  // the delete is a safe no-op — it stays in Trash and gets re-checked
+  // automatically (the 30-day sweep above, or the next manual click).
+  async function permanentlyDeleteItems(itemsToDelete) {
+    const receivedIds = itemsToDelete.filter((i) => i.origin === 'received').map((i) => i.id)
+    const sentIds = itemsToDelete.filter((i) => i.origin === 'sent').map((i) => i.id)
+    let blockedSentCount = 0
+    await Promise.all([
+      receivedIds.length
+        ? supabase.from('message_recipients').delete().eq('profile_id', profile.id).in('message_id', receivedIds)
+        : Promise.resolve(),
+      sentIds.length
+        ? supabase
+            .from('messages')
+            .delete()
+            .eq('sender_id', profile.id)
+            .in('id', sentIds)
+            .select('id')
+            .then(({ data }) => {
+              blockedSentCount = sentIds.length - (data?.length ?? 0)
+            })
+        : Promise.resolve(),
+    ])
+    setSelectedIds(new Set())
+    reload()
+    if (blockedSentCount > 0) {
+      alert(
+        `${blockedSentCount} sent message(s) are still visible to their recipient(s), so they can't be permanently deleted yet. They'll be removed automatically once every recipient has also deleted their own copy.`
+      )
+    }
+  }
+
+  async function permanentlyDeleteSelected() {
+    const toDelete = selectedTrashItems()
+    if (!toDelete.length) return
+    if (!confirm(`Permanently delete ${toDelete.length} selected message(s)? This cannot be undone.`)) return
+    await permanentlyDeleteItems(toDelete)
+  }
+
   function toggleSelected(id, e) {
     e.stopPropagation()
     setSelectedIds((prev) => {
@@ -278,6 +420,7 @@ export default function MessagePage() {
   const importantItems = useMemo(() => [...inboxItems, ...sentItems].filter((i) => i.isImportant), [inboxItems, sentItems])
   const unreadItems = useMemo(() => inboxItems.filter((i) => !i.readAt), [inboxItems])
   const readItems = useMemo(() => inboxItems.filter((i) => !!i.readAt), [inboxItems])
+  const trashItems = useMemo(() => [...trashInboxItems, ...trashSentItems], [trashInboxItems, trashSentItems])
   const rawItems =
     tab === 'inbox'
       ? inboxItems
@@ -287,7 +430,9 @@ export default function MessagePage() {
           ? unreadItems
           : tab === 'read'
             ? readItems
-            : importantItems
+            : tab === 'trash'
+              ? trashItems
+              : importantItems
   const items = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rawItems.filter((item) => {
@@ -316,8 +461,10 @@ export default function MessagePage() {
     const m = new Map()
     for (const item of inboxItems) m.set(item.id, item)
     for (const item of sentItems) m.set(item.id, item)
+    for (const item of trashInboxItems) m.set(item.id, item)
+    for (const item of trashSentItems) m.set(item.id, item)
     return m
-  }, [inboxItems, sentItems])
+  }, [inboxItems, sentItems, trashInboxItems, trashSentItems])
 
   function rootIdOf(message) {
     let current = message
@@ -415,22 +562,30 @@ export default function MessagePage() {
             onChange={(e) => toggleSelected(item.id, e)}
             className="shrink-0"
           />
-          <button
-            type="button"
-            onClick={(e) => toggleImportant(item, e)}
-            title={item.isImportant ? 'Unmark Important' : 'Mark Important'}
-            className={`shrink-0 text-base leading-none ${item.isImportant ? 'text-amber-400' : 'text-gray-300 hover:text-amber-300'}`}
-          >
-            {item.isImportant ? '★' : '☆'}
-          </button>
-          <button
-            type="button"
-            onClick={(e) => deleteOne(item, e)}
-            title="Delete"
-            className="shrink-0 text-gray-300 hover:text-red-500"
-          >
-            🗑
-          </button>
+          {/* Jeff, 2026-10-27: Trash rows drop the star/soft-delete
+              controls — neither makes sense on an already-deleted item;
+              Restore / Permanently delete are bulk actions instead (see
+              the "Delete selected" button's replacement below). */}
+          {tab !== 'trash' && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => toggleImportant(item, e)}
+                title={item.isImportant ? 'Unmark Important' : 'Mark Important'}
+                className={`shrink-0 text-base leading-none ${item.isImportant ? 'text-amber-400' : 'text-gray-300 hover:text-amber-300'}`}
+              >
+                {item.isImportant ? '★' : '☆'}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => deleteOne(item, e)}
+                title="Delete"
+                className="shrink-0 text-gray-300 hover:text-red-500"
+              >
+                🗑
+              </button>
+            </>
+          )}
           {threadCount > 0 && (
             <span
               role="button"
@@ -464,6 +619,7 @@ export default function MessagePage() {
               : `To: ${toNames.join(', ') || '—'}`
             : `From: ${item.sender_name}`}{' '}
           · {new Date(item.created_at).toLocaleString()}
+          {tab === 'trash' && item.deletedAt && ` · Deleted ${new Date(item.deletedAt).toLocaleDateString()}`}
         </span>
       </div>
     )
@@ -503,8 +659,11 @@ export default function MessagePage() {
                 MORE_FILTERS.some((f) => f.key === tab) ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-500'
               }`}
             >
+              {/* Jeff, 2026-10-27: "more旁邊的小箭頭跟下拉的箭頭感覺是重複
+                  的" — dropped the manual ▾ here; the <select> already
+                  draws its own native arrow. */}
               <option value="" disabled hidden>
-                More ▾
+                More
               </option>
               {MORE_FILTERS.map((f) => (
                 <option key={f.key} value={f.key}>
@@ -513,15 +672,45 @@ export default function MessagePage() {
               ))}
             </select>
           </div>
+          {/* Jeff, 2026-10-27: "more旁邊再多一個trash(用不同色塊表示)" — a
+              visually distinct (red) block, deliberately OUTSIDE the
+              brand-colored pill group above so it reads as its own thing,
+              not just another filter. */}
+          <button
+            type="button"
+            onClick={() => {
+              setTab('trash')
+              setSelectedIds(new Set())
+            }}
+            title="Trash"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+              tab === 'trash' ? 'bg-red-200 text-red-800' : 'bg-red-50 text-red-600 hover:bg-red-100'
+            }`}
+          >
+            🗑 Trash
+          </button>
           {/* Jeff, 2026-10-01: "如果多重選擇訊息的時候刪除選項會出現在
               important tab旁邊" — a bulk-delete button appears right next to
               the tab pills (which include Important) the moment anything's
-              checked, and disappears again once the selection's cleared. */}
-          {selectedIds.size > 0 && (
-            <Button variant="danger" onClick={deleteSelected}>
-              Delete selected ({selectedIds.size})
-            </Button>
-          )}
+              checked, and disappears again once the selection's cleared.
+              Jeff, 2026-10-27: inside Trash, that single "Delete selected"
+              doesn't apply anymore (it's already deleted) — Restore and
+              Permanently delete take its place instead. */}
+          {selectedIds.size > 0 &&
+            (tab === 'trash' ? (
+              <>
+                <Button variant="secondary" onClick={restoreSelected}>
+                  Restore ({selectedIds.size})
+                </Button>
+                <Button variant="danger" onClick={permanentlyDeleteSelected}>
+                  Permanently delete ({selectedIds.size})
+                </Button>
+              </>
+            ) : (
+              <Button variant="danger" onClick={deleteSelected}>
+                Delete selected ({selectedIds.size})
+              </Button>
+            ))}
         </div>
         <Button onClick={() => setComposing(true)}>+ New message</Button>
       </div>
@@ -607,7 +796,9 @@ export default function MessagePage() {
                     ? 'No unread messages.'
                     : tab === 'read'
                       ? 'No read messages.'
-                      : 'No important messages.'
+                      : tab === 'trash'
+                        ? 'Trash is empty.'
+                        : 'No important messages.'
           }
         />
       ) : (
