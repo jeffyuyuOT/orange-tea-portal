@@ -597,11 +597,21 @@ export function AuthProvider({ children }) {
       setUnreadMessageCount(0)
       return
     }
+    // Jeff, 2026-10-27: "有六封email我還沒讀就刪除了，但message的數字6提示
+    // 還在，刪除了應該就不算提示了" -- deleting an unread message only sets
+    // message_recipients.deleted_at (soft delete, see MessagePage.jsx's
+    // deleteItems — a message can't be hard-removed here since the OTHER
+    // recipient's/sender's own copy must survive), it never touches
+    // read_at, so without this filter a deleted-but-still-unread message
+    // kept counting toward this badge forever. MessagePage's own inbox
+    // query already excludes deleted_at rows the same way; this just
+    // brings the count in line with what the inbox itself shows.
     const { count } = await supabase
       .from('message_recipients')
       .select('id', { count: 'exact', head: true })
       .eq('profile_id', profile.id)
       .is('read_at', null)
+      .is('deleted_at', null)
     setUnreadMessageCount(count ?? 0)
   }, [profile, overrides])
 
