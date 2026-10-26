@@ -19,6 +19,8 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 export default function MessageReminderTab() {
   const { currentStoreId } = useAuth()
   const [weekday, setWeekday] = useState(4)
+  // The value actually stored in the database (what a reload would show).
+  const [savedWeekday, setSavedWeekday] = useState(4)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -37,6 +39,7 @@ export default function MessageReminderTab() {
       .then(({ data, error: err }) => {
         if (err) setError(err.message)
         setWeekday(data?.availability_reminder_weekday ?? 4)
+        setSavedWeekday(data?.availability_reminder_weekday ?? 4)
         setLoading(false)
       })
   }, [currentStoreId])
@@ -45,13 +48,21 @@ export default function MessageReminderTab() {
     setSaving(true)
     setSaved(false)
     setError('')
-    const { error: err } = await supabase
-      .from('stores')
-      .update({ availability_reminder_weekday: Number(weekday) })
-      .eq('id', currentStoreId)
+    // Jeff, 2026-10-26: "改了日期，重新登入後又跳回禮拜四" — a shop manager's
+    // direct UPDATE on stores matched no row (only admin/developer can write
+    // stores) yet looked like success. This goes through a narrow database
+    // function instead (migration 0151: admin/developer, or a shop manager of
+    // this store) and only shows "Saved." when it really took effect.
+    const { data: newDay, error: err } = await supabase.rpc('set_availability_reminder_weekday', {
+      p_store_id: currentStoreId,
+      p_weekday: Number(weekday),
+    })
     setSaving(false)
-    if (err) setError(err.message)
-    else setSaved(true)
+    if (err) return setError(err.message)
+    const data = [{ availability_reminder_weekday: newDay }]
+    setSavedWeekday(data[0].availability_reminder_weekday)
+    setWeekday(data[0].availability_reminder_weekday)
+    setSaved(true)
   }
 
   if (loading) return null
@@ -65,7 +76,10 @@ export default function MessageReminderTab() {
       </p>
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-gray-500">Remind on</span>
-        <select className="input" value={weekday} onChange={(e) => setWeekday(e.target.value)}>
+        <select className="input" value={weekday} onChange={(e) => {
+            setWeekday(e.target.value)
+            setSaved(false)
+          }}>
           {WEEKDAYS.map((d, i) => (
             <option key={i} value={i}>
               {d}
@@ -78,7 +92,10 @@ export default function MessageReminderTab() {
         <Button onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
-        {saved && <span className="text-xs text-green-600">Saved.</span>}
+        {saved && <span className="text-xs text-green-600">Saved — reminders go out on {WEEKDAYS[savedWeekday]}.</span>}
+        {!saved && Number(weekday) !== savedWeekday && (
+          <span className="text-xs text-amber-600">Not saved yet — press Save (currently {WEEKDAYS[savedWeekday]}).</span>
+        )}
       </div>
     </div>
   )
