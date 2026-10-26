@@ -92,7 +92,7 @@ export function orderedPageEntries(sectionKey, order) {
 export const PAGE_GROUPS = {
   // Jeff, 2026-10-26: Maintenance Log + its Setting sub-tab fold into one row.
   operations_training: [
-    { key: 'maintenance', label: 'Maintenance Log', pages: ['maintenance_log', 'maintenance_manager_log', 'maintenance_setting'] },
+    { key: 'maintenance', label: 'Maintenance Log', pages: ['maintenance_log', 'maintenance_manager_log', 'maintenance_overview', 'maintenance_setting'] },
   ],
   shop_management: [
     {

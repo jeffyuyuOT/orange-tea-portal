@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/AuthContext'
 import Button from '../../components/ui/Button'
 import AuthLayout from './AuthLayout'
 
@@ -41,6 +42,9 @@ import AuthLayout from './AuthLayout'
 // change still goes straight through exactly as before.
 export default function SetPasswordPage() {
   const navigate = useNavigate()
+  // Someone already signed in to the app (came here from My Information's
+  // "Change password"), as opposed to arriving from an email link.
+  const { profile, signOut } = useAuth()
   const [status, setStatus] = useState('checking') // checking | ready | invalid | done | mfa
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -48,6 +52,7 @@ export default function SetPasswordPage() {
   const [mfaCode, setMfaCode] = useState('')
   const [mfaFactorId, setMfaFactorId] = useState('')
   const [mfaSubmitting, setMfaSubmitting] = useState(false)
+  const [sessionLost, setSessionLost] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -101,6 +106,17 @@ export default function SetPasswordPage() {
     }
   }, [])
 
+  // Link flow: the link is dead, ask for a new one. Signed-in flow: the
+  // sign-in itself has lapsed, so signing out and back in is the fix.
+  function showSessionLost() {
+    if (profile) {
+      setError('Your sign-in session has expired. Sign out, sign in again, then open Change password again.')
+      setSessionLost(true)
+    } else {
+      setStatus('invalid')
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -112,8 +128,30 @@ export default function SetPasswordPage() {
       setError('Passwords do not match.')
       return
     }
-    const { error: updateError } = await supabase.auth.updateUser({ password })
+    // Jeff, 2026-10-26: a developer, signed in and coming from My Information,
+    // saw the raw "Auth session missing!" here — the app still showed them as
+    // signed in, but the Supabase session behind this page was gone. Try once
+    // to bring it back with a token refresh; if that fails, say what actually
+    // happened instead of Supabase's wording.
+    let sessionOk = !!(await supabase.auth.getSession()).data.session
+    if (!sessionOk) {
+      const { data: refreshed } = await supabase.auth.refreshSession()
+      sessionOk = !!refreshed?.session
+    }
+    if (!sessionOk) {
+      showSessionLost()
+      return
+    }
+    let { error: updateError } = await supabase.auth.updateUser({ password })
+    if (updateError && /auth session missing/i.test(updateError.message)) {
+      const { data: refreshed } = await supabase.auth.refreshSession()
+      if (refreshed?.session) ({ error: updateError } = await supabase.auth.updateUser({ password }))
+    }
     if (updateError) {
+      if (/auth session missing/i.test(updateError.message)) {
+        showSessionLost()
+        return
+      }
       // Supabase's documented code for exactly this case (see Error Codes
       // reference): the account has an MFA factor enrolled, and this
       // session hasn't proven it yet. Step up right here instead of just
@@ -264,6 +302,11 @@ export default function SetPasswordPage() {
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {sessionLost && (
+          <Button type="button" variant="secondary" className="w-full" onClick={() => signOut()}>
+            Sign out
+          </Button>
+        )}
         <Button type="submit" className="w-full">
           Set password
         </Button>

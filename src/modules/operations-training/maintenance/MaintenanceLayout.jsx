@@ -11,6 +11,7 @@ const PREFIX = '/operations-training/maintenance'
 const TABS = [
   { key: 'operations_training.maintenance_log', to: '/operations-training/maintenance-log', label: 'Log' },
   { key: 'operations_training.maintenance_manager_log', to: '/operations-training/maintenance-manager-log', label: "Manager's Log" },
+  { key: 'operations_training.maintenance_overview', to: '/operations-training/maintenance-overview', label: 'Overview' },
   { key: 'operations_training.maintenance_setting', to: '/operations-training/maintenance-setting', label: 'Setting' },
 ]
 

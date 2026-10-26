@@ -27,6 +27,7 @@ const ShopTrainingPage = lazy(() => import('../modules/operations-training/shop-
 
 const MaintenanceLayout = lazy(() => import('../modules/operations-training/maintenance/MaintenanceLayout'))
 const MaintenanceLogPage = lazy(() => import('../modules/operations-training/maintenance/MaintenanceLogPage'))
+const MaintenanceOverviewPage = lazy(() => import('../modules/operations-training/maintenance/MaintenanceOverviewPage'))
 const MaintenanceSettingPage = lazy(() => import('../modules/operations-training/maintenance/MaintenanceSettingPage'))
 const DashboardLayout = lazy(() => import('../modules/dashboard/DashboardLayout'))
 const BulletinPage = lazy(() => import('../modules/dashboard/bulletin/BulletinPage'))
@@ -142,6 +143,10 @@ export default function AppRoutes() {
             <Route
               path="/operations-training/maintenance-manager-log"
               element={guarded('operations_training.maintenance_manager_log', <MaintenanceLogPage logType="manager" />)}
+            />
+            <Route
+              path="/operations-training/maintenance-overview"
+              element={guarded('operations_training.maintenance_overview', <MaintenanceOverviewPage />)}
             />
             <Route
               path="/operations-training/maintenance-setting"

@@ -16,6 +16,8 @@ export const SECTIONS = {
       maintenance_log: 'Maintenance Log',
       // Jeff, 2026-10-26: manager-only checklist next to the general log.
       maintenance_manager_log: "Manager's Log",
+      // Jeff, 2026-10-26: admin/developer cross-store overdue overview.
+      maintenance_overview: 'Maintenance Overview',
       maintenance_setting: 'Maintenance Setting',
     },
   },
@@ -227,6 +229,7 @@ const ROLE_DEFAULTS = {
         'admin_center.training_journey_setting',
         'shop_management.qr_code',
         'audit.settings',
+        'operations_training.maintenance_overview',
         'developer_tools.payroll',
         'developer_tools.bk',
       ].includes(key)
