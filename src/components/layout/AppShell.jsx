@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
@@ -17,6 +17,10 @@ import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
 import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
 import { watchForUpdate, applyUpdate } from '../../lib/swUpdate'
+
+// Jeff, 2026-10-26: BK's nightly backup has to run from anywhere in the app, not only
+// while the BK page is open, so the guard lives here (loaded only for people who can open BK).
+const BkBackupGuard = lazy(() => import('../../modules/developer/bk/BackupGuard'))
 
 export default function AppShell() {
   const {
@@ -229,6 +233,7 @@ export default function AppShell() {
   // qr_code_maker, accountant) — same permission key the page itself is
   // guarded by (routes.jsx).
   const canClockInOut = canAccessPage(effectivePages, 'dashboard.time_attendance')
+  const canRunBkBackup = canAccessPage(effectivePages, 'developer_tools.bk')
   const clockInOut = useClockInOut(profile?.id, accessibleStores)
   // Same "nothing to navigate between" check as Sidebar.jsx (see its
   // 2026-10-01 comment) — hides the hamburger button and drawer too, not
@@ -414,6 +419,12 @@ export default function AppShell() {
           </main>
         </div>
       </div>
+
+      {canRunBkBackup && (
+        <Suspense fallback={null}>
+          <BkBackupGuard />
+        </Suspense>
+      )}
 
       {canClockInOut && clockInOut.showScanner && (
         <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
