@@ -12,7 +12,6 @@ const BonusTab = lazy(() => import('./bonus/BonusTab'))
 const OwedPage = lazy(() => import('./owed/OwedPage'))
 const HistoryTab = lazy(() => import('./history/HistoryTab'))
 const SettingsTab = lazy(() => import('./settings/SettingsTab'))
-import BackupGuard from './BackupGuard'
 
 // BK (記帳) — developer-only bookkeeping page. Gated by RequirePage on
 // developer_tools.bk (routes.jsx), which only the developer role has; the real
@@ -166,7 +165,6 @@ export default function BkPage() {
           <span className={`text-sm ${saveAllMsg.kind === 'error' ? 'text-red-600' : 'text-green-700'}`}>{saveAllMsg.text}</span>
         )}
       </div>
-      <BackupGuard />
 
       <div className="flex gap-1 overflow-x-auto rounded-xl bg-brand-50 p-1">
         {TABS.map(([key, label]) => (

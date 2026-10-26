@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { supabase } from '../../../lib/supabaseClient'
 import Button from '../../../components/ui/Button'
 import Modal from '../../../components/ui/Modal'
 import { Notice } from './bkUi'
@@ -26,11 +27,14 @@ function backupPending(state) {
   return !state.log.some((r) => r.day === today && (r.status === 'ok' || r.status === 'acknowledged'))
 }
 
-// Lives inside BkPage (so it only works while the BK page is open and logged in).
-//  - On entering BK: reads the backup log; if today's 22:30 backup is due and
+// Jeff, 2026-10-26: now mounted once in AppShell (for people who can open BK), so the
+// nightly backup runs on ANY page while the browser is open and signed in — not only
+// while the BK page itself is showing. The BK tables need a 2FA-verified (aal2) session,
+// so it stays idle until the session is at that level.
+//  - On startup / sign-in: reads the backup log; if today's 22:30 backup is due and
 //    still missing it is made right away (when the folder permission is still
 //    valid); any earlier day without a successful backup opens a warning.
-//  - While BK stays open: checks every 30 s and makes the backup once the chosen time (系統設置 › 備份) arrives.
+//  - While the app stays open: checks every 30 s and makes the backup once the chosen time (系統設置 › 備份) arrives.
 export default function BackupGuard() {
   const [missed, setMissed] = useState([])
   const [busy, setBusy] = useState(false)
@@ -40,6 +44,12 @@ export default function BackupGuard() {
   const runningRef = useRef(false)
 
   const refresh = useCallback(async () => {
+    try {
+      const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      if (data?.currentLevel !== 'aal2') return
+    } catch {
+      return
+    }
     let state
     try {
       state = await loadBackupState()
@@ -141,7 +151,7 @@ export default function BackupGuard() {
             <li key={m.day}>
               <span className="font-medium">{m.day}</span>
               <span className="text-gray-500">
-                {m.error ? `（失敗：${m.error}）` : '（那天沒有備份：瀏覽器沒開、沒登入，或沒開著 BK 頁面）'}
+                {m.error ? `（失敗：${m.error}）` : '（那天沒有備份：瀏覽器沒開、沒登入，或還沒完成兩步驟驗證）'}
               </span>
             </li>
           ))}

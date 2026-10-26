@@ -34,6 +34,14 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
   const [error, setError] = useState('')
   const [cell, setCell] = useState(null) // { item, month } being edited
   const [warn, setWarn] = useState(null) // item whose ⚠ was clicked
+  const [open, setOpen] = useState(() => new Set()) // phone cards whose month dates are expanded
+  const toggleOpen = (id) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const load = useCallback(async () => {
     if (!currentStoreId) return
@@ -120,6 +128,8 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
             const it = r.item
             const info = dueInfo(it, logs, today)
             const last = lastYear.get(it.id)
+            const isOpen = open.has(it.id)
+            const doneCount = MONTHS.reduce((n, _m, mi) => n + (byCell.get(`${it.id}:${mi}`)?.length ?? 0), 0)
             return (
               <div key={it.id} className="rounded-xl border border-brand-100 bg-white p-3">
                 <div className="flex items-start justify-between gap-2">
@@ -133,34 +143,52 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
                   </div>
                   <div className="shrink-0 text-xs text-gray-500">{frequencyLabel(it.frequency_months)}</div>
                 </div>
-                <div className="mb-2 text-xs text-gray-500">Last schedule: {last ? formatDate(last) : '—'}</div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {MONTHS.map((m, mi) => {
-                    const entries = byCell.get(`${it.id}:${mi}`) ?? []
-                    return (
-                      <button
-                        key={m}
-                        onClick={() => setCell({ item: it, month: mi })}
-                        className={`min-h-[52px] rounded-lg border px-1 py-1 text-center ${
-                          entries.length ? 'border-green-200 bg-green-50' : 'border-brand-100 bg-white'
-                        }`}
-                        aria-label={`${it.name} ${m}`}
-                      >
-                        <span className="block text-[10px] font-semibold uppercase text-gray-400">{m}</span>
-                        {entries.length === 0 ? (
-                          <span className="block text-gray-300">+</span>
-                        ) : (
-                          entries.map((e) => (
-                            <span key={e.id} className="block leading-tight">
-                              <span className="block text-xs font-medium text-green-700">{formatDayMonth(e.done_date)}</span>
-                              <span className="block truncate text-[10px] text-gray-500">{e.done_by_name}</span>
-                            </span>
-                          ))
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleOpen(it.id)}
+                  aria-expanded={isOpen}
+                  className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg bg-brand-50 px-2.5 py-1.5 text-left text-xs text-gray-600"
+                >
+                  <span>
+                    Last schedule: {last ? formatDate(last) : '—'}
+                    <span className="ml-2 text-brand-700">· {doneCount} in {year}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1 font-medium text-brand-700">
+                    {isOpen ? 'Hide dates' : 'Dates'}
+                    <svg className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                    </svg>
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="mt-2 grid grid-cols-4 gap-1.5">
+                    {MONTHS.map((m, mi) => {
+                      const entries = byCell.get(`${it.id}:${mi}`) ?? []
+                      return (
+                        <button
+                          key={m}
+                          onClick={() => setCell({ item: it, month: mi })}
+                          className={`min-h-[52px] rounded-lg border px-1 py-1 text-center ${
+                            entries.length ? 'border-green-200 bg-green-50' : 'border-brand-100 bg-white'
+                          }`}
+                          aria-label={`${it.name} ${m}`}
+                        >
+                          <span className="block text-[10px] font-semibold uppercase text-gray-400">{m}</span>
+                          {entries.length === 0 ? (
+                            <span className="block text-gray-300">+</span>
+                          ) : (
+                            entries.map((e) => (
+                              <span key={e.id} className="block leading-tight">
+                                <span className="block text-xs font-medium text-green-700">{formatDayMonth(e.done_date)}</span>
+                                <span className="block truncate text-[10px] text-gray-500">{e.done_by_name}</span>
+                              </span>
+                            ))
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}

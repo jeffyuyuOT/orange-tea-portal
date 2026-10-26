@@ -1,22 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import Sidebar from './Sidebar'
+import Sidebar, { SidebarBrand, SidebarNavLinks } from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
-import NavBadge from '../ui/NavBadge'
 import { useAuth } from '../../lib/AuthContext'
 import { ROLE_LABELS, NON_PICKABLE_STAFF_ROLES, canAccessPage } from '../../lib/permissions'
 import { useClockInOut } from '../../lib/useClockInOut'
 import { getWorkedMinutesByProfile } from '../../lib/attendance'
 import { trainingHoursBandInfo, trainingHoursReminderTitle } from '../../lib/trainingHoursReminder'
-import { logicalPageEntries, orderedSectionEntries } from '../../lib/sidebarOrder'
-import { useAuditPending } from '../../lib/useAuditPending'
-import { badgeForKeys } from '../../lib/navBadges'
 import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
 import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
 import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
-import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
-import { watchForUpdate, applyUpdate } from '../../lib/swUpdate'
 
 export default function AppShell() {
   const {
@@ -28,38 +22,39 @@ export default function AppShell() {
     rosterUpdates,
     hasFormulaUpdates,
     hasBulletinUpdates,
-    hasTimeDiscrepancies,
-    sidebarOrder,
     refreshProfile,
   } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  // Jeff, 2026-10-17: used to redirect front-line staff straight to Time &
-  // Attendance right after a real password sign-in (RootRedirect, routes.jsx,
-  // only covers landing on "/"). Jeff, 2026-10-21 (follow-up): removed —
-  // "不要預設在clock in out的頁面，因為其實最上面有相機快捷" (the header's
-  // camera-icon quick-scan button below already covers a fast clock-in/out
-  // without a special landing page), and it meant staff could easily sign
-  // in and never see an update sitting on their normal first page. See
-  // routes.jsx's RootRedirect for the other half of this same revert.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // Jeff, 2026-10-17: right after a real password sign-in, front-line staff land on
+  // Time & Attendance wherever the address bar happened to be (RootRedirect only
+  // covers "/"). Once per sign-in; refreshes and later navigation are untouched,
+  // and every other role keeps its normal landing page.
+  useEffect(() => {
+    if (!profile?.id) return
+    let justSignedIn = false
+    try {
+      justSignedIn = sessionStorage.getItem('ot_just_signed_in') === '1'
+      if (justSignedIn) sessionStorage.removeItem('ot_just_signed_in')
+    } catch {
+      /* ignore */
+    }
+    if (justSignedIn && profile.role === 'staff' && canAccessPage(effectivePages, 'dashboard.time_attendance')) {
+      navigate('/dashboard/time-attendance', { replace: true })
+    }
+  }, [profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // Jeff, 2026-10-02: "桌面捷徑有辦法有訊息提示嗎" — a badge/dot on the
-  // installed-app icon itself (desktop taskbar / Android home screen) via
-  // the Badging API (navigator.setAppBadge / clearAppBadge). Confirmed this
-  // session (2026-10-21): Android Chrome doesn't actually implement this API
-  // at all — `'setAppBadge' in navigator` is false there, so this effect is
-  // a silent no-op on every Android phone and only ever did anything on
-  // desktop Chrome/Edge. iOS has no equivalent for a home-screen web app
-  // either, same platform gap as the 2026-10-01 "shortcuts" discussion.
-  // `'setAppBadge' in navigator` guards every unsupported browser/OS combo
-  // to a harmless no-op.
-  //
-  // Android's own icon badge instead comes entirely from real Web Push
-  // (lib/webPush.js, public/push-sw.js, added 2026-10-21) — the OS badges
-  // the icon whenever there's an active notification `showNotification()`
-  // left in the notification shade, a completely separate mechanism from
-  // this Badging API code and from anything tracked in AuthContext. See the
-  // "clear shown push notifications" effect further down, which is what
-  // actually clears THAT badge.
+  // installed-app icon itself (desktop taskbar / Android home screen). This
+  // is the Badging API (navigator.setAppBadge / clearAppBadge) — NOT real
+  // push notifications (a popup alert when the app isn't even open), which
+  // would need a service worker push handler, VAPID keys and a backend
+  // trigger this project doesn't have. Badging only works on an installed
+  // PWA icon, and only on Chrome/Edge-family browsers (desktop + Android) —
+  // iOS has no equivalent for a home-screen web app, same platform gap as
+  // the 2026-10-01 "shortcuts" discussion. `'setAppBadge' in navigator`
+  // guards every other browser/OS combo (a normal browser tab, Safari,
+  // etc.) to a harmless no-op.
   //
   // Jeff, 2026-10-02 (later): "改成紅底加數字...提示除了之前說的new
   // message，還包括my roster更新，formula update，跟bulletin的新提示消息"
@@ -77,31 +72,6 @@ export default function AppShell() {
   // above.
   const badgeCount =
     unreadMessageCount + (rosterUpdates.myRoster ? 1 : 0) + (hasFormulaUpdates ? 1 : 0) + (hasBulletinUpdates ? 1 : 0)
-  // Jeff, 2026-10-21 (follow-up): "員工預設進去app會直接進clock in/out頁面，
-  // 這樣會不容易看到其他分頁有提示...在返回的圖示上加小紅點" — a staff login
-  // lands straight on Time & Attendance (see the sign-in effect above), so
-  // they may never see the section grid (/home) or even My Dashboard's own
-  // chooser where an update would otherwise be visible. This is the same
-  // problem one level up from what each layout's own back-bar badge solves
-  // (SectionTabLayout.jsx/DashboardLayout.jsx/TrainingCentreLayout.jsx,
-  // right below) — the "▦ go to sections" header button is the only way
-  // back to EVERY section, not just the current one, so it gets its own
-  // "something's new, somewhere" dot: the same badgeForKeys lookup every
-  // other nav surface uses, run across literally every page this person can
-  // reach (not a hand-picked subset like badgeCount above), so a future
-  // signal added to navBadges.js shows up here automatically too.
-  const auditPending = useAuditPending(profile, effectivePages)
-  const anywhereSignals = { rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, auditPending }
-  const anywhereFullKeys = orderedSectionEntries(sidebarOrder).flatMap(([sectionKey]) =>
-    logicalPageEntries(sectionKey, sidebarOrder).flatMap((entry) =>
-      entry.type === 'group'
-        ? entry.pages.filter((p) => canAccessPage(effectivePages, `${sectionKey}.${p}`)).map((p) => `${sectionKey}.${p}`)
-        : canAccessPage(effectivePages, `${sectionKey}.${entry.key}`)
-          ? [`${sectionKey}.${entry.key}`]
-          : []
-    )
-  )
-  const anywhereBadge = badgeForKeys(anywhereFullKeys, anywhereSignals)
   useEffect(() => {
     if (!('setAppBadge' in navigator)) return
     if (badgeCount > 0) {
@@ -110,116 +80,6 @@ export default function AppShell() {
       navigator.clearAppBadge().catch(() => {})
     }
   }, [badgeCount])
-  // Jeff, 2026-10-21 (follow-up): "訊息讀取後，dashboard跟message的提示消失，
-  // 但手機圖示的數字提醒還存在" — reading a message/bulletin in the app
-  // updates AuthContext (clears the in-app dot/count instantly, via
-  // badgeCount above) but does nothing to the actual push notification
-  // push-sw.js already showed — that's what the OS icon badge is really
-  // counting (see the comment above), and it has its own separate
-  // lifecycle. Closing it once badgeCount is actually back to 0 keeps the
-  // two in sync.
-  // Jeff, 2026-10-21 (correction): "應該不是打開手機就清掉桌面圖示，而是應該
-  // 造成提示的訊息閱讀了，桌面圖示提醒才會清掉" — an earlier version of this
-  // cleared the shown notification unconditionally on every app open/
-  // foreground, regardless of whether badgeCount was still > 0 (reasoning at
-  // the time: "having it open already means they've seen it" — Jeff's own
-  // call then, reversed now). That let the icon go blank before the message
-  // was actually read, which could hide a push someone only glanced past.
-  // Now the icon only ever gets cleared in step with badgeCount reaching 0 —
-  // the same real "have you actually read this" signal the in-app dots use,
-  // not just "was the app opened". AuthContext's own visibilitychange
-  // refresh (added the same day) is what keeps badgeCount itself current
-  // without needing a full close+reopen, so this effect no longer needs its
-  // own visibilitychange listener — it only has to react when badgeCount
-  // changes, however that change happened.
-  useEffect(() => {
-    if (!isPushSupported() || badgeCount > 0) return
-    navigator.serviceWorker.ready
-      .then((reg) => reg.getNotifications())
-      .then((list) => list.forEach((n) => n.close()))
-      .catch(() => {})
-  }, [badgeCount])
-  // Jeff, 2026-10-21: "還是做完整的 Web Push，這樣員工使用起來才知道有訊息
-  // 可以點進去看" — a toggle buried in My Information (MyInformationPage.jsx
-  // has the full on/off control) won't get found organically, so this is a
-  // one-time nudge: shown once per device while notification permission is
-  // still undecided, dismissible, remembered in localStorage (per-device is
-  // the right scope here anyway — a push subscription is inherently
-  // per-device, unlike every other profile-level "seen" flag in this file).
-  const [showPushNudge, setShowPushNudge] = useState(false)
-  useEffect(() => {
-    if (!profile?.id || !isPushSupported() || isIosNonStandalone()) return
-    // Jeff, 2026-10-21: "確認一下2d maker跟accountant不會收到推播通知" —
-    // this banner wasn't gated by role at all, so an accountant (a real
-    // person, unlike the device-account qr_code_maker) could tap it and
-    // start getting push despite having no access to Bulletin Board/My
-    // Information in the first place (permissions.js). None of
-    // NON_PICKABLE_STAFF_ROLES (training/qr_code_maker/accountant) should
-    // ever be offered push — the announcement trigger now also excludes
-    // them at the source (migration 0132) as defense in depth, but this is
-    // what stops a subscription row from being created for them at all.
-    if (NON_PICKABLE_STAFF_ROLES.includes(profile.role)) return
-    if (typeof Notification === 'undefined' || Notification.permission !== 'default') return
-    let dismissed = false
-    try {
-      dismissed = localStorage.getItem('ot_push_nudge_dismissed') === '1'
-    } catch {
-      /* ignore */
-    }
-    if (!dismissed) setShowPushNudge(true)
-  }, [profile?.id, profile?.role])
-  const dismissPushNudge = () => {
-    setShowPushNudge(false)
-    try {
-      localStorage.setItem('ot_push_nudge_dismissed', '1')
-    } catch {
-      /* ignore */
-    }
-  }
-  const enablePushFromNudge = async () => {
-    try {
-      await subscribeToPush(profile.id)
-    } catch {
-      /* the My Information page explains failures in more detail; a silent
-         no-op here just means the button stays visible to retry */
-    }
-    dismissPushNudge()
-  }
-
-  // Jeff, 2026-10-21 (further follow-up): "有辦法登入時如果發現新版本，先讓
-  // 其正常登入進去，再banner提示有新版本請確認更新...或者是有辦法做到員工
-  // 離開app那一瞬間，系統背後自己做更新?" — registerType is now 'prompt'
-  // (vite.config.js/swUpdate.js), so a newly-found update sits waiting
-  // instead of forcing itself through.
-  //
-  // Jeff, 2026-10-21 (yet another follow-up): "如果跳出時會自動更新，感覺
-  // 畫面上方的小提示...是不是就不需要" — right: this app's actual usage
-  // (phones get locked, store computers get shut down normally — Jeff
-  // confirmed) is already covered without it. Locking a phone screen fires
-  // 'visibilitychange' → 'hidden' on both iOS/Android while the tab is
-  // still open, which the effect below catches directly. A normal computer
-  // shutdown (or just closing the browser) goes further: once every
-  // tab/window this service worker controls is gone, there's nothing left
-  // for the OLD worker to keep controlling, so the browser activates the
-  // waiting one entirely on its own — no code of ours even needs to run
-  // for that case. The one device this wouldn't reach is a screen left
-  // open and in the foreground all day, never locked or closed (a tablet
-  // mounted as a standing kiosk) — no store runs one that way, so the
-  // visible banner + manual "Update now" button were dropped; this effect
-  // (silently applying the moment a tab IS backgrounded) is kept as the
-  // one case worth covering proactively rather than waiting for a full
-  // close.
-  useEffect(() => {
-    const cancelWatch = watchForUpdate(() => {})
-    function onHidden() {
-      if (document.visibilityState === 'hidden') applyUpdate()
-    }
-    document.addEventListener('visibilitychange', onHidden)
-    return () => {
-      cancelWatch()
-      document.removeEventListener('visibilitychange', onHidden)
-    }
-  }, [])
   // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
   // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
   // ANY page, not just after navigating into My Dashboard > Time & Attendance
@@ -244,6 +104,15 @@ export default function AppShell() {
   const isAdminCenter = location.pathname.startsWith('/admin-center') || location.pathname.startsWith('/developer-tools') ||
     // Audit Settings is one form shared by every store.
     location.pathname === '/audit/settings'
+
+  // Below the sidebar's md breakpoint there was previously no way at all to
+  // reach anything but whatever page you landed on — the sidebar (and every
+  // link in it) was simply `hidden` with no phone-sized replacement. This
+  // hamburger + slide-out drawer covers that, reusing the exact same
+  // permission-filtered link list as the desktop sidebar.
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
 
   // Jeff, 2026-10-08: "被qualified的員工，登入系統時中間會跳出視窗顯示
   // Congratulations! You have officially qualified as an Advanced staff
@@ -333,24 +202,35 @@ export default function AppShell() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
 
+        {hasSidebar && mobileNavOpen && (
+          <div className="fixed inset-0 z-40 flex md:hidden">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
+            <div className="relative flex w-64 max-w-[80vw] flex-col bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b border-brand-100 pr-2">
+                <SidebarBrand />
+                <button
+                  onClick={() => setMobileNavOpen(false)}
+                  className="rounded-full p-1 text-gray-400 hover:bg-brand-50 hover:text-brand-600"
+                  aria-label="Close menu"
+                >
+                  ✕
+                </button>
+              </div>
+              <SidebarNavLinks onNavigate={() => setMobileNavOpen(false)} />
+            </div>
+          </div>
+        )}
+
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center justify-between gap-2 border-b border-brand-100 px-3 py-3 md:px-6">
             <div className="flex min-w-0 items-center gap-2">
               {hasSidebar && (
-                // Jeff, 2026-10-19 (mobile nav redesign, point 1): replaces
-                // the old hamburger + slide-out drawer — this now jumps
-                // straight to MobileSectionHome's colored section grid
-                // (routes.jsx's /home), the "go up a level" screen for
-                // switching sections on a phone. Desktop never shows this;
-                // its permanent <aside> sidebar covers the same job already.
                 <button
-                  onClick={() => navigate('/home')}
-                  className="relative shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
-                  aria-label="Go to sections"
-                  title="Sections"
+                  onClick={() => setMobileNavOpen(true)}
+                  className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 md:hidden"
+                  aria-label="Open menu"
                 >
-                  ▦
-                  <NavBadge badge={anywhereBadge} corner />
+                  ☰
                 </button>
               )}
               {isAdminCenter ? <span className="text-sm font-medium text-brand-700">All Stores</span> : <StoreSwitcher />}
@@ -385,19 +265,6 @@ export default function AppShell() {
               </button>
             </div>
           </header>
-          {showPushNudge && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2 text-sm md:px-6">
-              <span className="text-brand-800">🔔 Turn on push notifications so you don't miss new messages, announcements, and roster updates.</span>
-              <div className="flex shrink-0 items-center gap-2">
-                <button onClick={enablePushFromNudge} className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">
-                  Turn on
-                </button>
-                <button onClick={dismissPushNudge} className="rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">
-                  Later
-                </button>
-              </div>
-            </div>
-          )}
           {/* overflow-x-hidden here is a safety net: if some element inside a
               page is ever too wide for the screen (like the Study Log header
               row Jeff hit on mobile, before it got its own flex-wrap fix),
