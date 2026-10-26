@@ -111,7 +111,51 @@ export default function MaintenanceOverviewPage() {
             <span className="font-semibold text-gray-900">{totalOverdue}</span> overdue service{totalOverdue === 1 ? '' : 's'} in {sel.size} store
             {sel.size === 1 ? '' : 's'}.
           </div>
-          <div className="overflow-x-auto rounded-xl border border-brand-100 bg-white">
+          {/* Phone: cards grouped by store, no sideways scrolling. */}
+          <div className="space-y-3 md:hidden">
+            {shownByStore.map((g) => (
+              <div key={g.store.id}>
+                <div className="rounded-lg border-l-4 border-l-brand-500 bg-brand-100 px-3 py-2 font-bold text-brand-800">
+                  {g.store.name}
+                  <span className="ml-2 text-xs font-medium text-brand-700">
+                    {g.overdueCount} overdue · {g.total} service{g.total === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {g.list.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-gray-400">
+                    {g.total === 0 ? 'No maintenance items set up.' : overdueOnly ? 'Nothing overdue. ✓' : 'No items.'}
+                  </div>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {g.list.map(({ it, info, daysOver, daysLeft }) => (
+                      <div key={it.id} className="rounded-xl border border-brand-100 bg-white p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-sm font-semibold text-gray-900">{it.name}</div>
+                          <div className="shrink-0">
+                            {info.overdue ? (
+                              <Badge color="red">⚠️ {daysOver}d overdue</Badge>
+                            ) : daysLeft <= 7 ? (
+                              <Badge color="gray">Due in {daysLeft}d</Badge>
+                            ) : (
+                              <span className="text-xs text-green-700">OK</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-0.5 text-xs text-gray-500">
+                          {[it.category, LOG_LABEL[it.log_type ?? 'general'], frequencyLabel(it.frequency_months)].filter(Boolean).join(' · ')}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-600">
+                          Last done: {info.last ? formatDate(info.last) : 'Never'} · Due by: <span className="font-medium">{formatDate(info.due)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-xl border border-brand-100 bg-white md:block">
             <table className="w-full min-w-[820px] border-collapse text-sm">
               <thead>
                 <tr className="bg-brand-50 text-xs font-semibold uppercase tracking-wide text-brand-700">

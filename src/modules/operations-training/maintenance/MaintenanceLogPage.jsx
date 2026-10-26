@@ -106,7 +106,67 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
       ) : !rows.length ? (
         <EmptyState label={logType === 'manager' ? "No Manager's Log items for this store yet. Add them in Setting." : 'No maintenance items for this store yet.'} />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-100 bg-white">
+        <>
+        {/* Phone: one card per service with a 4x3 month grid — no sideways scrolling. */}
+        <div className="space-y-3 md:hidden">
+          {rows.map((r) => {
+            if (r.type === 'category') {
+              return (
+                <div key={`mcat-${r.name}`} className="rounded-lg border-l-4 border-l-brand-500 bg-brand-100 px-3 py-2 text-sm font-bold text-brand-800">
+                  {r.name}
+                </div>
+              )
+            }
+            const it = r.item
+            const info = dueInfo(it, logs, today)
+            const last = lastYear.get(it.id)
+            return (
+              <div key={it.id} className="rounded-xl border border-brand-100 bg-white p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 text-sm font-semibold text-gray-900">
+                    {it.name}
+                    {info.overdue && (
+                      <button onClick={() => setWarn(it)} className="ml-1.5 text-amber-500" aria-label="Overdue">
+                        ⚠️
+                      </button>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-xs text-gray-500">{frequencyLabel(it.frequency_months)}</div>
+                </div>
+                <div className="mb-2 text-xs text-gray-500">Last schedule: {last ? formatDate(last) : '—'}</div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {MONTHS.map((m, mi) => {
+                    const entries = byCell.get(`${it.id}:${mi}`) ?? []
+                    return (
+                      <button
+                        key={m}
+                        onClick={() => setCell({ item: it, month: mi })}
+                        className={`min-h-[52px] rounded-lg border px-1 py-1 text-center ${
+                          entries.length ? 'border-green-200 bg-green-50' : 'border-brand-100 bg-white'
+                        }`}
+                        aria-label={`${it.name} ${m}`}
+                      >
+                        <span className="block text-[10px] font-semibold uppercase text-gray-400">{m}</span>
+                        {entries.length === 0 ? (
+                          <span className="block text-gray-300">+</span>
+                        ) : (
+                          entries.map((e) => (
+                            <span key={e.id} className="block leading-tight">
+                              <span className="block text-xs font-medium text-green-700">{formatDayMonth(e.done_date)}</span>
+                              <span className="block truncate text-[10px] text-gray-500">{e.done_by_name}</span>
+                            </span>
+                          ))
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="hidden overflow-x-auto rounded-xl border border-brand-100 bg-white md:block">
           <table className="w-full min-w-[1100px] border-collapse text-sm">
             <thead>
               <tr className="bg-brand-50 text-xs font-semibold uppercase tracking-wide text-brand-700">
@@ -182,6 +242,7 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {cell && (

@@ -244,20 +244,22 @@ export default function MaintenanceSettingPage() {
                 <div
                   key={it.id}
                   {...rowEvents}
-                  className={`flex items-center gap-2 border-b border-brand-100 px-3 py-2.5 last:border-b-0 ${
+                  className={`flex flex-col gap-2 border-b border-brand-100 px-3 py-2.5 last:border-b-0 md:flex-row md:items-center ${
                     isDragging ? 'opacity-40' : ''
                   } ${isDropTarget ? 'bg-brand-50' : ''}`}
                 >
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
                   <DragHandle {...drag.handleProps(it.id)} />
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-gray-900">{it.name}</span>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-sm font-medium text-gray-900 md:truncate">{it.name}</span>
                       {it.log_type === 'both' && <Badge color="gray">Both logs</Badge>}
                       {it.copy_group_id && <Badge color="brand">🔗 Linked</Badge>}
                     </div>
                     <div className="text-xs text-gray-500">{frequencyLabel(it.frequency_months)}</div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 pl-8 md:pl-0">
                     {isAdmin && otherStores.length > 0 && (
                       <button
                         type="button"
