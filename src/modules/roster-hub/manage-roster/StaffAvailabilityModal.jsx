@@ -13,7 +13,7 @@ import {
   availableWindowsWithLeave,
   leaveWindowOnDate,
 } from '../../../lib/availability'
-import { timeToMinutes, formatTickLabel, buildTicks, pickColor } from '../../../lib/timelineBar'
+import { timeToMinutes, formatTickLabel, buildHourlyTicks, pickColor } from '../../../lib/timelineBar'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -166,7 +166,11 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
   let windowEnd = storeHours.close ? timeToMinutes(storeHours.close) : 1440
   if (windowEnd <= windowStart) windowEnd = 1440
   const span = windowEnd - windowStart
-  const ticks = buildTicks(windowStart, windowEnd)
+  // Jeff's spec for this tab explicitly asked for a tick every hour
+  // ("時間也是每一小時一個刻度" / "有辦法詳細一點嗎"), unlike
+  // RosterSettingsPage's own timeline which widens its step for a long
+  // window — see buildHourlyTicks' own comment.
+  const ticks = buildHourlyTicks(windowStart, windowEnd)
 
   // Every staff member with any available time on `dateStr` (leave already
   // reconciled in), one color per person — "一個人一個色條" — threaded
@@ -230,11 +234,11 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
         ) : (
           <>
             <div className="mb-3 flex gap-2">
-              <TabButton active={tab === 'person'} onClick={() => setTab('person')}>
-                By Person
-              </TabButton>
               <TabButton active={tab === 'date'} onClick={() => setTab('date')}>
                 By Date
+              </TabButton>
+              <TabButton active={tab === 'person'} onClick={() => setTab('person')}>
+                By Person
               </TabButton>
             </div>
 
