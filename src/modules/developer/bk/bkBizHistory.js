@@ -54,14 +54,18 @@ export function aggregateDays(storeDays, storeIds) {
 // Sum of the records matching `pred`; null when nothing matches.
 export function sumRecords(records, pred = () => true) {
   const hit = records.filter((r) => pred(r.date))
-  if (hit.length === 0) return { total: null, cups: null, days: 0, avgCups: null }
+  if (hit.length === 0) return { total: null, cups: null, days: 0, avgTotal: null, avgCups: null }
   const cups = sumOrNull(hit.map((r) => r.cups))
+  const total = sumOrNull(hit.map((r) => r.total))
+  // 日均營業額 = 總營業額 ÷ the days that actually have a 總營業額 figure.
+  const totalDays = hit.filter((r) => r.total !== null && r.total !== undefined).length
   // 日均杯數 = 總杯數 ÷ the days that actually have a cup figure.
   const cupDays = hit.filter((r) => r.cups !== null && r.cups !== undefined).length
   return {
-    total: sumOrNull(hit.map((r) => r.total)),
+    total,
     cups,
     days: hit.length,
+    avgTotal: total !== null && totalDays > 0 ? round2(total / totalDays) : null,
     avgCups: cups !== null && cupDays > 0 ? round2(cups / cupDays) : null,
   }
 }

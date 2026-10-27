@@ -59,8 +59,8 @@ function YearSelect({ years, value, onChange }) {
   )
 }
 
-// A clickable block: label + 總營業額 + 總杯數 (+ 日均杯數 when given).
-function Tile({ label, sub, total, cups, avgCups, onClick }) {
+// A clickable block: label + 總營業額 + 總杯數 (+ 日均營業額 / 日均杯數 when given).
+function Tile({ label, sub, total, cups, avgTotal, avgCups, onClick }) {
   const empty = total === null && cups === null
   return (
     <button
@@ -75,6 +75,12 @@ function Tile({ label, sub, total, cups, avgCups, onClick }) {
       <div className="text-lg font-semibold tabular-nums text-gray-900">{money(total)}</div>
       <div className="mt-1 text-xs text-gray-500">總杯數</div>
       <div className="text-lg font-semibold tabular-nums text-gray-900">{count(cups)}</div>
+      {avgTotal !== undefined && (
+        <>
+          <div className="mt-1 text-xs text-gray-500">日均營業額</div>
+          <div className="text-lg font-semibold tabular-nums text-gray-900">{money(avgTotal)}</div>
+        </>
+      )}
       {avgCups !== undefined && (
         <>
           <div className="mt-1 text-xs text-gray-500">日均杯數</div>
@@ -100,6 +106,7 @@ function DetailModal({ detail, onClose, onHours }) {
                 <th className={th}>{detail.firstCol}</th>
                 <th className={`${th} text-right`}>總營業額</th>
                 <th className={`${th} text-right`}>總杯數</th>
+                {detail.rows.some((r) => 'avgTotal' in r) && <th className={`${th} text-right`}>日均營業額</th>}
                 {detail.rows.some((r) => 'avgCups' in r) && <th className={`${th} text-right`}>日均杯數</th>}
                 {detail.rows.some((r) => r.hour) && <th className={th} />}
               </tr>
@@ -117,6 +124,7 @@ function DetailModal({ detail, onClose, onHours }) {
                   <td className={td}>{r.label}</td>
                   <td className={`${td} text-right tabular-nums`}>{money(r.total)}</td>
                   <td className={`${td} text-right tabular-nums`}>{count(r.cups)}</td>
+                  {detail.rows.some((x) => 'avgTotal' in x) && <td className={`${td} text-right tabular-nums`}>{money(r.avgTotal)}</td>}
                   {detail.rows.some((x) => 'avgCups' in x) && <td className={`${td} text-right tabular-nums`}>{count(r.avgCups)}</td>}
                   {detail.rows.some((x) => x.hour) && (
                     <td className={`${td} text-right`}>
@@ -241,12 +249,13 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
               sub={`${QUARTER_MONTHS[q.key][0]}–${QUARTER_MONTHS[q.key][2]} 月`}
               total={q.total}
               cups={q.cups}
+              avgTotal={q.avgTotal}
               avgCups={q.avgCups}
               onClick={() =>
                 showAcross(
                   `歷年 ${q.label}`,
                   '年份',
-                  quarterAcrossYears(records, q.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgCups: r.avgCups, highlight: r.year === year }))
+                  quarterAcrossYears(records, q.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgTotal: r.avgTotal, avgCups: r.avgCups, highlight: r.year === year }))
                 )
               }
             />
@@ -267,12 +276,13 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
               label={`${year} 年 ${m.label}`}
               total={m.total}
               cups={m.cups}
+              avgTotal={m.avgTotal}
               avgCups={m.avgCups}
               onClick={() =>
                 showAcross(
                   `歷年 ${m.label}`,
                   '年份',
-                  monthAcrossYears(records, m.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgCups: r.avgCups, highlight: r.year === year }))
+                  monthAcrossYears(records, m.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgTotal: r.avgTotal, avgCups: r.avgCups, highlight: r.year === year }))
                 )
               }
             />
