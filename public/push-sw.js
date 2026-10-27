@@ -27,13 +27,37 @@ self.addEventListener('push', (event) => {
   }
   const title = data.title || 'OT Portal'
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || '',
-      icon: '/pwa-192x192.png',
-      badge: '/pwa-192x192.png',
-      tag: data.tag,
-      data: { url: data.url || '/' },
-    })
+    (async () => {
+      // Jeff, 2026-10-27: "推播提示在samsung手機常常會讀完，提示還是卡在
+      // 那，必須要去setting-app-force stop後，提示才會消失" — Samsung's
+      // One UI launcher has a known issue where its home-screen icon badge
+      // count doesn't reliably decrement when a same-`tag` push silently
+      // replaces an older notification in place; explicitly close()-ing
+      // the old one first (instead of just relying on showNotification's
+      // own tag-replace behavior) is the documented workaround, since
+      // close() is what reliably signals the OS/launcher that a
+      // notification actually went away. `renotify: true` below makes the
+      // replacement still alert (same as any other new push) instead of
+      // silently swapping in place. This only has an effect once data.tag
+      // is actually set by the sender — see migration 0147 (giving each
+      // push category — message/announcement/formula_update/
+      // roster_change — its own stable tag at the source, so a second
+      // push of the same kind replaces the first instead of stacking up
+      // separate notifications; not yet applied, needs a separate
+      // approval — see the chat).
+      if (data.tag) {
+        const existing = await self.registration.getNotifications({ tag: data.tag })
+        existing.forEach((n) => n.close())
+      }
+      await self.registration.showNotification(title, {
+        body: data.body || '',
+        icon: '/pwa-192x192.png',
+        badge: '/pwa-192x192.png',
+        tag: data.tag,
+        renotify: true,
+        data: { url: data.url || '/' },
+      })
+    })()
   )
 })
 
