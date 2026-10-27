@@ -82,17 +82,30 @@ export default function BackupGuard() {
   useEffect(() => {
     refresh()
     // The 30 s tick only has something to do once the backup time has passed and
-    // today's backup is still missing; otherwise (or while the tab is hidden) it
-    // skips the two Supabase reads. Opening BK and the change event still refresh at once.
+    // today's backup is still missing; otherwise it skips the two Supabase reads.
+    // Jeff, 2026-10-28: it used to skip entirely while the tab was hidden, so with the
+    // window minimised / covered / screen off at 22:00 the backup never ran (no request
+    // reached Supabase at all that night). It now runs hidden too (the browser only slows
+    // a hidden tab's timer to about once a minute), and it also retries while no state has
+    // been loaded yet (e.g. the 2FA step was finished after the page opened).
     const id = setInterval(() => {
-      if (document.hidden || !backupPending(stateRef.current)) return
+      if (stateRef.current && !backupPending(stateRef.current)) return
       refresh()
     }, 30000)
     const onChange = () => refresh()
+    // Coming back to the tab / window (or waking the computer) re-checks at once.
+    const onVisible = () => {
+      if (document.hidden) return
+      if (!stateRef.current || backupPending(stateRef.current)) refresh()
+    }
     window.addEventListener(BACKUP_CHANGED_EVENT, onChange)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
     return () => {
       clearInterval(id)
       window.removeEventListener(BACKUP_CHANGED_EVENT, onChange)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
     }
   }, [refresh])
 
