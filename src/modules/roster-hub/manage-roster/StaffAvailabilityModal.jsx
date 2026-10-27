@@ -481,7 +481,7 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
                   {windows.map((w, i) => (
                     <div
                       key={i}
-                      className="absolute left-0 right-0 flex items-center justify-center overflow-visible rounded text-[9px] font-semibold leading-none text-white"
+                      className="absolute left-0 right-0 flex items-center justify-center overflow-visible rounded text-[11px] font-semibold leading-none text-white"
                       style={{
                         top: `${((w.start - windowStart) / span) * 100}%`,
                         height: `${((w.end - w.start) / span) * 100}%`,
