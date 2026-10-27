@@ -169,10 +169,23 @@ export function leaveWindowOnDate(leave, dateStr) {
   if (!leave.has_time) return { start: 0, end: 1440 }
   const clippedStart = leaveStart < dayStart ? dayStart : leaveStart
   const clippedEnd = leaveEnd > nextDayStart ? nextDayStart : leaveEnd
-  return {
-    start: Math.max(0, Math.round((clippedStart - dayStart) / 60000)),
-    end: Math.min(1440, Math.round((clippedEnd - dayStart) / 60000)),
-  }
+  const start = Math.max(0, Math.round((clippedStart - dayStart) / 60000))
+  let end = Math.min(1440, Math.round((clippedEnd - dayStart) / 60000))
+  // Jeff, 2026-10-28 (screenshot): a whole-day leave application
+  // (LeaveDateRangeFields.jsx's "Specific time" left unchecked, the
+  // default for most leave) stores its end as a literal 23:59 — that
+  // form's own "end of day" shorthand, since checking "Specific time"
+  // only ever offers half-hour marks (HALF_HOUR_TIMES: :00/:30) and could
+  // never itself produce a :59 end. So an end landing on minute 1439 here
+  // always means "through the end of the day", same as this file treats
+  // 1440 everywhere else — left at 1439, it leaves a 1-minute sliver
+  // (11:59 PM – 12:00 AM) that still reads as technically available once
+  // subtracted from a normal all-day-available day, which is exactly the
+  // stray "11:59 PM – 12:00 AM" Jeff found on a staff member's full-day
+  // leave in Manage Roster's Staff Availability (both By Person and By
+  // Date tabs, since both go through this same function).
+  if (end === 1439) end = 1440
+  return { start, end }
 }
 
 // Every (day, available window, leave) triple that overlaps, across a whole
