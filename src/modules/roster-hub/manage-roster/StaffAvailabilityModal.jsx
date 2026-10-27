@@ -460,6 +460,15 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
                 style={{ top: `${((t - windowStart) / span) * 100}%` }}
               />
             ))}
+            {/* Jeff, 2026-10-27: "手機版by date可以做到名字在色條裡但也直
+                的寫嗎? 因為現在放在最下面其實看不是很清楚" — the name is
+                now written vertically inside each person's own segment
+                (writing-mode, so it's the whole word turned sideways rather
+                than one letter per line), same place desktop shows it, so
+                there's no separate legend row to lose track of which color
+                is whose. overflow stays visible — a short segment still
+                shows the full name, it just extends past the segment the
+                same way a narrow desktop bar does. */}
             <div className="absolute inset-0 flex gap-1 p-1">
               {people.map(({ profile, windows, desc, color }) => (
                 <button
@@ -472,27 +481,23 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
                   {windows.map((w, i) => (
                     <div
                       key={i}
-                      className="absolute left-0 right-0 rounded"
+                      className="absolute left-0 right-0 flex items-center justify-center overflow-visible rounded text-[9px] font-semibold leading-none text-white"
                       style={{
                         top: `${((w.start - windowStart) / span) * 100}%`,
                         height: `${((w.end - w.start) / span) * 100}%`,
                         minHeight: '4px',
                         backgroundColor: color,
                       }}
-                    />
+                    >
+                      <span className="whitespace-nowrap" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>
+                        {rosterDisplayName(profile)}
+                      </span>
+                    </div>
                   ))}
                 </button>
               ))}
             </div>
           </div>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {people.map(({ profile, color }) => (
-            <span key={profile.id} className="flex items-center gap-1 text-[11px] text-gray-600">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-              {rosterDisplayName(profile)}
-            </span>
-          ))}
         </div>
       </div>
     </div>
