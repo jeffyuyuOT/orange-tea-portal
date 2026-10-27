@@ -28,7 +28,25 @@ import { applyUpdate } from './swUpdate'
 // completes, same as before.
 export async function checkForAppUpdate() {
   if (!('serviceWorker' in navigator)) return { supported: false, updateFound: false }
-  const reg = await navigator.serviceWorker.getRegistration()
+  let reg = await navigator.serviceWorker.getRegistration()
+  // Jeff, 2026-10-27: "現在有更新的話手機去my information - check for
+  // update都會找不到，要登出再登入才找的到" — getRegistration() with no
+  // scope argument re-derives the registration from the CURRENT page's URL
+  // every time it's called, and on some mobile browsers (seen on Samsung
+  // devices) that lookup can come back empty on a long-lived page even
+  // though a service worker is genuinely controlling it — logging out and
+  // back in forces a real navigation, which resets whatever the browser was
+  // getting confused by and makes the same lookup succeed again.
+  // `serviceWorker.ready` resolves a different way (from the registration
+  // actually controlling this page, not re-derived from the URL each time),
+  // so it's a more reliable fallback here — capped with a timeout so a
+  // genuinely unsupported/uncontrolled page can't hang this button forever.
+  if (!reg) {
+    reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]).catch(() => null)
+  }
   if (!reg) return { supported: true, updateFound: false }
   await reg.update()
   if (reg.installing) {
