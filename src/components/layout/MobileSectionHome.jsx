@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext'
 import { SECTIONS, canAccessPage } from '../../lib/permissions'
@@ -6,6 +7,7 @@ import { useAuditPending } from '../../lib/useAuditPending'
 import { badgeForKeys } from '../../lib/navBadges'
 import { SECTION_STYLE } from '../../lib/sectionStyle'
 import NavBadge from '../ui/NavBadge'
+import NavTreeModal from './NavTreeModal'
 
 // Jeff, 2026-10-19 (mobile nav redesign, point 1): mobile's new main-nav
 // screen — one colored button per accessible section, reached via the
@@ -51,6 +53,10 @@ export default function MobileSectionHome() {
   // navBadges.jsx for the shared lookup every nav surface uses.
   const auditPending = useAuditPending(profile, effectivePages)
   const signals = { rosterUpdates, hasFormulaUpdates, hasBulletinUpdates, unreadMessageCount, hasTimeDiscrepancies, auditPending }
+  // Jeff, 2026-10-27: "手機版分頁按鈕最下方新增一個樹狀圖的圖案" — one more
+  // tile at the END of this grid (see the render below), opening
+  // NavTreeModal instead of navigating anywhere.
+  const [showTree, setShowTree] = useState(false)
 
   const sections = orderedSectionEntries(sidebarOrder)
     .map(([sectionKey]) => {
@@ -92,34 +98,56 @@ export default function MobileSectionHome() {
   if (sections.length <= 1) return <Navigate to="/" replace />
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-      {sections.map((s) => (
-        <Link
-          key={s.key}
-          to={s.to}
-          className="relative flex min-h-[92px] flex-col rounded-2xl p-4 text-white shadow-sm"
-          style={{ background: s.style?.bg ?? 'linear-gradient(135deg,#9ca3af,#6b7280)' }}
+    <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        {sections.map((s) => (
+          <Link
+            key={s.key}
+            to={s.to}
+            className="relative flex min-h-[92px] flex-col rounded-2xl p-4 text-white shadow-sm"
+            style={{ background: s.style?.bg ?? 'linear-gradient(135deg,#9ca3af,#6b7280)' }}
+          >
+            <span className="text-xl opacity-90" aria-hidden>
+              {s.style?.icon ?? '📁'}
+            </span>
+            {/* Jeff, 2026-10-19: the icon used to be absolutely positioned
+                over the label ("operation and training的圖示壓到字了") — fine
+                for a one-line label, but "Operations & Training" wraps to two
+                lines and the bottom-anchored text rose right into the icon's
+                fixed spot. Plain flow + mt-auto instead: the icon takes its
+                own row, the label block is pushed to the bottom of whatever
+                room is left, so a longer/wrapped label just pushes the icon
+                up with it rather than overlapping it. */}
+            <div className="mt-auto">
+              <div className="text-sm font-semibold leading-snug">{s.label}</div>
+              <div className="text-[11px] opacity-85">
+                {s.count} page{s.count > 1 ? 's' : ''}
+              </div>
+            </div>
+            <NavBadge badge={s.badge} corner />
+          </Link>
+        ))}
+        {/* Jeff, 2026-10-27: "手機版分頁按鈕最下方新增一個樹狀圖的圖案，按下
+            去會彈出視窗顯示樹狀圖有哪些主分頁，主分頁下有哪些子分頁" — last
+            tile in this grid (so it reads as "at the bottom" of the section
+            buttons), neutral gray since it isn't a real section — opens
+            NavTreeModal instead of navigating. */}
+        <button
+          type="button"
+          onClick={() => setShowTree(true)}
+          className="relative flex min-h-[92px] flex-col rounded-2xl p-4 text-left text-white shadow-sm"
+          style={{ background: 'linear-gradient(135deg,#9ca3af,#6b7280)' }}
         >
           <span className="text-xl opacity-90" aria-hidden>
-            {s.style?.icon ?? '📁'}
+            🌳
           </span>
-          {/* Jeff, 2026-10-19: the icon used to be absolutely positioned
-              over the label ("operation and training的圖示壓到字了") — fine
-              for a one-line label, but "Operations & Training" wraps to two
-              lines and the bottom-anchored text rose right into the icon's
-              fixed spot. Plain flow + mt-auto instead: the icon takes its
-              own row, the label block is pushed to the bottom of whatever
-              room is left, so a longer/wrapped label just pushes the icon
-              up with it rather than overlapping it. */}
           <div className="mt-auto">
-            <div className="text-sm font-semibold leading-snug">{s.label}</div>
-            <div className="text-[11px] opacity-85">
-              {s.count} page{s.count > 1 ? 's' : ''}
-            </div>
+            <div className="text-sm font-semibold leading-snug">Navigation Map</div>
+            <div className="text-[11px] opacity-85">View all pages</div>
           </div>
-          <NavBadge badge={s.badge} corner />
-        </Link>
-      ))}
-    </div>
+        </button>
+      </div>
+      <NavTreeModal open={showTree} onClose={() => setShowTree(false)} />
+    </>
   )
 }
