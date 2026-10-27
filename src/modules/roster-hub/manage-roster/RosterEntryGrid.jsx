@@ -49,6 +49,13 @@ export default function RosterEntryGrid({
   // ManageRosterPage), checked independently of and ahead of the
   // availability check below.
   leavesByProfile,
+  // Jeff, 2026-10-27: lifted up to ManageRosterPage (was a local useState
+  // here) so StaffAvailabilityModal's "By Date" tab can default-expand to
+  // whichever day these mobile tabs currently show. Behaves exactly the
+  // same from this component's own point of view — just reading/writing
+  // through props instead of its own state.
+  mobileDayIdx,
+  setMobileDayIdx,
 }) {
   // "+ Add row" placeholders for a casual/one-off name not in Staff
   // Information yet. Keyed by a stable id (not by the typed name) so
@@ -278,7 +285,8 @@ export default function RosterEntryGrid({
   // far wider than a phone screen, so under the `sm` breakpoint this swaps
   // to one day at a time (day tabs above a vertical list of staff cards)
   // instead of forcing a wide, awkward horizontal scroll for every edit.
-  const [mobileDayIdx, setMobileDayIdx] = useState(0)
+  // (mobileDayIdx/setMobileDayIdx are now props — see this component's
+  // signature — but otherwise used exactly the same as before.)
   const mobileDate = weekDates[Math.min(mobileDayIdx, weekDates.length - 1)]
 
   return (

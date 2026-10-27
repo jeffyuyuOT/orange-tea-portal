@@ -101,6 +101,13 @@ export default function ManageRosterPage() {
   // dropdown rather than inside it since it's a lookup, not a
   // destructive/file operation the way the other three menu items are.
   const [availabilityModalOpen, setAvailabilityModalOpen] = useState(false)
+  // Jeff, 2026-10-27: lifted out of RosterEntryGrid (which owned this
+  // itself until now) so StaffAvailabilityModal's new "By Date" tab can
+  // default-expand to whichever day is currently showing in the mobile
+  // day-tabs below ("手機板的點by date的話會預設展開顯示正在選取排班表的
+  // 那一天") — RosterEntryGrid still reads/writes it exactly the same way,
+  // just via props now instead of its own useState.
+  const [mobileDayIdx, setMobileDayIdx] = useState(0)
   // Jeff, 2026-10-02: "上面的那一段說明改到instruction小圖示放在submit那一
   // 行的最右邊，點擊圖示在跳出視窗顯示這一段說明" — the "Fill in the grid
   // below..." paragraph that used to sit permanently under the page title
@@ -1033,6 +1040,8 @@ export default function ManageRosterPage() {
         onHideStaff={persistHideStaff}
         availabilityByProfile={availabilityByProfile}
         leavesByProfile={leavesByProfile}
+        mobileDayIdx={mobileDayIdx}
+        setMobileDayIdx={setMobileDayIdx}
       />
 
       <label className="mt-4 block">
@@ -1056,6 +1065,7 @@ export default function ManageRosterPage() {
           onClose={() => setAvailabilityModalOpen(false)}
           staff={staff}
           weekStart={weekStart}
+          mobileDayIdx={mobileDayIdx}
         />
       )}
 

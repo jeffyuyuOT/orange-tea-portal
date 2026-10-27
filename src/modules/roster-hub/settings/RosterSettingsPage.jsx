@@ -6,69 +6,18 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import LeaveLimitsTab from './LeaveLimitsTab'
 import RosterStaffOrderTab from './RosterStaffOrderTab'
 import MessageReminderTab from './MessageReminderTab'
+// Jeff, 2026-10-27: these five used to live only here — pulled out into
+// their own file (lib/timelineBar.js) so StaffAvailabilityModal's new "By
+// Date" tab can reuse the exact same timeline mechanics ("其操作方法跟
+// labour allocation看時間色條的邏輯一樣") instead of a second, driftable
+// copy. Nothing about their behavior changed in this move.
+import { timeToMinutes, formatTime, formatTickLabel, buildTicks, pickColor } from '../../../lib/timelineBar'
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-// One color per distinct time-slot label, so e.g. every "weekday morning"
-// bar reads the same color across every day of the week at a glance. Picked
-// by hashing the label text rather than by order of appearance, so a
-// label's color stays the same across reloads regardless of what order
-// rules come back in. Two DIFFERENT labels can still hash to the same
-// color though — pickColor() below nudges one of them to the next palette
-// color whenever that would land two different labels right next to each
-// other on the same day's bar, so touching segments never blend together.
-const BAR_COLORS = ['#f97316', '#3b82f6', '#22c55e', '#a855f7', '#ef4444', '#0891b2', '#ca8a04', '#db2777']
-function colorForLabel(label) {
-  let hash = 0
-  for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) >>> 0
-  return BAR_COLORS[hash % BAR_COLORS.length]
-}
-function pickColor(label, prevColor) {
-  const base = colorForLabel(label)
-  if (base !== prevColor) return base
-  const idx = BAR_COLORS.indexOf(base)
-  return BAR_COLORS[(idx + 1) % BAR_COLORS.length]
-}
 
 function parseMin(raw) {
   const nums = raw.split(',').map((n) => parseInt(n.trim(), 10)).filter((n) => !isNaN(n))
   return nums.length ? Math.min(...nums) : 0
-}
-
-// "16:00:00" / "16:00" -> 960 (minutes since midnight).
-function timeToMinutes(raw) {
-  const [h, m] = (raw || '0:0').split(':').map(Number)
-  return (h || 0) * 60 + (m || 0)
-}
-
-function formatTime(raw) {
-  const mins = timeToMinutes(raw)
-  const h24 = Math.floor(mins / 60)
-  const m = mins % 60
-  const ampm = h24 >= 12 ? 'PM' : 'AM'
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
-}
-
-// Short axis-tick label, e.g. 630 -> "10:30am", 1080 -> "6pm".
-function formatTickLabel(mins) {
-  const h24 = Math.floor(mins / 60) % 24
-  const m = mins % 60
-  const ampm = h24 >= 12 ? 'pm' : 'am'
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
-  return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2, '0')}${ampm}`
-}
-
-// Tick marks across [open, close] — always includes both ends, plus evenly
-// spaced hour marks in between (coarser for a long window, finer for a
-// short one) so the axis stays readable whether a store is open 4 hours or
-// 20.
-function buildTicks(open, close) {
-  const span = close - open
-  const step = span > 12 * 60 ? 180 : span > 6 * 60 ? 120 : span > 2 * 60 ? 60 : 30
-  const ticks = new Set([open, close])
-  for (let t = Math.ceil(open / step) * step; t < close; t += step) ticks.add(t)
-  return Array.from(ticks).sort((a, b) => a - b)
 }
 
 export default function RosterSettingsPage() {

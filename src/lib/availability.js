@@ -241,11 +241,23 @@ function formatWindows(avail) {
 // one place that reconciles it for roster purposes — My Availability's own
 // page (describeDay, findLeaveConflicts) is left showing the untouched
 // pattern, on purpose.
+// Jeff, 2026-10-27: pulled the leave-reconciled WINDOW LIST (not just the
+// formatted text describeDayWithLeave below produces) out into its own
+// export — StaffAvailabilityModal's new "By Date" color-bar tab needs the
+// actual start/end minutes to draw each person's bar segments, the same
+// leave-aware reconciliation describeDayWithLeave already does for the "By
+// Person" text view (leave always wins — see that function's own comment).
+export function availableWindowsWithLeave(dayRow, windows, leaveWindowsForDay) {
+  const avail = computeAvailableWindows(dayRow, windows)
+  const touchedByLeave = (leaveWindowsForDay ?? []).some((lw) => avail.some((aw) => windowsOverlap(aw, lw)))
+  return touchedByLeave ? subtractWindows(avail, leaveWindowsForDay) : avail
+}
+
 export function describeDayWithLeave(dayRow, windows, leaveWindowsForDay) {
   const avail = computeAvailableWindows(dayRow, windows)
   const touchedByLeave = (leaveWindowsForDay ?? []).some((lw) => avail.some((aw) => windowsOverlap(aw, lw)))
   if (!touchedByLeave) return describeDay(dayRow, windows)
-  return formatWindows(subtractWindows(avail, leaveWindowsForDay))
+  return formatWindows(availableWindowsWithLeave(dayRow, windows, leaveWindowsForDay))
 }
 
 // Manage Roster's per-shift warning ("排時間的時候如果跟該員的available
