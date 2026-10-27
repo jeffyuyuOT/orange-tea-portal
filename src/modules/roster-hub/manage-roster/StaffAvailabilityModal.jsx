@@ -408,9 +408,14 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
                 />
               ))}
               {windows.map((w, i) => (
+                // Jeff, 2026-10-27: "色條太窄時名字還是完整顯示，只是超過的
+                // 部分跑到色條外" — no overflow-hidden/truncate here on
+                // purpose: a narrow segment still shows the whole name, it
+                // just spills past the colored box's own edge instead of
+                // being clipped with an ellipsis.
                 <div
                   key={i}
-                  className="absolute top-0.5 bottom-0.5 flex items-center overflow-hidden rounded px-1.5 text-[11px] font-semibold text-white"
+                  className="absolute top-0.5 bottom-0.5 flex items-center whitespace-nowrap rounded px-1.5 text-[11px] font-semibold text-white"
                   style={{
                     left: `${((w.start - windowStart) / span) * 100}%`,
                     width: `${((w.end - w.start) / span) * 100}%`,
@@ -420,7 +425,7 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
                   onMouseEnter={() => setHoverId(profile.id)}
                   onMouseLeave={() => setHoverId((cur) => (cur === profile.id ? null : cur))}
                 >
-                  <span className="truncate">{rosterDisplayName(profile)}</span>
+                  {rosterDisplayName(profile)}
                 </div>
               ))}
               {hoverId === profile.id && (
