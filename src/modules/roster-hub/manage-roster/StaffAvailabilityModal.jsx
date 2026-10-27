@@ -62,7 +62,9 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
   // that's what someone wants.
   const [expandedIds, setExpandedIds] = useState(new Set())
 
-  const [tab, setTab] = useState('person')
+  // Jeff, 2026-10-27: "預設在by date" — By Date is now the modal's default
+  // tab (it's also listed first in the tab row — see the reorder below).
+  const [tab, setTab] = useState('date')
   // Store's configured open/close hours, same shape RosterSettingsPage.jsx
   // loads for its own Labour allocation timeline.
   const [storeHours, setStoreHours] = useState({ open: '', close: '' })
@@ -145,7 +147,7 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
   // point is just "start where the grid was", not tracking it afterwards.
   useEffect(() => {
     if (!open) return
-    setTab('person')
+    setTab('date')
     setMobileDetail(null)
     let initial = new Set()
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches) {
@@ -375,58 +377,57 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
 
   return (
     <div className="mt-2">
-      {/* Desktop: horizontal */}
+      {/* Desktop: horizontal. Jeff, 2026-10-27: "名字顯示在色條上，不要放
+          在最前面" — the person's name is drawn inside their own color
+          segment instead of a separate leading label column, so there's no
+          "放在最前面" name column at all now. */}
       <div className="hidden sm:block">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="w-28 shrink-0" />
-          <div className="relative h-3 flex-1 text-[10px] text-gray-400">
-            {ticks.map((t, i) => {
-              const isFirst = i === 0
-              const isLast = i === ticks.length - 1
-              return (
-                <span
-                  key={t}
-                  className={`absolute ${isFirst ? 'left-0' : isLast ? 'right-0' : '-translate-x-1/2'}`}
-                  style={isFirst || isLast ? undefined : { left: `${((t - windowStart) / span) * 100}%` }}
-                >
-                  {formatTickLabel(t)}
-                </span>
-              )
-            })}
-          </div>
+        <div className="relative mb-1 h-3 text-[10px] text-gray-400">
+          {ticks.map((t, i) => {
+            const isFirst = i === 0
+            const isLast = i === ticks.length - 1
+            return (
+              <span
+                key={t}
+                className={`absolute ${isFirst ? 'left-0' : isLast ? 'right-0' : '-translate-x-1/2'}`}
+                style={isFirst || isLast ? undefined : { left: `${((t - windowStart) / span) * 100}%` }}
+              >
+                {formatTickLabel(t)}
+              </span>
+            )
+          })}
         </div>
         <div className="space-y-1">
           {people.map(({ profile, windows, desc, color }) => (
-            <div key={profile.id} className="flex items-center gap-2">
-              <span className="w-28 shrink-0 truncate text-xs font-medium text-gray-600">{rosterDisplayName(profile)}</span>
-              <div className="relative h-7 flex-1 rounded-md border border-gray-200 bg-gray-50">
-                {ticks.slice(1, -1).map((t) => (
-                  <div
-                    key={t}
-                    className="absolute top-0 bottom-0 border-l border-gray-200"
-                    style={{ left: `${((t - windowStart) / span) * 100}%` }}
-                  />
-                ))}
-                {windows.map((w, i) => (
-                  <div
-                    key={i}
-                    className="absolute top-0.5 bottom-0.5 rounded"
-                    style={{
-                      left: `${((w.start - windowStart) / span) * 100}%`,
-                      width: `${((w.end - w.start) / span) * 100}%`,
-                      minWidth: '6px',
-                      backgroundColor: color,
-                    }}
-                    onMouseEnter={() => setHoverId(profile.id)}
-                    onMouseLeave={() => setHoverId((cur) => (cur === profile.id ? null : cur))}
-                  />
-                ))}
-                {hoverId === profile.id && (
-                  <div className="absolute -top-8 left-0 z-10 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] text-white shadow">
-                    {desc}
-                  </div>
-                )}
-              </div>
+            <div key={profile.id} className="relative h-7 rounded-md border border-gray-200 bg-gray-50">
+              {ticks.slice(1, -1).map((t) => (
+                <div
+                  key={t}
+                  className="absolute top-0 bottom-0 border-l border-gray-200"
+                  style={{ left: `${((t - windowStart) / span) * 100}%` }}
+                />
+              ))}
+              {windows.map((w, i) => (
+                <div
+                  key={i}
+                  className="absolute top-0.5 bottom-0.5 flex items-center overflow-hidden rounded px-1.5 text-[11px] font-semibold text-white"
+                  style={{
+                    left: `${((w.start - windowStart) / span) * 100}%`,
+                    width: `${((w.end - w.start) / span) * 100}%`,
+                    minWidth: '6px',
+                    backgroundColor: color,
+                  }}
+                  onMouseEnter={() => setHoverId(profile.id)}
+                  onMouseLeave={() => setHoverId((cur) => (cur === profile.id ? null : cur))}
+                >
+                  <span className="truncate">{rosterDisplayName(profile)}</span>
+                </div>
+              ))}
+              {hoverId === profile.id && (
+                <div className="absolute -top-8 left-0 z-10 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] text-white shadow">
+                  {desc}
+                </div>
+              )}
             </div>
           ))}
         </div>
