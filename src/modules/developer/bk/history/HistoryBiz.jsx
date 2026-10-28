@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import Modal from '../../../../components/ui/Modal'
 import LoadingSpinner from '../../../../components/ui/LoadingSpinner'
 import { brisbaneToday, brisbaneTodayStr, fmtMoney, monthDates, round2, weekdayOf } from '../bkUtils'
-import { loadPublicHolidays, loadSalesAll, loadSalesNotesAll, loadSfPostAll } from '../bkSalesData'
+import { loadEarliestYear, loadPublicHolidays, loadSalesNotesAll, loadSalesRange, loadSfPostRange } from '../bkSalesData'
 import { loadHourSalesRange, loadHourSettings } from '../bkHourData'
 import { averageByHour, hourlyByDay, hoursFor, settingsMap } from '../bkHourly'
 import HourBreakdown from '../hours/HourBreakdown'
@@ -22,7 +22,6 @@ import {
   quarterAcrossYears,
   matchesPeriod,
   quartersOfYear,
-  recordYears,
   weekdayIndex,
   weekdayAcrossYears,
   weekdayStats,
@@ -98,7 +97,8 @@ const td = 'border-b border-gray-100 px-3 py-2 text-sm'
 function DetailModal({ detail, onClose, onHours }) {
   return (
     <Modal open={!!detail} onClose={onClose} title={detail?.title ?? ''} footer={<Button onClick={onClose}>關閉</Button>}>
-      {detail && (
+      {detail?.loading && <LoadingSpinner />}
+      {detail && !detail.loading && (
         <div className="overflow-hidden rounded-lg border border-brand-100">
           <table className="w-full border-collapse">
             <thead>
@@ -155,7 +155,10 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   const today = brisbaneToday()
   const [storeId, setStoreId] = useState(null) // null = 全部分店
   const [kind, setKind] = useState('quarter')
-  const [data, setData] = useState(null) // { sales, posts, notes, holidays }
+  // Loaded in batches (Jeff, 2026-10-29): only the years being looked at are downloaded.
+  const [data, setData] = useState(null) // { sales, posts, loaded: Set<year> }
+  const [extra, setExtra] = useState(null) // { notes, holidays } — only for the Event view
+  const [firstYear, setFirstYear] = useState(null)
   const [error, setError] = useState('')
   const [detail, setDetail] = useState(null)
   const [year, setYear] = useState(today.year)
@@ -165,35 +168,103 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
   const [hourView, setHourView] = useState(null)
 
   const storeKey = salesStores.map((s) => `${s.id}:${s.sf_store_id ?? ''}`).join(',')
-  const reload = useCallback(async () => {
-    try {
+  const genRef = useRef(0)
+  const inflight = useRef(new Set())
+  const extraStarted = useRef(false)
+
+  // Downloads whole years that aren't here yet and merges them in.
+  const loadYears = useCallback(
+    async (list) => {
+      const todo = list.filter((y) => !inflight.current.has(y))
+      if (todo.length === 0) return
+      todo.forEach((y) => inflight.current.add(y))
+      const gen = genRef.current
       const ids = salesStores.map((s) => s.id)
       const sfIds = salesStores.map((s) => s.sf_store_id).filter(Boolean)
-      const [sales, posts, notes, holidays] = await Promise.all([
-        loadSalesAll(ids),
-        loadSfPostAll(sfIds),
-        loadSalesNotesAll(ids),
-        loadPublicHolidays().catch(() => ({})), // the payroll list is a bonus; never block the page on it
-      ])
-      setData({ sales, posts, notes, holidays })
-      setError('')
-    } catch (e) {
-      setError(e.message)
-    }
-  }, [storeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+      try {
+        const parts = await Promise.all(
+          todo.map(async (y) => {
+            const [sales, posts] = await Promise.all([
+              loadSalesRange(ids, `${y}-01-01`, `${y}-12-31`),
+              loadSfPostRange(sfIds, `${y}-01-01`, `${y}-12-31`),
+            ])
+            return { y, sales, posts }
+          })
+        )
+        if (gen !== genRef.current) return
+        setData((d) => {
+          const base = d ?? { sales: [], posts: [], loaded: new Set() }
+          return {
+            sales: [...base.sales, ...parts.flatMap((p) => p.sales)],
+            posts: [...base.posts, ...parts.flatMap((p) => p.posts)],
+            loaded: new Set([...base.loaded, ...parts.map((p) => p.y)]),
+          }
+        })
+        setError('')
+      } catch (e) {
+        todo.forEach((y) => inflight.current.delete(y))
+        if (gen === genRef.current) setError(e.message)
+      }
+    },
+    [storeKey] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
+  // Fresh start whenever the page becomes active (or the stores change): only the earliest year
+  // (a 1-row query) is fetched here; the year data comes from the effect below.
+  useEffect(() => {
+    if (!active) return
+    genRef.current += 1
+    inflight.current = new Set()
+    extraStarted.current = false
+    setData({ sales: [], posts: [], loaded: new Set() })
+    setExtra(null)
+    const gen = genRef.current
+    const ids = salesStores.map((s) => s.id)
+    const sfIds = salesStores.map((s) => s.sf_store_id).filter(Boolean)
+    loadEarliestYear(ids, sfIds)
+      .then((y) => gen === genRef.current && setFirstYear(y ?? today.year))
+      .catch((e) => gen === genRef.current && setError(e.message))
+  }, [active, storeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const allYears = useMemo(() => {
+    const list = []
+    for (let y = today.year; y >= Math.min(firstYear ?? today.year, today.year); y--) list.push(y)
+    return list
+  }, [firstYear, today.year])
+  const needAll = kind === 'week' || kind === 'event'
+  const loadedAll = !!data && firstYear !== null && allYears.every((y) => data.loaded.has(y))
+  const needYears = needAll || detail ? allYears : [kind === 'day' ? dayYM.year : year]
+  const needKey = needYears.join(',')
 
   useEffect(() => {
-    if (active) reload()
-  }, [active, reload])
+    if (active && data && firstYear !== null) loadYears(needYears)
+  }, [active, needKey, firstYear, data === null, loadYears]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Notes + public holidays are only for the Event view.
+  useEffect(() => {
+    if (!active || kind !== 'event' || extraStarted.current) return
+    extraStarted.current = true
+    const gen = genRef.current
+    const ids = salesStores.map((s) => s.id)
+    Promise.all([
+      loadSalesNotesAll(ids),
+      loadPublicHolidays().catch(() => ({})), // the payroll list is a bonus; never block the page on it
+    ])
+      .then(([notes, holidays]) => gen === genRef.current && setExtra({ notes, holidays }))
+      .catch((e) => {
+        extraStarted.current = false
+        if (gen === genRef.current) setError(e.message)
+      })
+  }, [active, kind, storeKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const storeDays = useMemo(() => (data ? buildStoreDays(salesStores, data.sales, data.posts) : {}), [data, salesStores])
   const scopeIds = useMemo(() => (storeId ? [storeId] : salesStores.map((s) => s.id)), [storeId, salesStores])
   const records = useMemo(() => aggregateDays(storeDays, scopeIds), [storeDays, scopeIds])
-  const years = useMemo(() => recordYears(records), [records])
+  const years = allYears
   const events = useMemo(
     // Jeff, 2026-10-17: dates that haven't happened yet (e.g. next year's holidays from the payroll list) have no figures — left out.
-    () => (data ? withSales(buildEvents(data.notes, data.holidays, scopeIds), records).filter((e) => e.date <= brisbaneTodayStr()) : []),
-    [data, scopeIds, records]
+    () => (extra ? withSales(buildEvents(extra.notes, extra.holidays, scopeIds), records).filter((e) => e.date <= brisbaneTodayStr()) : []),
+    [extra, scopeIds, records]
   )
 
   if (salesStores.length === 0) {
@@ -202,8 +273,10 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
 
   const wFilter = { quarter: wQuarter ? Number(wQuarter) : null, month: wMonth ? Number(wMonth) : null }
 
-  function showAcross(title, firstCol, rows) {
-    setDetail({ title, firstCol, rows })
+  // `build(records, events)` runs against the freshest data, so the popup can open at once and
+  // fill in when the other years finish downloading.
+  function showAcross(title, firstCol, build) {
+    setDetail({ title, firstCol, build })
   }
 
   // 小時統計 button of a detail row. spec = { type:'day', date } | { type:'weekday', index, year, filter }.
@@ -233,8 +306,13 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
     }
   }
 
+  const shownDetail = detail
+    ? { title: detail.title, firstCol: detail.firstCol, loading: !loadedAll, rows: loadedAll ? detail.build(records, events) : [] }
+    : null
+
   let body = null
-  if (!data) body = <LoadingSpinner />
+  const yearsReady = !!data && firstYear !== null && (needAll ? loadedAll : data.loaded.has(kind === 'day' ? dayYM.year : year))
+  if (!yearsReady || (kind === 'event' && !extra)) body = <LoadingSpinner />
   else if (kind === 'quarter') {
     body = (
       <>
@@ -255,7 +333,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
                 showAcross(
                   `歷年 ${q.label}`,
                   '年份',
-                  quarterAcrossYears(records, q.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgTotal: r.avgTotal, avgCups: r.avgCups, highlight: r.year === year }))
+                  (records, events) =>
+quarterAcrossYears(records, q.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgTotal: r.avgTotal, avgCups: r.avgCups, highlight: r.year === year }))
                 )
               }
             />
@@ -282,7 +361,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
                 showAcross(
                   `歷年 ${m.label}`,
                   '年份',
-                  monthAcrossYears(records, m.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgTotal: r.avgTotal, avgCups: r.avgCups, highlight: r.year === year }))
+                  (records, events) =>
+monthAcrossYears(records, m.key).map((r) => ({ key: r.year, label: `${r.year} 年`, total: r.total, cups: r.cups, avgTotal: r.avgTotal, avgCups: r.avgCups, highlight: r.year === year }))
                 )
               }
             />
@@ -315,7 +395,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
                       showAcross(
                         `歷年 ${Number(date.slice(5, 7))} 月 ${Number(date.slice(8))} 日`,
                         '日期',
-                        dayAcrossYears(records, date.slice(5)).map((x) => ({
+                        (records, events) =>
+dayAcrossYears(records, date.slice(5)).map((x) => ({
                           key: x.date,
                           label: `${x.date} ${weekdayOf(x.date)}`,
                           total: x.total,
@@ -372,7 +453,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
                     showAcross(
                       e.label,
                       '日期',
-                      eventsLike(events, e.label).map((x) => ({
+                      (records, events) =>
+eventsLike(events, e.label).map((x) => ({
                         key: `${x.date}|${x.kind}`,
                         label: `${x.date} ${weekdayOf(x.date)}`,
                         total: x.total,
@@ -435,7 +517,8 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
                 showAcross(
                   `歷年 ${s.label} 平均（${periodLabel}）`,
                   '年份',
-                  weekdayAcrossYears(records, s.key, wFilter).map((r) => ({
+                  (records, events) =>
+weekdayAcrossYears(records, s.key, wFilter).map((r) => ({
                     key: r.year,
                     label: `${r.year} 年`,
                     total: r.total,
@@ -457,7 +540,7 @@ export default function HistoryBiz({ salesStores, stores = [], active }) {
       <StoreTabs stores={salesStores} storeId={storeId} onChange={setStoreId} allowAll />
       <SubTabs tabs={KINDS} value={kind} onChange={setKind} />
       {body}
-      <DetailModal detail={detail} onClose={() => setDetail(null)} onHours={openHours} />
+      <DetailModal detail={shownDetail} onClose={() => setDetail(null)} onHours={openHours} />
       <HourBreakdown view={hourView} onClose={() => setHourView(null)} />
     </div>
   )

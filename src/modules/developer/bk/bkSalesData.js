@@ -136,6 +136,24 @@ export async function loadSfPostRange(sfStoreIds, from, to) {
   return rows.map((r) => ({ day: r.day, o_post: r.o_post, sf_store_id: r.bk_sf_months.store_id }))
 }
 
+// Year of the oldest stored day (sales or SF O.POST) — one tiny query each, so 歷史紀錄
+// can list the available years without downloading every day. null = no data.
+export async function loadEarliestYear(storeIds, sfStoreIds) {
+  const years = []
+  if (storeIds.length > 0) {
+    const rows = unwrap(await supabase.from('bk_sales_days').select('day').in('store_id', storeIds).order('day').limit(1)) ?? []
+    if (rows[0]) years.push(Number(rows[0].day.slice(0, 4)))
+  }
+  if (sfStoreIds.length > 0) {
+    const rows =
+      unwrap(
+        await supabase.from('bk_sf_days').select('day, bk_sf_months!inner(store_id)').in('bk_sf_months.store_id', sfStoreIds).order('day').limit(1)
+      ) ?? []
+    if (rows[0]) years.push(Number(rows[0].day.slice(0, 4)))
+  }
+  return years.length ? Math.min(...years) : null
+}
+
 // Every stored day of the given stores (all years) — 歷史紀錄 › 營業.
 export async function loadSalesAll(storeIds) {
   if (storeIds.length === 0) return []
