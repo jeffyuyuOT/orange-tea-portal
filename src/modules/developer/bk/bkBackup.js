@@ -249,6 +249,9 @@ async function writeLog(day, status, fileName, errorText) {
 
 // Days (oldest first) that were due, are not 'ok' and were not acknowledged.
 // Failed ones carry their error. Looks back at most 60 days.
+// Jeff, 2026-10-28: only days AFTER the latest successful backup count — once a newer
+// day has an 'ok' backup, older gaps are no longer asked about (the newer file already
+// holds all the data).
 export function missedDays(settings, log, ms = Date.now()) {
   if (!settings?.enabled || !settings.enabled_since) return []
   const byDay = new Map(log.map((r) => [r.day, r]))
@@ -256,6 +259,8 @@ export function missedDays(settings, log, ms = Date.now()) {
   let day = settings.enabled_since
   const floor = addDay(last, -59)
   if (day < floor) day = floor
+  const lastOk = log.filter((r) => r.status === 'ok').reduce((m, r) => (r.day > m ? r.day : m), '')
+  if (lastOk && day <= lastOk) day = addDay(lastOk, 1)
   const out = []
   for (; day <= last; day = addDay(day, 1)) {
     const r = byDay.get(day)
