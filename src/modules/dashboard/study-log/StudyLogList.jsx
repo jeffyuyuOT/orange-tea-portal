@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
+import { FORMULA_LIST_COLUMNS } from '../../../lib/formulaUpdates'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
 import Modal from '../../../components/ui/Modal'
@@ -109,7 +110,7 @@ export default function StudyLogList({ profileId, qualified = false, onProgressC
       await Promise.all([
         supabase
           .from('formula_items')
-          .select('*, formula_categories(name)')
+          .select(`${FORMULA_LIST_COLUMNS}, formula_categories(name)`) // no `notes` (huge pasted images)
           .eq('is_active', true)
           .order('group_key')
           .order('sort_order'),

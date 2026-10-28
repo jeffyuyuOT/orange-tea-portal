@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import { filterVisibleForStore } from '../../../lib/storeVisibility'
-import { getUnseenFormulaItems } from '../../../lib/formulaUpdates'
+import { FORMULA_LIST_COLUMNS, getUnseenFormulaItems } from '../../../lib/formulaUpdates'
 import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner, { EmptyState } from '../../../components/ui/LoadingSpinner'
@@ -257,7 +257,7 @@ function ItemList({ groupKey, categoryId, topTen, mustKnow, storeId, onBack, bac
     async function load() {
       let query = supabase
         .from('formula_items')
-        .select('*')
+        .select(FORMULA_LIST_COLUMNS) // no `notes` — it can hold huge pasted images; the detail modal loads it
         .eq('group_key', groupKey)
         .eq('is_active', true)
         .eq('hide_from_formula', false)

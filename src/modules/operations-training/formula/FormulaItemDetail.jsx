@@ -27,6 +27,7 @@ export default function FormulaItemDetail({ item, onClose, onSeen }) {
   const [annotationsBelow, setAnnotationsBelow] = useState([])
   const [videos, setVideos] = useState([])
   const [steps, setSteps] = useState([])
+  const [notes, setNotes] = useState(null) // fetched on open; list queries leave `notes` out (egress)
   const [loading, setLoading] = useState(true)
   const [showHot, setShowHot] = useState(false) // Iced/Cold vs Hot, when item.has_hot_version
 
@@ -34,6 +35,7 @@ export default function FormulaItemDetail({ item, onClose, onSeen }) {
     if (!item) return
     let active = true
     setLoading(true)
+    setNotes(null)
     setShowHot(false) // always open on Iced/Cold, even if a previous item was left on Hot
     Promise.all([
       // Note: ingredient_format_rules is embedded THROUGH ingredient_master,
@@ -54,8 +56,10 @@ export default function FormulaItemDetail({ item, onClose, onSeen }) {
         : Promise.resolve({ data: [] }),
       supabase.from('formula_item_annotations').select('*').eq('formula_item_id', item.id).order('sort_order'),
       supabase.from('formula_item_videos').select('*').eq('formula_item_id', item.id).order('sort_order'),
-    ]).then(([ingRes, stepRes, sizeRes, annRes, videoRes]) => {
+      supabase.from('formula_items').select('notes').eq('id', item.id).maybeSingle(),
+    ]).then(([ingRes, stepRes, sizeRes, annRes, videoRes, notesRes]) => {
       if (!active) return
+      setNotes(notesRes.data?.notes ?? item.notes ?? null)
       // Drop rows where no ingredient was ever picked (a "+ Add ingredient"
       // row left blank in Edit Item) — these used to show up as their own
       // column/chip labelled literally "Ingredient" with nothing in it.
@@ -114,7 +118,7 @@ export default function FormulaItemDetail({ item, onClose, onSeen }) {
               sizes={sizes}
               annotationsAbove={annotationsAbove}
               annotationsBelow={annotationsBelow}
-              notesHtml={item?.notes}
+              notesHtml={notes ?? item?.notes}
               notesImagePath={item?.notes_image_path}
               videos={videos}
             />

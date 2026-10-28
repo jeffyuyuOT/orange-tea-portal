@@ -1,6 +1,10 @@
 import { supabase } from './supabaseClient'
 import { filterVisibleForStore } from './storeVisibility'
 
+// Every formula_items column except `notes` (see the egress note below).
+export const FORMULA_LIST_COLUMNS =
+  'id, group_key, category_id, name_en, name_zh, sort_order, is_active, created_at, updated_at, display_mode, custom_image_path, notes_image_path, has_hot_version, created_by_name, top_10, top_10_sort_order, tracked_since, is_must_know, training_journey_phase, must_appear_in_exam, hide_from_formula'
+
 // Shared by AuthContext (the Sidebar's red "Update" badge next to Formula)
 // and FormulaPage (the actual "Update" tab listing) — see migration 0053.
 //
@@ -20,9 +24,11 @@ export async function getUnseenFormulaItems(profileId, currentStoreId) {
   // appear on the Formula page at all, so it shouldn't trigger the Update
   // tab or the Sidebar's red Update badge either, even if it was just
   // edited.
+  // Egress (Jeff, 2026-10-29): `notes` can hold pasted base64 images (hundreds of KB per item), so list
+  // queries never select it — FormulaItemDetail fetches it when an item is opened.
   const { data: itemRows } = await supabase
     .from('formula_items')
-    .select('*')
+    .select(FORMULA_LIST_COLUMNS)
     .eq('is_active', true)
     .eq('hide_from_formula', false)
   const eligible = (itemRows ?? []).filter((i) => i.updated_at >= i.tracked_since)
