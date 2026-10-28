@@ -224,7 +224,7 @@ export default function MyInformationPage() {
         </div>
       </section>
 
-      <StaffDocumentsSection profileId={profile?.id} storeId={currentStoreId} />
+      <StaffDocumentsSection profileId={profile?.id} storeId={currentStoreId} ownView />
 
       {showStaffId && <MyStaffIdModal onClose={() => setShowStaffId(false)} />}
     </div>

@@ -9,10 +9,25 @@ import { STAFF_DOC_TYPES } from '../lib/staffDocumentTypes'
 // for和parent consent form" — both pages read/write the exact same
 // `user_documents` rows (keyed by profile_id + doc_type, same as always),
 // this component is just the one UI both render it with so they can never
-// drift apart. `readOnly` (Staff Information's accountant viewers, who are
+// drift apart. `ownView` = My Information (the person's own page: shows the upload
+// hint only; Staff Information also shows when each file will be removed). `readOnly` (Staff Information's accountant viewers, who are
 // view-only everywhere on that page) hides the Upload control — the
 // uploaded file and the blank-template link still show.
-export default function StaffDocumentsSection({ profileId, storeId, readOnly = false, title = 'Documents' }) {
+// Jeff, 2026-10-29: uploads are kept for 30 days only — a daily job (migration 0139,
+// cleanup_expired_user_documents) deletes the file and the user_documents row after that.
+const RETENTION_DAYS = 30
+
+// "November 12" — the last day the file is kept, in Brisbane time.
+function retainedUntil(uploadedAt) {
+  const d = new Date(new Date(uploadedAt).getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000)
+  return new Intl.DateTimeFormat('en-AU', { month: 'long', day: 'numeric', timeZone: 'Australia/Brisbane' })
+    .format(d)
+    .split(' ')
+    .reverse()
+    .join(' ')
+}
+
+export default function StaffDocumentsSection({ profileId, storeId, readOnly = false, ownView = false, title = 'Documents' }) {
   const [docs, setDocs] = useState({})
   const [templates, setTemplates] = useState({})
 
@@ -22,6 +37,7 @@ export default function StaffDocumentsSection({ profileId, storeId, readOnly = f
       .from('user_documents')
       .select('*')
       .eq('profile_id', profileId)
+      .order('uploaded_at') // the newest upload of a type wins
       .then(({ data }) => {
         const map = {}
         ;(data ?? []).forEach((d) => (map[d.doc_type] = d))
@@ -69,7 +85,9 @@ export default function StaffDocumentsSection({ profileId, storeId, readOnly = f
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold text-brand-700">{title}</h2>
+      <h2 className="mb-1 text-sm font-semibold text-brand-700">{title}</h2>
+      {!readOnly && <p className="mb-3 text-xs text-gray-500">Uploaded files are retained for 30 days only.</p>}
+      {readOnly && <div className="mb-3" />}
       <div className="space-y-3">
         {STAFF_DOC_TYPES.map((d) => {
           const uploaded = docs[d.key]
@@ -101,6 +119,11 @@ export default function StaffDocumentsSection({ profileId, storeId, readOnly = f
                     </>
                   )}
                 </div>
+                {uploaded && !ownView && (
+                  <div className="mt-0.5 text-xs text-amber-600">
+                    This file will only be retained until {retainedUntil(uploaded.uploaded_at)}. Please download it if you need a backup.
+                  </div>
+                )}
               </div>
               {!readOnly && (
                 <label className="cursor-pointer rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">
