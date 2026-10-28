@@ -74,6 +74,17 @@ function bucketsForEntry(e, isWholeDayPublicHoliday) {
   return buckets
 }
 
+// Jeff, 2026-10-28 (further follow-up): "如果小數點後面為0的就不用顯示，有
+// 數值的話就最多到小數點第三位" — toFixed(2) was now always padding with
+// trailing zeros (33.00h) even on an exact total, and couldn't show a third
+// decimal place either. Round to 3 decimals first (toFixed(3) also absorbs
+// the usual floating-point summation noise), then hand that to
+// Number/toString, which drops trailing zeros on its own:
+// 33.000 -> "33", 7.750 -> "7.75", 10.333 -> "10.333".
+function formatHours(n) {
+  return Number(n.toFixed(3)).toString()
+}
+
 export default function RosterSummaryModal({ period, storeName, onClose }) {
   const { currentStoreId } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -148,17 +159,23 @@ export default function RosterSummaryModal({ period, storeName, onClose }) {
               {rows.map((r) => (
                 <tr key={r.name}>
                   <td className="py-1.5 pr-2 font-medium text-gray-800">{r.name}</td>
-                  <td className="py-1.5 pr-2 text-right text-gray-600">{r.weekday.toFixed(1)}h</td>
-                  <td className="py-1.5 pr-2 text-right text-gray-600">{r.weekend.toFixed(1)}h</td>
-                  <td className="py-1.5 pr-2 text-right text-gray-600">{r.publicHoliday.toFixed(1)}h</td>
+                  {/* Jeff, 2026-10-28: "summary裡的小時是要到小數點第二位，
+                      現在是四捨五入到小數點第一位，這樣數值會不一樣" — shifts
+                      are entered in quarter-hour steps (e.g. 10.75) and break
+                      in half-hour steps, so a total can genuinely land on a
+                      .25/.75 fraction; see formatHours above for the actual
+                      "trim trailing zeros, up to 3 decimals" rule. */}
+                  <td className="py-1.5 pr-2 text-right text-gray-600">{formatHours(r.weekday)}h</td>
+                  <td className="py-1.5 pr-2 text-right text-gray-600">{formatHours(r.weekend)}h</td>
+                  <td className="py-1.5 pr-2 text-right text-gray-600">{formatHours(r.publicHoliday)}h</td>
                   <td className="py-1.5 pl-2 text-right font-semibold text-brand-700">
-                    {(r.weekday + r.weekend + r.publicHoliday).toFixed(1)}h
+                    {formatHours(r.weekday + r.weekend + r.publicHoliday)}h
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="mt-3 text-right text-xs text-gray-400">Store total: {grandTotal.toFixed(1)}h</div>
+          <div className="mt-3 text-right text-xs text-gray-400">Store total: {formatHours(grandTotal)}h</div>
         </>
       )}
     </Modal>
