@@ -15,6 +15,8 @@ import {
   findLeaveConflicts,
   rowToEditDay,
   editDayToRowShape,
+  loadWeekLocks,
+  setWeekLock,
 } from '../../../lib/availability'
 import TimeOfDaySelect from './TimeOfDaySelect'
 
@@ -24,20 +26,22 @@ import TimeOfDaySelect from './TimeOfDaySelect'
 // own Copy-last-week, own Save) rather than one shared form, since a save on
 // one week has no bearing on the other.
 export default function MyAvailabilityPage() {
-  const { profile, refreshProfile } = useAuth()
-  // Jeff, 2026-10-02: "my available time的copy last week左邊新增lock time
-  // pattern。勾取的話，就會自動將目前的time pattern帶到下個禮拜，而且勾取此
-  // 選項的user不會收到系統提示" — profile-level (not tied to either week
-  // section specifically), so it's lifted up here and passed to both
-  // sections below rather than each keeping its own copy that could get
-  // out of sync with the other. `locked` mirrors `profile.availability_
-  // pattern_locked` (migration 0087) but as its own state so the checkbox
-  // responds immediately on click rather than waiting on a full profile
-  // refetch; `saving` just disables it mid-request so a second click can't
-  // race the first. The actual weekly auto-copy + reminder-suppression
-  // this flag drives happens server-side (migration 0088's pg_cron job) —
-  // this page only sets the flag.
-  const [locked, setLocked] = useState(false)
+  const { profile } = useAuth()
+  const thisWeekStr = thisWeekStart()
+  const nextWeekStr = nextWeekStart()
+  // Jeff, 2026-10-28: "這禮拜跟下禮拜的lock time pattern可以各自勾取(不用同時
+  // 勾取跟取消)" — migration 0087's single profile-level
+  // `availability_pattern_locked` column forced This Week and Next Week to
+  // always show (and toggle) the same value. Migration 0153 replaces it
+  // with `availability_week_locks`, one existence-row per (profile, week),
+  // so each week now carries its OWN lock state — loaded here as
+  // { thisWeek, nextWeek } (null while loading) and passed down separately
+  // to each section. Each section still needs to know the OTHER week's
+  // lock too: "同時勾取lock time pattern時並save時兩邊才會同步" — saving
+  // This Week only pushes a copy into Next Week when BOTH are checked at
+  // once, not just This Week's own checkbox — so that decision has to be
+  // made up here, where both states are visible together.
+  const [locks, setLocks] = useState(null)
   const [savingLock, setSavingLock] = useState(false)
   // Jeff, 2026-10-24: "訊息說同步，但下禮拜六還是不一樣" / "禮拜天也不一樣" —
   // the This-Week-saved-while-locked sync (added just above, same day) WAS
@@ -52,15 +56,22 @@ export default function MyAvailabilityPage() {
   const [nextWeekRefreshToken, setNextWeekRefreshToken] = useState(0)
 
   useEffect(() => {
-    setLocked(!!profile?.availability_pattern_locked)
-  }, [profile?.availability_pattern_locked])
+    let cancelled = false
+    if (!profile?.id) return
+    loadWeekLocks(profile.id, [thisWeekStr, nextWeekStr]).then((lockedWeeks) => {
+      if (cancelled) return
+      setLocks({ thisWeek: lockedWeeks.has(thisWeekStr), nextWeek: lockedWeeks.has(nextWeekStr) })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.id, thisWeekStr, nextWeekStr])
 
-  async function toggleLocked(next) {
-    setLocked(next)
+  async function toggleWeekLocked(weekStartStr, key, next) {
+    setLocks((prev) => ({ ...prev, [key]: next }))
     setSavingLock(true)
-    await supabase.from('profiles').update({ availability_pattern_locked: next }).eq('id', profile.id)
+    await setWeekLock(profile.id, weekStartStr, next)
     setSavingLock(false)
-    refreshProfile()
   }
 
   return (
@@ -74,21 +85,25 @@ export default function MyAvailabilityPage() {
       <div className="space-y-8">
         <AvailabilityWeekSection
           title="This Week"
-          weekStart={thisWeekStart()}
+          weekStart={thisWeekStr}
           profileId={profile?.id}
-          locked={locked}
+          locked={!!locks?.thisWeek}
+          otherWeekLocked={!!locks?.nextWeek}
+          lockLoaded={!!locks}
           savingLock={savingLock}
-          onToggleLocked={toggleLocked}
+          onToggleLocked={(next) => toggleWeekLocked(thisWeekStr, 'thisWeek', next)}
           isThisWeek
           onSyncedNextWeek={() => setNextWeekRefreshToken((t) => t + 1)}
         />
         <AvailabilityWeekSection
           title="Next Week"
-          weekStart={nextWeekStart()}
+          weekStart={nextWeekStr}
           profileId={profile?.id}
-          locked={locked}
+          locked={!!locks?.nextWeek}
+          otherWeekLocked={!!locks?.thisWeek}
+          lockLoaded={!!locks}
           savingLock={savingLock}
-          onToggleLocked={toggleLocked}
+          onToggleLocked={(next) => toggleWeekLocked(nextWeekStr, 'nextWeek', next)}
           refreshToken={nextWeekRefreshToken}
         />
       </div>
@@ -103,6 +118,8 @@ function AvailabilityWeekSection({
   weekStart,
   profileId,
   locked,
+  otherWeekLocked,
+  lockLoaded,
   savingLock,
   onToggleLocked,
   isThisWeek = false,
@@ -185,7 +202,13 @@ function AvailabilityWeekSection({
       return
     }
 
-    if (!isThisWeek || !locked) {
+    // Jeff, 2026-10-28: "同時勾取lock time pattern時並save時兩邊才會同步" —
+    // now that each week carries its own independent lock (migration 0153),
+    // saving This Week only pushes a copy into Next Week when BOTH weeks'
+    // checkboxes are on at the same time — This Week being locked alone is
+    // no longer enough, since Next Week might deliberately be left
+    // unlocked with its own different pattern.
+    if (!isThisWeek || !locked || !otherWeekLocked) {
       setSaving(false)
       setMessage('Availability saved.')
       return
@@ -258,7 +281,7 @@ function AvailabilityWeekSection({
               type="checkbox"
               className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
               checked={locked}
-              disabled={savingLock}
+              disabled={savingLock || !lockLoaded}
               onChange={(e) => onToggleLocked(e.target.checked)}
             />
             Lock time pattern
@@ -268,7 +291,7 @@ function AvailabilityWeekSection({
           </Button>
         </div>
       </div>
-      {locked && isThisWeek && (
+      {locked && otherWeekLocked && isThisWeek && (
         <p className="mb-2 text-xs text-gray-400">Saving This Week will also copy it into Next Week.</p>
       )}
 

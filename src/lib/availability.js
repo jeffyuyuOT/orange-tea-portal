@@ -459,3 +459,33 @@ export async function saveWeekAvailability(profileId, weekStartStr, byDate) {
   }
   return { error: null }
 }
+
+// Jeff, 2026-10-28: "my available time的在這禮拜跟下禮拜的lock time pattern
+// 可以各自勾取(不用同時勾取跟取消)" — migration 0087's single profile-level
+// `availability_pattern_locked` column forced This Week and Next Week to
+// always show (and toggle) the same value, since both sections read/wrote
+// that one shared flag. Migration 0153 replaces it with this
+// `availability_week_locks` table — one existence row per (profile, week),
+// so each week's own section can carry its own independent lock state.
+// Locked = a row exists for that profile_id/week_start_date; unlocked = no
+// row — the same "absence is the default" shape availability_days itself
+// already uses, which is also what lets the weekly cron (migration 0153's
+// rewritten copy_locked_availability_patterns) propagate a lock forward
+// with a plain `insert ... on conflict do nothing` rather than needing an
+// update statement.
+export async function loadWeekLocks(profileId, weekStartStrs) {
+  if (!profileId || !weekStartStrs?.length) return new Set()
+  const { data } = await supabase
+    .from('availability_week_locks')
+    .select('week_start_date')
+    .eq('profile_id', profileId)
+    .in('week_start_date', weekStartStrs)
+  return new Set((data ?? []).map((r) => r.week_start_date))
+}
+
+export async function setWeekLock(profileId, weekStartStr, locked) {
+  if (locked) {
+    return supabase.from('availability_week_locks').upsert({ profile_id: profileId, week_start_date: weekStartStr })
+  }
+  return supabase.from('availability_week_locks').delete().eq('profile_id', profileId).eq('week_start_date', weekStartStr)
+}
