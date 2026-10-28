@@ -119,6 +119,17 @@ async function notifyManagersOfTrainingHours(newlyCrossed, storeId, sender) {
 // AnnouncementsTab.jsx, but no longer referenced here). Replaced with a
 // star toggle right next to the "Store Announcement" filter button: see
 // importantOnly/toggleImportant below.
+
+// Jeff, 2026-10-29: the feed only needs the row's header fields. It used to
+// select('*'), which also downloaded every announcement's content_html — one
+// complaint post with an inline photo is ~470 KB, and it was re-downloaded on every
+// page visit by every account (a big part of the Supabase egress). The full body is
+// fetched by AnnouncementDetailModal only when a post is opened.
+const ANNOUNCEMENT_LIST_SELECT =
+  'id, store_id, title, is_important, category, solved, solved_by, solved_by_name, solved_at, broadcast_group_id, ' +
+  'created_by, created_at, updated_by, updated_at, created_by_name, updated_by_name, ' +
+  'creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)'
+
 export default function BulletinPage() {
   const { currentStoreId, profile, refreshBulletinUpdates } = useAuth()
   // Jeff, 2026-10-20 (point 3): "有勾選的話才能看到bulletin的roaster
@@ -175,7 +186,7 @@ export default function BulletinPage() {
     const [{ data: announcementRows }, { data: importantAnnouncementRows }, { data: complaintRows }, { data: rosterRows }, { data: settingsRow }, { data: changeEventRows }, { data: periodViewRows }, { data: announcementReadRows }, { data: rosterTabRow }] = await Promise.all([
       supabase
         .from('announcements')
-        .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
+        .select(ANNOUNCEMENT_LIST_SELECT)
         .eq('store_id', currentStoreId)
         .eq('category', 'normal')
         .gte('updated_at', oneMonthAgo)
@@ -185,7 +196,7 @@ export default function BulletinPage() {
       // id, rather than folding the exemption into one `.or()` filter.
       supabase
         .from('announcements')
-        .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
+        .select(ANNOUNCEMENT_LIST_SELECT)
         .eq('store_id', currentStoreId)
         .eq('category', 'normal')
         .eq('is_important', true)
@@ -195,7 +206,7 @@ export default function BulletinPage() {
       // someone actually marks them solved.
       supabase
         .from('announcements')
-        .select('*, creator:created_by(first_name,last_name), editor:updated_by(first_name,last_name)')
+        .select(ANNOUNCEMENT_LIST_SELECT)
         .eq('store_id', currentStoreId)
         .eq('category', 'customer_complaint')
         .order('updated_at', { ascending: false }),

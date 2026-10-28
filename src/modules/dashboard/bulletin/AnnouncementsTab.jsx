@@ -20,7 +20,7 @@ export default function AnnouncementsTab() {
     setLoading(true)
     const { data } = await supabase
       .from('announcements')
-      .select('*, creator:created_by(first_name,last_name,roster_display_name), editor:updated_by(first_name,last_name,roster_display_name)')
+      .select('id, store_id, title, is_important, category, solved, solved_by, solved_by_name, solved_at, broadcast_group_id, created_by, created_at, updated_by, updated_at, created_by_name, updated_by_name, creator:created_by(first_name,last_name,roster_display_name), editor:updated_by(first_name,last_name,roster_display_name)')
       .eq('store_id', currentStoreId)
       .order('updated_at', { ascending: false })
     setAnnouncements(data ?? [])
