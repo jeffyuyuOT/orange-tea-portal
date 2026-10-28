@@ -489,3 +489,26 @@ export async function setWeekLock(profileId, weekStartStr, locked) {
   }
   return supabase.from('availability_week_locks').delete().eq('profile_id', profileId).eq('week_start_date', weekStartStr)
 }
+
+// Jeff, 2026-10-29: "如果下禮拜是沒資料的情況下，勾取lock time pattern會抓取
+// 最近一次lock time pattern的紀錄去載入" — when MyAvailabilityPage's own
+// week section turns a week's lock ON while that week is still completely
+// untouched (every day still the bare 'all_available' default), it loads
+// whatever this returns instead of locking today's blank defaults in
+// place. "Most recent" means the closest PAST week that currently still
+// has its own lock row — not necessarily the immediately preceding week
+// (there could be an unlocked gap week or two in between), and not a week
+// that was locked once but has since been unlocked (its row is gone, so
+// it's no longer a candidate). Returns null if this profile has never
+// locked any earlier week.
+export async function findMostRecentLockedWeek(profileId, beforeWeekStartStr) {
+  if (!profileId) return null
+  const { data } = await supabase
+    .from('availability_week_locks')
+    .select('week_start_date')
+    .eq('profile_id', profileId)
+    .lt('week_start_date', beforeWeekStartStr)
+    .order('week_start_date', { ascending: false })
+    .limit(1)
+  return data?.[0]?.week_start_date ?? null
+}

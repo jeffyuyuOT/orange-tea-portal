@@ -17,6 +17,7 @@ import {
   editDayToRowShape,
   loadWeekLocks,
   setWeekLock,
+  findMostRecentLockedWeek,
 } from '../../../lib/availability'
 import TimeOfDaySelect from './TimeOfDaySelect'
 
@@ -113,6 +114,26 @@ export default function MyAvailabilityPage() {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// Jeff, 2026-10-29: "如果下禮拜是沒資料的情況下" — "no data" means every day
+// in the week is still sitting at the bare default rowToEditDay produces
+// for a day with no saved row at all (mode 'all_available', no boundary,
+// no custom windows) — i.e. the person hasn't touched this week yet.
+function isWeekUntouched(editState, dates) {
+  return dates.every((d) => {
+    const day = editState?.[d]
+    return day?.mode === 'all_available' && !(day.windows?.length)
+  })
+}
+
+// Jeff, 2026-10-29: the two notes behind the ⓘ next to "Lock time pattern"
+// — kept as the exact English Jeff gave, verbatim (this is a bilingual
+// app; the staff-facing UI text itself stays English like the rest of the
+// page, only Claude's own commit/explanation messages are in Chinese).
+const LOCK_INFO_NOTES = [
+  "You cannot modify the time while 'Lock Time Pattern' is checked. To change the time, you must first uncheck it.",
+  "If there is no data for next week, checking 'Lock Time Pattern' will load the record from the most recent locked pattern. Please click 'Save' to apply your changes.",
+]
+
 function AvailabilityWeekSection({
   title,
   weekStart,
@@ -135,6 +156,7 @@ function AvailabilityWeekSection({
   // per Jeff: "有衝突的話提交時會跳出警示窗...重疊" (a warning window on
   // submit, naming which slot overlaps which leave).
   const [conflicts, setConflicts] = useState(null)
+  const [showLockInfo, setShowLockInfo] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -172,6 +194,32 @@ function AvailabilityWeekSection({
     })
     setEditState(next)
     setMessage("Copied last week's availability below — Save to keep it.")
+  }
+
+  // Jeff, 2026-10-29: "勾取lock time pattern的時候不能更改時間...如果下禮拜
+  // 是沒資料的情況下，勾取lock time pattern會抓取最近一次lock time pattern
+  // 的紀錄去載入" — wraps the parent's onToggleLocked (which just persists
+  // the lock row itself) with the one piece of behaviour that needs the
+  // section's own editState: turning the lock ON for a week that's still
+  // completely untouched loads the most recent previously-locked week's
+  // pattern into the editor first, rather than locking today's blank
+  // defaults in place. A week that already has SOME data (even if it was
+  // never itself locked) just gets locked as-is — nothing is overwritten.
+  async function handleToggleLocked(next) {
+    if (next && editState && isWeekUntouched(editState, dates)) {
+      const sourceWeekStart = await findMostRecentLockedWeek(profileId, weekStart)
+      if (sourceWeekStart) {
+        const sourceDates = weekDatesFrom(sourceWeekStart)
+        const byDate = await loadWeekAvailability(profileId, sourceWeekStart)
+        const loaded = {}
+        dates.forEach((d, i) => {
+          loaded[d] = rowToEditDay(byDate[sourceDates[i]])
+        })
+        setEditState(loaded)
+        setMessage('Loaded your most recent locked pattern below — Save to keep it.')
+      }
+    }
+    onToggleLocked(next)
   }
 
   async function save() {
@@ -282,11 +330,19 @@ function AvailabilityWeekSection({
               className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
               checked={locked}
               disabled={savingLock || !lockLoaded}
-              onChange={(e) => onToggleLocked(e.target.checked)}
+              onChange={(e) => handleToggleLocked(e.target.checked)}
             />
             Lock time pattern
           </label>
-          <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={copyLastWeek} disabled={!editState}>
+          <button
+            type="button"
+            className="text-gray-400 hover:text-brand-600"
+            onClick={() => setShowLockInfo(true)}
+            aria-label="About Lock time pattern"
+          >
+            ⓘ
+          </button>
+          <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={copyLastWeek} disabled={!editState || locked}>
             Copy last week
           </Button>
         </div>
@@ -306,6 +362,7 @@ function AvailabilityWeekSection({
                 label={`${DAY_LABELS[i]} ${format(parseISO(dateStr), 'd/M')}`}
                 day={editState[dateStr]}
                 onChange={(patch) => updateDay(dateStr, patch)}
+                disabled={locked}
               />
             ))}
           </div>
@@ -346,14 +403,35 @@ function AvailabilityWeekSection({
           ))}
         </ul>
       </Modal>
+
+      <Modal
+        open={showLockInfo}
+        onClose={() => setShowLockInfo(false)}
+        title="Lock Time Pattern"
+        footer={
+          <Button variant="secondary" onClick={() => setShowLockInfo(false)}>
+            Close
+          </Button>
+        }
+      >
+        <ol className="list-decimal space-y-2 pl-4 text-sm text-gray-600">
+          {LOCK_INFO_NOTES.map((note, i) => (
+            <li key={i}>{note}</li>
+          ))}
+        </ol>
+      </Modal>
     </div>
   )
 }
 
 // One day's row: the day label, its mode select, and whatever that mode
 // needs — nothing (all_available/all_unavailable), a single boundary time
-// (before/after), or an editable list of specific windows (custom).
-function DayEditor({ label, day, onChange }) {
+// (before/after), or an editable list of specific windows (custom). Jeff,
+// 2026-10-29: "勾取lock time pattern的時候不能更改時間" — `disabled` (the
+// section's own `locked`) greys out every control here so the displayed
+// pattern can't be touched while locked; unchecking the lock is what
+// re-enables editing.
+function DayEditor({ label, day, onChange, disabled = false }) {
   function updateWindow(idx, patch) {
     onChange({ windows: day.windows.map((w, i) => (i === idx ? { ...w, ...patch } : w)) })
   }
@@ -369,8 +447,9 @@ function DayEditor({ label, day, onChange }) {
       <div className="w-20 shrink-0 pt-1.5 text-sm font-medium text-gray-700">{label}</div>
 
       <select
-        className="input !w-52 !py-1.5"
+        className="input !w-52 !py-1.5 disabled:cursor-not-allowed disabled:opacity-60"
         value={day.mode}
+        disabled={disabled}
         onChange={(e) => onChange({ mode: e.target.value, boundaryTime: '', windows: e.target.value === 'custom' ? day.windows?.length ? day.windows : [{ start: '09:00', end: '17:00' }] : day.windows })}
       >
         {AVAILABILITY_MODES.map((m) => (
@@ -381,7 +460,7 @@ function DayEditor({ label, day, onChange }) {
       </select>
 
       {(day.mode === 'before' || day.mode === 'after') && (
-        <TimeOfDaySelect value={day.boundaryTime || '09:00'} onChange={(t) => onChange({ boundaryTime: t })} />
+        <TimeOfDaySelect value={day.boundaryTime || '09:00'} onChange={(t) => onChange({ boundaryTime: t })} disabled={disabled} />
       )}
 
       {day.mode === 'custom' && (
@@ -400,17 +479,28 @@ function DayEditor({ label, day, onChange }) {
             // line by itself. Desktop is unaffected since everything still
             // fits on one line there.
             <div key={i} className="flex flex-wrap items-center gap-1.5">
-              <TimeOfDaySelect value={w.start} onChange={(t) => updateWindow(i, { start: t })} />
+              <TimeOfDaySelect value={w.start} onChange={(t) => updateWindow(i, { start: t })} disabled={disabled} />
               <div className="flex items-center gap-1.5">
                 <span className="text-gray-400">–</span>
-                <TimeOfDaySelect value={w.end} onChange={(t) => updateWindow(i, { end: t })} />
-                <button type="button" className="px-1.5 text-gray-400 hover:text-red-500" onClick={() => removeWindow(i)} aria-label="Remove time range">
+                <TimeOfDaySelect value={w.end} onChange={(t) => updateWindow(i, { end: t })} disabled={disabled} />
+                <button
+                  type="button"
+                  className="px-1.5 text-gray-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-gray-400"
+                  onClick={() => removeWindow(i)}
+                  disabled={disabled}
+                  aria-label="Remove time range"
+                >
                   ✕
                 </button>
               </div>
             </div>
           ))}
-          <button type="button" className="self-start text-xs font-medium text-brand-600 hover:text-brand-700" onClick={addWindow}>
+          <button
+            type="button"
+            className="self-start text-xs font-medium text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-brand-600"
+            onClick={addWindow}
+            disabled={disabled}
+          >
             + Add time range
           </button>
         </div>

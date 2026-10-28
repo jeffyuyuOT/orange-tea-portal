@@ -12,7 +12,7 @@ import { MINUTE_OPTIONS, decomposeQuarterHour, composeQuarterHour } from '../../
 // some custom windows' End time could be set to) — the latest selectable
 // time of day is now 11:45 PM, the last quarter-hour PM option, same as
 // every other day.
-export default function TimeOfDaySelect({ value, onChange, className = '' }) {
+export default function TimeOfDaySelect({ value, onChange, className = '', disabled = false }) {
   const { hour12, minute, ampm } = decomposeQuarterHour(value)
 
   function set(patch) {
@@ -43,9 +43,10 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
     // for the same reason the padding bump was.
     <div className={`flex items-center gap-1 ${className}`}>
       <select
-        className="input !w-14 !py-2 leading-normal sm:!w-16"
+        className="input !w-14 !py-2 leading-normal sm:!w-16 disabled:cursor-not-allowed disabled:opacity-60"
         style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
         value={hour12}
+        disabled={disabled}
         onChange={(e) => set({ hour12: Number(e.target.value) })}
       >
         {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
@@ -56,9 +57,10 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
       </select>
       <span className="text-gray-400">:</span>
       <select
-        className="input !w-14 !py-2 leading-normal sm:!w-16"
+        className="input !w-14 !py-2 leading-normal sm:!w-16 disabled:cursor-not-allowed disabled:opacity-60"
         style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
         value={minute}
+        disabled={disabled}
         onChange={(e) => set({ minute: e.target.value })}
       >
         {MINUTE_OPTIONS.map((m) => (
@@ -68,9 +70,10 @@ export default function TimeOfDaySelect({ value, onChange, className = '' }) {
         ))}
       </select>
       <select
-        className="input !w-20 !py-2 leading-normal sm:!w-24"
+        className="input !w-20 !py-2 leading-normal sm:!w-24 disabled:cursor-not-allowed disabled:opacity-60"
         style={{ colorScheme: 'light', backgroundColor: '#ffffff', color: '#1f2937' }}
         value={ampm}
+        disabled={disabled}
         onChange={(e) => set({ ampm: e.target.value })}
       >
         <option value="AM">AM</option>
