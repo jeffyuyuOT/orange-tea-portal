@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { STAFF_DOC_TYPES } from '../lib/staffDocumentTypes'
+import { RETENTION_DAYS, retainedUntil } from '../lib/retention'
 
 // TFN declaration / Super Choice / Parent-Guardian Consent uploads — shown
 // on both My Information (the staff member's own view) and Staff
@@ -13,20 +14,6 @@ import { STAFF_DOC_TYPES } from '../lib/staffDocumentTypes'
 // hint only; Staff Information also shows when each file will be removed). `readOnly` (Staff Information's accountant viewers, who are
 // view-only everywhere on that page) hides the Upload control — the
 // uploaded file and the blank-template link still show.
-// Jeff, 2026-10-29: uploads are kept for 30 days only — a daily job (migration 0139,
-// cleanup_expired_user_documents) deletes the file and the user_documents row after that.
-const RETENTION_DAYS = 30
-
-// "November 12" — the last day the file is kept, in Brisbane time.
-function retainedUntil(uploadedAt) {
-  const d = new Date(new Date(uploadedAt).getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000)
-  return new Intl.DateTimeFormat('en-AU', { month: 'long', day: 'numeric', timeZone: 'Australia/Brisbane' })
-    .format(d)
-    .split(' ')
-    .reverse()
-    .join(' ')
-}
-
 export default function StaffDocumentsSection({ profileId, storeId, readOnly = false, ownView = false, title = 'Documents' }) {
   const [docs, setDocs] = useState({})
   const [templates, setTemplates] = useState({})
@@ -86,7 +73,7 @@ export default function StaffDocumentsSection({ profileId, storeId, readOnly = f
   return (
     <section>
       <h2 className="mb-1 text-sm font-semibold text-brand-700">{title}</h2>
-      {!readOnly && <p className="mb-3 text-xs text-gray-500">Uploaded files are retained for 30 days only.</p>}
+      {!readOnly && <p className="mb-3 text-xs text-gray-500">Uploaded files are retained for {RETENTION_DAYS} days only.</p>}
       {readOnly && <div className="mb-3" />}
       <div className="space-y-3">
         {STAFF_DOC_TYPES.map((d) => {

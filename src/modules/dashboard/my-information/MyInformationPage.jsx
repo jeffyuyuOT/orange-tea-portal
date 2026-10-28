@@ -6,6 +6,7 @@ import { checkForAppUpdate } from '../../../lib/pwaUpdate'
 import { getPushPermissionState, relinkPush, subscribeToPush, unsubscribeFromPush } from '../../../lib/webPush'
 import Button from '../../../components/ui/Button'
 import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
+import { RETENTION_DAYS, retainedUntil } from '../../../lib/retention'
 import MyStaffIdModal from './MyStaffIdModal'
 
 export default function MyInformationPage() {
@@ -136,7 +137,13 @@ export default function MyInformationPage() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-brand-700">Bank Details</h2>
+        <h2 className="mb-1 text-sm font-semibold text-brand-700">Bank Details</h2>
+        <p className="mb-3 text-xs text-gray-500">Bank details are retained for {RETENTION_DAYS} days only.</p>
+        {profile?.bank_saved_at && (profile.bank_account_name || profile.bsb || profile.account_number) && (
+          <p className="mb-3 text-xs text-amber-600">
+            Please back up your bank details. They will be deleted on {retainedUntil(profile.bank_saved_at)}.
+          </p>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Bank account name">
             <input

@@ -4,6 +4,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import StaffDocumentsSection from '../../../components/StaffDocumentsSection'
+import { retainedUntil } from '../../../lib/retention'
 
 export default function StaffDetailModal({ staff, onClose, onSaved }) {
   const { profile: me, currentStoreId, accessibleStores } = useAuth()
@@ -262,6 +263,11 @@ export default function StaffDetailModal({ staff, onClose, onSaved }) {
                 onChange={(e) => setForm({ ...form, account_number: e.target.value })}
               />
             </Field>
+            {staff.bank_saved_at && (staff.bank_account_name || staff.bsb || staff.account_number) && (
+              <p className="col-span-full text-xs text-amber-600">
+                Please back up these bank details. They will be deleted on {retainedUntil(staff.bank_saved_at)}.
+              </p>
+            )}
           </>
         )}
       </div>
