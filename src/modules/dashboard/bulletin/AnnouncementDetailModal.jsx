@@ -628,30 +628,27 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               ))}
             </select>
           </label>
-          {/* Jeff, 2026-10-30: "原文不能改,只能插入或加" — once an EXISTING
-              notice has merge-mode on, the body is only ever grown via
-              Comments below (append_merged_comment()); the rich text
-              editor itself is swapped out for a read-only view here so
-              there's no way to rewrite what's already there. A brand new
-              notice (isNew) is exempt — there's no "original" yet to
-              protect, and locking it before anything's even been typed
-              would strand whoever's creating it. */}
-          {mergeComments && !isNew ? (
-            <div>
-              <RichTextViewer html={content} />
-              <p className="mt-1 text-xs text-gray-400">
-                Content is locked while "Merge comments into content" is on — new text can only be added via Comments
-                below. Uncheck it below to edit the content directly.
-              </p>
-            </div>
-          ) : (
-            <SimpleRichTextEditor
-              value={content}
-              onChange={setContent}
-              placeholder="Notice content…"
-              imageUploadPath={`announcements/${storeId}`}
-            />
-          )}
+          {/* Jeff, 2026-10-30: "admin或發文者要有edit跟comment兩個選項，因為
+              這兩個是不同的動作...而且edit的話還是可以在comment merge下更改
+              內容，只有comment才鎖住原文" — "原文不能改,只能插入或加" (the
+              original text can only be grown, never rewritten) is a rule
+              about the COMMENT action specifically (postMergedComment
+              below, which is all a plain viewer without edit rights ever
+              gets) — it was never meant to apply to an actual Edit by
+              someone who has edit rights (admin, or the creator before
+              the first comment — see canEditThis above). This form is
+              only reachable via that Edit button in the first place, so
+              the rich text editor now always renders here regardless of
+              mergeComments — editing and commenting are two separate,
+              simultaneously-available actions (the view below this form
+              still has both: this Edit form, and the Comments box), not
+              a locked/unlocked toggle on the same one. */}
+          <SimpleRichTextEditor
+            value={content}
+            onChange={setContent}
+            placeholder="Notice content…"
+            imageUploadPath={`announcements/${storeId}`}
+          />
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} />
             Mark as important
