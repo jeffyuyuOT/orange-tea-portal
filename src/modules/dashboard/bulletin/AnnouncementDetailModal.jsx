@@ -28,6 +28,25 @@ function nameOf(profile) {
   return `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email
 }
 
+// Jeff, 2026-10-30: pulls the current plain text back OUT of a merged
+// comment's stored HTML block (by its data-comment-id — see
+// append_merged_comment()/edit_merged_comment(), migrations 0157/0159/
+// 0161) so the "Edit" button on that History entry can pre-fill an
+// editable plain-text box with it, the same way editingCommentText
+// already works for the ordinary (non-merge) Comments list below.
+// <br/> tags are turned back into real newlines first — the reverse of
+// what those two SQL functions do to a newline you type — before reading
+// textContent, which itself already reverses the &amp;/&lt;/&gt; escaping.
+function extractMergedCommentText(html, historyId) {
+  if (!html || typeof document === 'undefined') return ''
+  const container = document.createElement('div')
+  container.innerHTML = html
+  const target = container.querySelector(`[data-comment-id="${CSS.escape(String(historyId))}"]`)
+  if (!target) return ''
+  target.querySelectorAll('br').forEach((br) => br.replaceWith('\n'))
+  return target.textContent ?? ''
+}
+
 export default function AnnouncementDetailModal({ announcementId, storeId, onClose, onSaved }) {
   const { profile, accessibleStores } = useAuth()
   const isNew = !announcementId
@@ -80,6 +99,18 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [mergeComments, setMergeComments] = useState(false)
   const [editingCommentId, setEditingCommentId] = useState(null)
   const [editingCommentText, setEditingCommentText] = useState('')
+  // Jeff, 2026-10-30: which merged-in comment block (if any) the History
+  // list's click should highlight in the content above — see RichTextViewer's
+  // own comment on data-comment-id/highlightId for the actual DOM work.
+  const [highlightedCommentId, setHighlightedCommentId] = useState(null)
+  // Jeff, 2026-10-30: "Merge加的comment發文者也要可以編輯跟刪除" — editing a
+  // merged comment (see editingHistoryCommentId's History-row UI below)
+  // is a separate state from editingCommentId/editingCommentText above —
+  // those two are for the ordinary (non-merge) Comments list, which saves
+  // straight to announcement_comments; this one calls edit_merged_comment()
+  // (migration 0161) instead, so they're kept apart rather than shared.
+  const [editingHistoryCommentId, setEditingHistoryCommentId] = useState(null)
+  const [editingHistoryCommentText, setEditingHistoryCommentText] = useState('')
   const [showViewers, setShowViewers] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -95,16 +126,32 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   // below, and the Solved checkbox on a complaint, just not this footer.
   const canManageThis = isNew || isManagerOrAdmin || isCreator
   // Everyone who can manage a post can delete it (per the "manager admin
-  // write announcements" RLS policy for manager/admin — any manager/admin
+  // delete announcements" RLS policy for manager/admin — any manager/admin
   // with access to this store, not just the original poster — and per the
   // "staff delete own announcements" policy for a staff creator, which is
   // their own post only), so the button is really always available to
   // canManageThis; only the label changes to reflect that the creator is
   // "retracting" their own post rather than moderating someone else's.
+  // Jeff, 2026-10-30 (delete is unchanged — this is about EDIT only).
   const deleteLabel = isCreator ? 'Retract' : 'Delete'
+  // Jeff, 2026-10-30: "manager的edit權限拿掉，只保留給admin跟發文者。發文者
+  // 在有人comment之後就無法edit訊息(admin除外)" — a plain shop_manager who
+  // isn't this post's own creator can no longer edit it at all (RLS:
+  // migration 0162 drops their old blanket "any post at this store" UPDATE
+  // right down to admin-only); the creator keeps editing their own post,
+  // but only until the first comment lands on it — a regular
+  // announcement_comments row OR a merge-mode 'commented' history entry
+  // both count as "someone commented", since either way the post has a
+  // reply on record now. Admin/developer is exempt from that lock and can
+  // always edit. canManageThis above is untouched on purpose — it still
+  // gates the whole footer (Delete/View history stay exactly as broad as
+  // before); this is only about whether the Edit button itself shows.
+  const hasAnyComments = comments.length > 0 || history.some((h) => h.action === 'commented')
+  const canEditThis = isAdmin || (isCreator && !hasAnyComments)
   const categorySelectValue = isComplaint ? 'customer_complaint' : isImportant ? 'important' : 'normal'
 
   useEffect(() => {
+    setHighlightedCommentId(null)
     if (isNew) return
     supabase
       .from('announcements')
@@ -420,6 +467,57 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     setComments((prev) => prev.filter((c) => c.id !== commentId))
   }
 
+  // Jeff, 2026-10-30: "Merge加的comment發文者也要可以編輯跟刪除" — the
+  // missing edit half of deleteMergedComment below, via edit_merged_
+  // comment() (migration 0161, author-only — no manager/admin OR-clause,
+  // same asymmetry saveCommentEdit above already has for the non-merge
+  // case).
+  async function saveMergedCommentEdit(historyId) {
+    const body = editingHistoryCommentText.trim()
+    if (!body) return
+    const { error } = await supabase.rpc('edit_merged_comment', {
+      p_announcement_id: announcementId,
+      p_history_id: historyId,
+      p_comment: body,
+    })
+    if (error) {
+      alert(`Could not update comment: ${error.message}`)
+      return
+    }
+    setEditingHistoryCommentId(null)
+    const { data: refreshed } = await supabase.from('announcements').select('content_html').eq('id', announcementId).single()
+    if (refreshed) setContent(refreshed.content_html ?? '')
+  }
+
+  // Jeff, 2026-10-30: "如果comment者刪除的話是不是歷史紀錄也要清楚" — a
+  // merge-mode comment has no row of its own; deleting one means
+  // stripping its block back out of content_html AND removing its
+  // History row together, which delete_merged_comment() (migration 0160)
+  // does as one SECURITY DEFINER transaction. Re-fetches afterwards, same
+  // reasoning as postMergedComment() above (never hand-build what the
+  // server already built/removed).
+  async function deleteMergedComment(historyId) {
+    const { error } = await supabase.rpc('delete_merged_comment', {
+      p_announcement_id: announcementId,
+      p_history_id: historyId,
+    })
+    if (error) {
+      alert(`Could not delete comment: ${error.message}`)
+      return
+    }
+    if (highlightedCommentId === historyId) setHighlightedCommentId(null)
+    const [{ data: refreshed }, { data: refreshedHistory }] = await Promise.all([
+      supabase.from('announcements').select('content_html').eq('id', announcementId).single(),
+      supabase
+        .from('announcement_history')
+        .select('*, actor:actor_id(first_name,last_name)')
+        .eq('announcement_id', announcementId)
+        .order('acted_at', { ascending: false }),
+    ])
+    if (refreshed) setContent(refreshed.content_html ?? '')
+    setHistory(refreshedHistory ?? [])
+  }
+
   // Writes the staged Solved/Unsolved change — independent of the Edit/Save
   // flow, so solved_at reflects the moment Submit was actually clicked, not
   // whenever some unrelated edit happens to be saved. Routed through the
@@ -499,9 +597,11 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
                 View history
               </Button>
             )}
-            <Button variant="secondary" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
+            {canEditThis && (
+              <Button variant="secondary" onClick={() => setEditing(true)}>
+                Edit
+              </Button>
+            )}
           </>
         ))
       }
@@ -623,7 +723,17 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             </div>
           )}
 
-          <RichTextViewer html={content} />
+          <RichTextViewer html={content} highlightId={highlightedCommentId} />
+
+          {/* Jeff, 2026-10-30: tells the creator themselves why the Edit
+              button above just disappeared — admin never sees this (they're
+              exempt from the lock), and it's only meaningful to the person
+              who actually lost the ability. */}
+          {isCreator && !isAdmin && hasAnyComments && (
+            <p className="text-xs text-gray-400">
+              Editing is locked now that this notice has a comment — ask an admin if it needs changes.
+            </p>
+          )}
 
           {/* "Supplement" comments (migration 0056) — anyone who can see
               this post can add one here, regardless of who created it;
@@ -739,12 +849,90 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase text-gray-400">History</h4>
             <ul className="space-y-1 text-xs text-gray-500">
-              {history.map((h) => (
-                <li key={h.id}>
-                  {new Date(h.acted_at).toLocaleString()} — {h.action.replace('_', ' ')} by{' '}
-                  {h.actor_name || (h.actor ? `${h.actor.first_name ?? ''} ${h.actor.last_name ?? ''}`.trim() : 'Unknown')}
-                </li>
-              ))}
+              {/* Jeff, 2026-10-30: "如果想知道哪一段留言是誰加的，可以點擊
+                  該歷史紀錄（顯示highlight），然後該記錄編輯的文字也
+                  highlight" — only a 'commented' entry has a matching
+                  data-comment-id block to find in the content above (a
+                  plain edit/created/solved entry touched no single
+                  identifiable block), so only those are clickable; a
+                  second click on the same entry un-highlights it. */}
+              {history.map((h) => {
+                const isCommentEntry = h.action === 'commented'
+                const isHighlighted = isCommentEntry && highlightedCommentId === h.id
+                const isOwnComment = isCommentEntry && profile?.id === h.actor_id
+                const canDeleteThisComment = isCommentEntry && (isOwnComment || isManagerOrAdmin)
+
+                if (editingHistoryCommentId === h.id) {
+                  return (
+                    <li key={h.id} className="rounded bg-gray-50 px-1.5 py-1">
+                      <input
+                        value={editingHistoryCommentText}
+                        onChange={(e) => setEditingHistoryCommentText(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && saveMergedCommentEdit(h.id)}
+                        autoFocus
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-brand-400 focus:outline-none"
+                      />
+                      <div className="mt-1 flex gap-2">
+                        <button
+                          type="button"
+                          className="font-medium text-brand-600 hover:text-brand-700"
+                          onClick={() => saveMergedCommentEdit(h.id)}
+                          disabled={!editingHistoryCommentText.trim()}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="font-medium text-gray-400 hover:text-gray-600"
+                          onClick={() => setEditingHistoryCommentId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </li>
+                  )
+                }
+                return (
+                  <li
+                    key={h.id}
+                    className={`flex items-center gap-1.5 ${isHighlighted ? '-mx-1 rounded bg-yellow-100 px-1 font-medium text-gray-700' : ''}`}
+                  >
+                    <span
+                      onClick={isCommentEntry ? () => setHighlightedCommentId((prev) => (prev === h.id ? null : h.id)) : undefined}
+                      className={isCommentEntry ? 'cursor-pointer hover:text-brand-600' : ''}
+                    >
+                      {new Date(h.acted_at).toLocaleString()} — {h.action.replace('_', ' ')} by{' '}
+                      {h.actor_name || (h.actor ? `${h.actor.first_name ?? ''} ${h.actor.last_name ?? ''}`.trim() : 'Unknown')}
+                    </span>
+                    {/* Jeff, 2026-10-30: "Merge加的comment發文者也要可以編
+                        輯跟刪除" — Edit is author-only (never manager/
+                        admin on someone else's words, same as the
+                        non-merge Comments list above); Delete keeps its
+                        existing author-or-manager/admin rule. */}
+                    {isOwnComment && (
+                      <button
+                        type="button"
+                        className="font-medium text-brand-600 hover:text-brand-700"
+                        onClick={() => {
+                          setEditingHistoryCommentId(h.id)
+                          setEditingHistoryCommentText(extractMergedCommentText(content, h.id))
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {canDeleteThisComment && (
+                      <button
+                        type="button"
+                        className="font-medium text-gray-400 hover:text-red-500"
+                        onClick={() => deleteMergedComment(h.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </div>
 
