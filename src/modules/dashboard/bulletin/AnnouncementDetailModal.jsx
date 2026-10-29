@@ -36,6 +36,12 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   // own post's manager-only bits, or see "View history", for the same
   // reason posting was broken for them).
   const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'shop_manager' || profile?.role === 'developer'
+  // Jeff, 2026-10-30: "admin可以在notice勾取，將comment併至內文的選項" —
+  // deliberately narrower than isManagerOrAdmin above (shop_manager does
+  // NOT get this one) — same "developer counts as admin" convention the
+  // rest of this file already uses for everything else, just without
+  // shop_manager this time since Jeff said "admin" specifically.
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'developer'
   // Jeff, 2026-09: admin/developer can broadcast a brand-new announcement to
   // several stores at once ("有的訊息是要給所有分店或特定那些分店的") — admin/
   // developer are the only roles whose accessibleStores ever spans more than
@@ -68,6 +74,12 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [comments, setComments] = useState([])
   const [newComment, setNewComment] = useState('')
   const [postingComment, setPostingComment] = useState(false)
+  // Jeff, 2026-10-30: per-notice, admin-only "merge comments into content"
+  // toggle (migration 0157) — see postMergedComment() and the Comments
+  // section below for what it actually changes.
+  const [mergeComments, setMergeComments] = useState(false)
+  const [editingCommentId, setEditingCommentId] = useState(null)
+  const [editingCommentText, setEditingCommentText] = useState('')
   const [showViewers, setShowViewers] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -110,6 +122,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           setDraftSolved(data.solved ?? false)
           setSolvedByName(data.solved_by_name ?? null)
           setSolvedAt(data.solved_at ?? null)
+          setMergeComments(!!data.merge_comments_into_content)
         }
       })
     supabase
@@ -252,6 +265,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               content_html: content,
               is_important: isImportant,
               category,
+              merge_comments_into_content: mergeComments,
               created_by: profile.id,
               created_by_name: actorName,
               updated_by: profile.id,
@@ -279,7 +293,19 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
       } else {
         const { error } = await supabase
           .from('announcements')
-          .update({ title, content_html: content, is_important: isImportant, category, updated_by: profile.id, updated_by_name: actorName })
+          .update({
+            title,
+            content_html: content,
+            is_important: isImportant,
+            category,
+            // Jeff, 2026-10-30: only admin/developer ever gets the checkbox
+            // that changes this (see the Edit form below), so a
+            // manager/staff saving a normal edit just resends whatever was
+            // already loaded — never silently flips it.
+            merge_comments_into_content: mergeComments,
+            updated_by: profile.id,
+            updated_by_name: actorName,
+          })
           .eq('id', announcementId)
         if (error) throw error
         await supabase
@@ -322,6 +348,76 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     }
     setComments((prev) => [...prev, data])
     setNewComment('')
+  }
+
+  // Jeff, 2026-10-30: "將comment併至內文的選項，這樣新增的comment會像是edit
+  // 的效果一樣直接加在原文裡" — when mergeComments is on, the SAME comment
+  // box calls this instead of postComment() above: the comment never
+  // becomes its own announcement_comments row at all, it's appended
+  // straight onto content_html by append_merged_comment() (migration
+  // 0157, SECURITY DEFINER — see that migration's comment for why this
+  // can't just be a plain client .update()) and logged to
+  // announcement_history as 'commented'. Re-fetches content_html +
+  // history afterwards rather than re-building the same HTML client-side,
+  // so this view can never drift from exactly what the RPC actually wrote
+  // (its escaping, timestamp formatting, etc.).
+  async function postMergedComment() {
+    const body = newComment.trim()
+    if (!body) return
+    setPostingComment(true)
+    const { error } = await supabase.rpc('append_merged_comment', {
+      p_announcement_id: announcementId,
+      p_comment: body,
+    })
+    if (error) {
+      setPostingComment(false)
+      alert(`Could not post comment: ${error.message}`)
+      return
+    }
+    setNewComment('')
+    const [{ data: refreshed }, { data: refreshedHistory }] = await Promise.all([
+      supabase.from('announcements').select('content_html').eq('id', announcementId).single(),
+      supabase
+        .from('announcement_history')
+        .select('*, actor:actor_id(first_name,last_name)')
+        .eq('announcement_id', announcementId)
+        .order('acted_at', { ascending: false }),
+    ])
+    setPostingComment(false)
+    if (refreshed) setContent(refreshed.content_html ?? '')
+    setHistory(refreshedHistory ?? [])
+  }
+
+  // Jeff, 2026-10-30: "發comment的人要有可以編輯或刪除comment的功能" — the
+  // author-scoped update/delete RLS policies (migration 0157) make these
+  // safe for anyone to call; a non-author's attempt is simply rejected by
+  // RLS (the UI already only shows the buttons on the author's own
+  // comments — see the Comments list below — but these aren't the only
+  // thing standing between someone and another person's comment).
+  async function saveCommentEdit(commentId) {
+    const body = editingCommentText.trim()
+    if (!body) return
+    const { data, error } = await supabase
+      .from('announcement_comments')
+      .update({ content: body })
+      .eq('id', commentId)
+      .select('*, author:author_id(first_name,last_name)')
+      .single()
+    if (error) {
+      alert(`Could not update comment: ${error.message}`)
+      return
+    }
+    setComments((prev) => prev.map((c) => (c.id === commentId ? data : c)))
+    setEditingCommentId(null)
+  }
+
+  async function deleteComment(commentId) {
+    const { error } = await supabase.from('announcement_comments').delete().eq('id', commentId)
+    if (error) {
+      alert(`Could not delete comment: ${error.message}`)
+      return
+    }
+    setComments((prev) => prev.filter((c) => c.id !== commentId))
   }
 
   // Writes the staged Solved/Unsolved change — independent of the Edit/Save
@@ -432,16 +528,40 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               ))}
             </select>
           </label>
-          <SimpleRichTextEditor
-            value={content}
-            onChange={setContent}
-            placeholder="Notice content…"
-            imageUploadPath={`announcements/${storeId}`}
-          />
+          {/* Jeff, 2026-10-30: "原文不能改,只能插入或加" — once an EXISTING
+              notice has merge-mode on, the body is only ever grown via
+              Comments below (append_merged_comment()); the rich text
+              editor itself is swapped out for a read-only view here so
+              there's no way to rewrite what's already there. A brand new
+              notice (isNew) is exempt — there's no "original" yet to
+              protect, and locking it before anything's even been typed
+              would strand whoever's creating it. */}
+          {mergeComments && !isNew ? (
+            <div>
+              <RichTextViewer html={content} />
+              <p className="mt-1 text-xs text-gray-400">
+                Content is locked while "Merge comments into content" is on — new text can only be added via Comments
+                below. Uncheck it below to edit the content directly.
+              </p>
+            </div>
+          ) : (
+            <SimpleRichTextEditor
+              value={content}
+              onChange={setContent}
+              placeholder="Notice content…"
+              imageUploadPath={`announcements/${storeId}`}
+            />
+          )}
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} />
             Mark as important
           </label>
+          {isAdmin && (
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" checked={mergeComments} onChange={(e) => setMergeComments(e.target.checked)} />
+              Merge comments into content (admin only)
+            </label>
+          )}
           {canBroadcast && (
             <div>
               <span className="mb-1 block text-xs font-medium text-gray-500">
@@ -508,31 +628,109 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           {/* "Supplement" comments (migration 0056) — anyone who can see
               this post can add one here, regardless of who created it;
               this is separate from Edit/Save above, which stays limited to
-              the creator + manager/admin. */}
+              the creator + manager/admin.
+              Jeff, 2026-10-30: while mergeComments is on (admin-only
+              checkbox in the Edit form above), this box no longer creates
+              its own announcement_comments row at all — the list below is
+              hidden and Post instead calls postMergedComment(), which
+              appends straight onto the notice's own content above (see
+              that function's own comment). Existing rows from before
+              merge-mode was turned on, if any, are left in the database
+              untouched but simply aren't shown while it's on. */}
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase text-gray-400">Comments</h4>
-            <ul className="mb-2 space-y-1.5">
-              {comments.map((c) => (
-                <li key={c.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
-                  <p className="whitespace-pre-wrap text-gray-700">{c.content}</p>
-                  <p className="mt-1 text-xs text-gray-400">
-                    {c.author_name || (c.author ? `${c.author.first_name ?? ''} ${c.author.last_name ?? ''}`.trim() : 'Unknown')} ·{' '}
-                    {new Date(c.created_at).toLocaleString()}
-                  </p>
-                </li>
-              ))}
-              {!comments.length && <li className="text-xs text-gray-400">No comments yet.</li>}
-            </ul>
+            {!mergeComments && (
+              <ul className="mb-2 space-y-1.5">
+                {comments.map((c) => {
+                  const isOwnComment = !!profile && profile.id === c.author_id
+                  const authorLabel =
+                    c.author_name || (c.author ? `${c.author.first_name ?? ''} ${c.author.last_name ?? ''}`.trim() : 'Unknown')
+                  if (editingCommentId === c.id) {
+                    return (
+                      <li key={c.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                        <input
+                          value={editingCommentText}
+                          onChange={(e) => setEditingCommentText(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && saveCommentEdit(c.id)}
+                          autoFocus
+                          className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand-400 focus:outline-none"
+                        />
+                        <div className="mt-1.5 flex gap-2">
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                            onClick={() => saveCommentEdit(c.id)}
+                            disabled={!editingCommentText.trim()}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-gray-400 hover:text-gray-600"
+                            onClick={() => setEditingCommentId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  }
+                  return (
+                    <li key={c.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                      <p className="whitespace-pre-wrap text-gray-700">{c.content}</p>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                        <span>
+                          {authorLabel} · {new Date(c.created_at).toLocaleString()}
+                        </span>
+                        {/* Jeff, 2026-10-30: "發comment的人要有可以編輯或刪
+                            除comment的功能" — the comment's own author can
+                            edit or delete it; manager/admin get delete too
+                            (moderation — the RLS policy for this already
+                            existed, migration 0056, it just had no UI entry
+                            point until now), but never edit on someone
+                            else's words. */}
+                        {isOwnComment && (
+                          <button
+                            type="button"
+                            className="font-medium text-brand-600 hover:text-brand-700"
+                            onClick={() => {
+                              setEditingCommentId(c.id)
+                              setEditingCommentText(c.content)
+                            }}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {(isOwnComment || isManagerOrAdmin) && (
+                          <button
+                            type="button"
+                            className="font-medium text-gray-400 hover:text-red-500"
+                            onClick={() => deleteComment(c.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+                {!comments.length && <li className="text-xs text-gray-400">No comments yet.</li>}
+              </ul>
+            )}
             <div className="flex gap-2">
               <input
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && postComment()}
+                onKeyDown={(e) => e.key === 'Enter' && (mergeComments ? postMergedComment() : postComment())}
                 placeholder="Add a comment…"
                 disabled={postingComment}
                 className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
               />
-              <Button onClick={postComment} disabled={postingComment || !newComment.trim()} className="!px-3 !py-1.5 !text-xs">
+              <Button
+                onClick={mergeComments ? postMergedComment : postComment}
+                disabled={postingComment || !newComment.trim()}
+                className="!px-3 !py-1.5 !text-xs"
+              >
                 {postingComment ? 'Posting…' : 'Post'}
               </Button>
             </div>
