@@ -1040,35 +1040,6 @@ export default function ManageRosterPage() {
                   sm+, where the button genuinely is flush with the screen's
                   right edge again. */
               <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
-                {/* Jeff, 2026-10-30/31: "time format移到action裡面（在外面顯
-                    得有點亂），一樣選取後再選擇格式" — moved in here from its
-                    own standalone control next to the week tabs (both desktop
-                    and mobile share this one menu, so there's nothing
-                    separate to change per layout). Shown as its own
-                    unclosing section rather than two one-shot action
-                    buttons — a ✓ marks whichever of the two is currently
-                    active, same idea as the bold/filled "Current week" tab
-                    above. */}
-                <div className="px-3.5 pb-1 pt-2 text-xs font-semibold uppercase text-gray-400">Time format</div>
-                {TIME_FORMAT_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    className={`flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-sm hover:bg-brand-50 ${
-                      timeInputFormat === o.value ? 'font-medium text-brand-700' : 'text-gray-700'
-                    }`}
-                    onClick={() => {
-                      setActionMenuOpen(false)
-                      setTimeInputFormat(o.value)
-                    }}
-                  >
-                    <span>
-                      {o.label} ({o.example})
-                    </span>
-                    {timeInputFormat === o.value && <span aria-hidden="true">✓</span>}
-                  </button>
-                ))}
-                <div className="my-1 border-t border-gray-100" />
                 {/* Jeff, 2026-10-24: "新增Copy Last Week的選項並放在最上面" —
                     see copyLastWeek() above for what it actually does. Its
                     own divider below separates it from the file-oriented
@@ -1106,6 +1077,32 @@ export default function ManageRosterPage() {
                 >
                   Download template
                 </button>
+                <div className="my-1 border-t border-gray-100" />
+                {/* Jeff, 2026-10-31: "Time format放到download template下面，
+                    因為不會很常用" — below the Excel-oriented items (was
+                    above Copy Last Week before this), its own section
+                    rather than two one-shot action buttons — a ✓ marks
+                    whichever of the two is currently active, same idea as
+                    the bold/filled "Current week" tab above. */}
+                <div className="px-3.5 pb-1 pt-2 text-xs font-semibold uppercase text-gray-400">Time format</div>
+                {TIME_FORMAT_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    className={`flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-sm hover:bg-brand-50 ${
+                      timeInputFormat === o.value ? 'font-medium text-brand-700' : 'text-gray-700'
+                    }`}
+                    onClick={() => {
+                      setActionMenuOpen(false)
+                      setTimeInputFormat(o.value)
+                    }}
+                  >
+                    <span>
+                      {o.label} ({o.example})
+                    </span>
+                    {timeInputFormat === o.value && <span aria-hidden="true">✓</span>}
+                  </button>
+                ))}
                 <div className="my-1 border-t border-gray-100" />
                 {/* Jeff, 2026-10-01: "action裡新增clear, 如果按clear消除表格
                     載入的資料" — own section at the bottom, visually
