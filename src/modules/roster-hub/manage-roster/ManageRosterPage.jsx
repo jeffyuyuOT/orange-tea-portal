@@ -5,7 +5,7 @@ import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import Modal from '../../../components/ui/Modal'
-import RosterEntryGrid from './RosterEntryGrid'
+import RosterEntryGrid, { formatHourForDisplay } from './RosterEntryGrid'
 import UnderstaffedWarnings, { computeUnderstaffedWarnings } from './UnderstaffedWarnings'
 import ImportReconcileModal from './ImportReconcileModal'
 import StaffAvailabilityModal from './StaffAvailabilityModal'
@@ -40,6 +40,20 @@ import { thisWeekStart } from '../shared/rosterWeeks'
 // MAX_SHIFT_HOUR is deliberately generous (30 = 6am the NEXT day) so it
 // never rejects a real late-closing shift; a bare "HHMM" typo (930, 1030,
 // 1800, 2200…) is always far past that no matter what time was meant.
+// Jeff, 2026-10-30: "action按鈕上面新增輸入格式...然後save和publish時的格式
+// 檢查邏輯也要跟著變" — RosterEntryGrid's HourInput now parses whatever's
+// typed (1030, or 10.5) into canonical decimal hours itself, per whichever
+// of these two formats is currently selected (see its own comment for the
+// full mechanics) — so by the time an entry ever reaches `entries` here,
+// it's already the right decimal regardless of which format was used to
+// type it. That means this function's actual CHECK doesn't need to change
+// per format at all (a bad value is a bad value once it's decimal) — only
+// the blocking modal's wording below needs to match whichever format is
+// currently on screen, since that's what the manager needs to go fix it.
+const TIME_FORMAT_OPTIONS = [
+  { value: 'decimal', label: 'Decimal hours', example: '10.5 = 10:30' },
+  { value: 'compact', label: 'Compact Time Format', example: '1030 = 10:30' },
+]
 const MAX_SHIFT_HOUR = 30
 function findInvalidTimeEntries(entries) {
   const bad = []
@@ -61,6 +75,28 @@ export default function ManageRosterPage() {
   const location = useLocation()
   const [weekStart, setWeekStart] = useState('')
   const [entries, setEntries] = useState([])
+  // Jeff, 2026-10-30: which way Start/End cells are typed/read in the grid
+  // below — see TIME_FORMAT_OPTIONS above and HourInput's own comment in
+  // RosterEntryGrid.jsx for the full picture. Remembered per-browser via
+  // localStorage (not per-store/DB — it's just how THIS manager likes to
+  // type, same convenience as a keyboard layout choice, not roster data),
+  // so it doesn't reset back to Decimal every time this page is reopened.
+  const [timeInputFormat, setTimeInputFormat] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ot-portal:roster-time-input-format')
+      return saved === 'compact' ? 'compact' : 'decimal'
+    } catch {
+      return 'decimal'
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('ot-portal:roster-time-input-format', timeInputFormat)
+    } catch {
+      // best-effort — a private window or blocked storage just means this
+      // falls back to the 'decimal' default next time, nothing breaks.
+    }
+  }, [timeInputFormat])
   const [notes, setNotes] = useState('')
   const [staff, setStaff] = useState([])
   const [pendingStaff, setPendingStaff] = useState([])
@@ -872,25 +908,46 @@ export default function ManageRosterPage() {
         ]
         return (
           <div className="mb-3">
-          <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2">
-            {tabs.map(([label, start]) => {
-              const active = weekStart === start
-              return (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setWeekStart(start)}
-                  aria-pressed={active}
-                  className={
-                    active
-                      ? 'whitespace-nowrap rounded-full bg-brand-500 px-4 py-2 text-base font-bold text-white shadow-md ring-2 ring-brand-300 sm:px-6 sm:py-2.5 sm:text-lg'
-                      : 'whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500 hover:bg-brand-50 hover:text-brand-700 sm:px-4 sm:py-1.5 sm:text-sm'
-                  }
-                >
-                  {label}
-                </button>
-              )
-            })}
+          {/* Jeff, 2026-10-30: "time format放在action按鈕上面(跟last,
+              current, next week tab同一行但最右邊)" — moved here from
+              beside View Staff's Availability/Action (same row's far right
+              now, via justify-between), and wraps onto its own line below
+              the tabs on a narrow phone rather than overlapping them. */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+            <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2">
+              {tabs.map(([label, start]) => {
+                const active = weekStart === start
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setWeekStart(start)}
+                    aria-pressed={active}
+                    className={
+                      active
+                        ? 'whitespace-nowrap rounded-full bg-brand-500 px-4 py-2 text-base font-bold text-white shadow-md ring-2 ring-brand-300 sm:px-6 sm:py-2.5 sm:text-lg'
+                        : 'whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500 hover:bg-brand-50 hover:text-brand-700 sm:px-4 sm:py-1.5 sm:text-sm'
+                    }
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <label className="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
+              <span className="font-medium">Time format</span>
+              <select
+                className="input !w-auto !py-1 text-xs"
+                value={timeInputFormat}
+                onChange={(e) => setTimeInputFormat(e.target.value)}
+              >
+                {TIME_FORMAT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label} ({o.example})
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
             {weekStart && !loadingPeriod && loadedPeriodStatus === null && (
               <div className="mt-1.5 text-sm text-gray-400">這一週還沒有已儲存的班表資料</div>
@@ -1072,9 +1129,13 @@ export default function ManageRosterPage() {
 
       <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="How to fill in the grid">
         <p className="text-sm text-gray-600">
-          Fill in the grid below — Start/End hours (e.g. 11, 22.5 for 10:30pm) and each day's Break in half-hour
-          units (1 = 30 min, 2 = 1 hr) — or download the template, fill it in Excel, and upload it back. Total hr
-          and WKD hr are calculated automatically.
+          {/* Jeff, 2026-10-30: matches whichever Time format is currently
+              selected (see TIME_FORMAT_OPTIONS above) — the example here
+              needs to be the one actually being typed, not always Decimal's. */}
+          Fill in the grid below — Start/End hours (e.g.{' '}
+          {timeInputFormat === 'compact' ? '1100, 2230 for 10:30pm' : '11, 22.5 for 10:30pm'}) and each day's Break
+          in half-hour units (1 = 30 min, 2 = 1 hr) — or download the template, fill it in Excel, and upload it
+          back. Total hr and WKD hr are calculated automatically.
         </p>
       </Modal>
 
@@ -1089,6 +1150,7 @@ export default function ManageRosterPage() {
         leavesByProfile={leavesByProfile}
         mobileDayIdx={mobileDayIdx}
         setMobileDayIdx={setMobileDayIdx}
+        timeInputFormat={timeInputFormat}
       />
 
       <label className="mt-4 block">
@@ -1169,8 +1231,20 @@ export default function ManageRosterPage() {
         >
           <div className="space-y-2 text-sm text-gray-700">
             <p>
-              Shift times are entered as decimal hours — 10:30 is typed as <strong>10.5</strong>, not{' '}
-              <strong>1030</strong>. The following {invalidTimeBlocked.length === 1 ? 'cell doesn\'t' : 'cells don\'t'}{' '}
+              {/* Jeff, 2026-10-30: wording now follows whichever format is
+                  currently selected — see TIME_FORMAT_OPTIONS above — since
+                  that's the one the manager is actually typing in right now. */}
+              Shift times are entered as{' '}
+              {timeInputFormat === 'compact' ? (
+                <>
+                  Compact Time Format — 10:30 is typed as <strong>1030</strong>, not <strong>10.5</strong>
+                </>
+              ) : (
+                <>
+                  decimal hours — 10:30 is typed as <strong>10.5</strong>, not <strong>1030</strong>
+                </>
+              )}
+              . The following {invalidTimeBlocked.length === 1 ? 'cell doesn\'t' : 'cells don\'t'}{' '}
               look like a valid time, so nothing has been saved or published yet. Fix{' '}
               {invalidTimeBlocked.length === 1 ? 'it' : 'them'} and try again.
             </p>
@@ -1178,7 +1252,10 @@ export default function ManageRosterPage() {
               {invalidTimeBlocked.map((e, i) => (
                 <li key={i}>
                   {e.staffName || 'Unnamed'} — {format(parseISO(e.date), 'EEE d MMM')} (
-                  {e.field === 'startTime' ? 'Start' : 'End'}): <strong>{String(e.value)}</strong>
+                  {e.field === 'startTime' ? 'Start' : 'End'}):{' '}
+                  <strong>
+                    {Number.isFinite(Number(e.value)) ? formatHourForDisplay(e.value, timeInputFormat) : 'invalid'}
+                  </strong>
                 </li>
               ))}
             </ul>
