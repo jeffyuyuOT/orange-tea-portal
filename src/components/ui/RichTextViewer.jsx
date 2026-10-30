@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 // Renders stored HTML (from SimpleRichTextEditor) safely-enough for
 // internal admin-authored content. If you later accept untrusted input,
@@ -65,8 +65,43 @@ function linkifyHtml(html) {
   return container.innerHTML
 }
 
-export default function RichTextViewer({ html, className = '' }) {
+// Jeff, 2026-10-30: "可以點擊該歷史紀錄（顯示highlight），然後該記錄編輯的
+// 文字也highlight" — a merge-mode notice's History list (AnnouncementDetail
+// Modal.jsx) can pass `highlightId` (an announcement_history row's id) to
+// flash the matching merged-comment block appended by that history entry
+// (append_merged_comment(), migration 0159, stamps each block with
+// data-comment-id="<that history row's id>"). Plain DOM manipulation
+// rather than real React state, since the content this searches is itself
+// raw HTML rendered via dangerouslySetInnerHTML below, not React elements
+// — there's nothing else to attach a prop/class to.
+function applyHighlight(container, highlightId) {
+  if (!container) return
+  container.querySelectorAll('[data-comment-id]').forEach((el) => {
+    el.style.backgroundColor = ''
+    el.style.transition = ''
+  })
+  if (!highlightId) return
+  const target = container.querySelector(`[data-comment-id="${CSS.escape(String(highlightId))}"]`)
+  if (!target) return
+  target.style.transition = 'background-color 0.3s ease'
+  target.style.backgroundColor = '#fef9c3'
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+export default function RichTextViewer({ html, className = '', highlightId = null }) {
+  const containerRef = useRef(null)
   const linkedHtml = useMemo(() => linkifyHtml(html), [html])
+
+  useEffect(() => {
+    applyHighlight(containerRef.current, highlightId)
+  }, [highlightId, linkedHtml])
+
   if (!html) return null
-  return <div className={`prose-content text-sm text-gray-700 ${className}`} dangerouslySetInnerHTML={{ __html: linkedHtml }} />
+  return (
+    <div
+      ref={containerRef}
+      className={`prose-content text-sm text-gray-700 ${className}`}
+      dangerouslySetInnerHTML={{ __html: linkedHtml }}
+    />
+  )
 }

@@ -56,6 +56,12 @@ export default function RosterEntryGrid({
   // through props instead of its own state.
   mobileDayIdx,
   setMobileDayIdx,
+  // Jeff, 2026-10-30: 'decimal' (10.5 = 10:30, the only option before this)
+  // or 'compact' (1030 = 10:30) — picked once via the dropdown above the
+  // Action button in ManageRosterPage, threaded all the way down to every
+  // Start/End HourInput below (never the Break(½h) one — see HourInput's
+  // own comment for why that one's excluded).
+  timeInputFormat = 'decimal',
 }) {
   // "+ Add row" placeholders for a casual/one-off name not in Staff
   // Information yet. Keyed by a stable id (not by the typed name) so
@@ -384,6 +390,7 @@ export default function RosterEntryGrid({
                   onCheckConflict={checkConflict}
                   displayFormat={displayFormat}
                   phases={phases}
+                  timeInputFormat={timeInputFormat}
                 />
               )
             })}
@@ -439,6 +446,7 @@ export default function RosterEntryGrid({
                 onCheckConflict={checkConflict}
                 displayFormat={displayFormat}
                 phases={phases}
+                timeInputFormat={timeInputFormat}
                 onShowWeek={() => setWeekSummaryRow(row)}
               />
             )
@@ -523,24 +531,99 @@ export default function RosterEntryGrid({
   )
 }
 
-function HourInput({ value, onChange, onBlur, disabled, className = '', style, title }) {
+// Jeff, 2026-10-30: "action按鈕上面新增輸入格式，可以選擇Decimal hours或
+// Compact Time Format...save和publish時的格式檢查邏輯也要跟著變" — a store
+// manager (Underwood's Penny) typed "1030" meaning 10:30 straight into a
+// decimal-hours Start/End cell; the grid read that as literally 1030
+// hours, which published and then showed every staff member a blank shift
+// (see ManageRosterPage's findInvalidTimeEntries). Rather than just
+// blocking that typo, this lets a manager who thinks in clock times use
+// "Compact Time Format" on purpose — 1030 really does mean 10:30 when this
+// mode is selected — while `entries.startTime`/`endTime` (and therefore
+// every computation downstream: rowTotals/grandTotal, checkConflict,
+// Save/Submit's validation, persist()'s decimalToTime()) still only ever
+// sees plain decimal hours, exactly as before. The format toggle is purely
+// an input/display convenience on TOP of that same canonical number.
+function compactToDecimalHours(n) {
+  if (!Number.isInteger(n) || n < 0) return NaN
+  // 1 or 2 digits alone means just the hour, no minutes — "9"/"18" mean
+  // 9:00/18:00, not 0:09/0:18. From 3 digits up, the last two are always
+  // minutes (same convention as reading a 24hr clock number aloud):
+  // "930" → 9:30, "1030" → 10:30.
+  if (String(n).length <= 2) return n
+  const minute = n % 100
+  const hour = Math.floor(n / 100)
+  if (minute > 59) return NaN
+  return hour + minute / 60
+}
+
+function decimalHoursToCompact(n) {
+  const h = Math.floor(n)
+  const m = Math.round((n - h) * 60)
+  return h * 100 + m
+}
+
+// What the box shows whenever it's NOT the one currently being typed into
+// (initial mount, loading a different week, Copy Last Week, Clear, the
+// format dropdown being switched, or just finishing editing a DIFFERENT
+// cell) — always reformatted fresh off the canonical decimal `value`.
+export function formatHourForDisplay(value, format) {
+  if (value === '' || value == null) return ''
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '' // an unparseable/invalid committed value — nothing sane to show
+  return format === 'compact' ? String(decimalHoursToCompact(n)) : String(n)
+}
+
+// What a keystroke's raw text commits back up as `entries.startTime`/
+// `endTime` — '' stays '' (no shift), anything that doesn't parse as a
+// sane time in the selected format commits as NaN (findInvalidTimeEntries
+// in ManageRosterPage is what turns that into the blocking Save/Submit
+// warning, exactly like an out-of-range decimal already does).
+function parseHourInput(raw, format) {
+  if (raw === '') return ''
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return NaN
+  return format === 'compact' ? compactToDecimalHours(n) : n
+}
+
+function HourInput({ value, onChange, onBlur, disabled, className = '', style, title, format = 'decimal' }) {
+  const [focused, setFocused] = useState(false)
+  const [draft, setDraft] = useState(() => formatHourForDisplay(value, format))
+
+  // Resync the shown text from the canonical `value` whenever this box
+  // isn't the one being typed into right now — but never while focused,
+  // or reformatting mid-keystroke (e.g. typing "10" meaning "still
+  // composing the hour" would jump to "1000" the moment Compact mode
+  // reformats it back) would fight every subsequent keystroke. `onChange`
+  // below still fires on every keystroke exactly as before — this only
+  // decouples what's DISPLAYED while focused from that committed value.
+  useEffect(() => {
+    if (!focused) setDraft(formatHourForDisplay(value, format))
+  }, [value, format, focused])
+
   return (
     <input
-      type="number"
-      step="any"
-      inputMode="decimal"
+      type="text"
+      inputMode={format === 'compact' ? 'numeric' : 'decimal'}
       disabled={disabled}
       title={title}
       className={`input no-spinner !px-0.5 !py-0.5 text-center text-xs ${className}`}
       style={style}
-      value={value === '' || value == null ? '' : value}
-      onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-      onBlur={onBlur}
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        onChange(parseHourInput(e.target.value, format))
+      }}
+      onBlur={(e) => {
+        setFocused(false)
+        onBlur?.(e)
+      }}
     />
   )
 }
 
-function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases }) {
+function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, timeInputFormat }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -605,6 +688,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   onBlur={() => onCheckConflict?.(row, date)}
                   className={displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}
                   style={colorStyle}
+                  format={timeInputFormat}
                 />
               </td>
               <td className="border border-brand-100 px-0.5 py-0.5">
@@ -615,6 +699,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   onBlur={() => onCheckConflict?.(row, date)}
                   className={displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}
                   style={colorStyle}
+                  format={timeInputFormat}
                 />
               </td>
             </Fragment>
@@ -658,7 +743,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
 // instead of two wide table rows. Wk/WKD totals still reflect the whole
 // week (computed the same way as desktop) so switching days doesn't lose
 // sight of the running total.
-function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, onShowWeek }) {
+function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, timeInputFormat, onShowWeek }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -723,6 +808,7 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
         onBlur={() => onCheckConflict?.(row, date)}
         className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}`}
         style={colorStyle}
+        format={timeInputFormat}
       />
       <span className="shrink-0 text-[10px] font-medium text-gray-400">E</span>
       <HourInput
@@ -732,6 +818,7 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
         onBlur={() => onCheckConflict?.(row, date)}
         className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}`}
         style={colorStyle}
+        format={timeInputFormat}
       />
       <span className="shrink-0 text-[10px] font-medium text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">
         B
