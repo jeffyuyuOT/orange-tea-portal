@@ -24,6 +24,38 @@ import { loadWeekAvailabilityForProfiles } from '../../../lib/availability'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import { thisWeekStart } from '../shared/rosterWeeks'
 
+// Jeff, 2026-10-30: Underwood's Penny typed shift times like "1030" (meant
+// as 10:30) straight into a Start/End cell instead of the decimal hours the
+// grid actually expects ("10.5") — HourInput is a plain type="number"
+// input, so a value like 1030 is a perfectly valid NUMBER as far as the
+// browser's concerned, nothing stopped her from Saving/Publishing it, and
+// decimalToTime(1030) downstream just builds "1030:00:00" without checking
+// it's sane either. That got written to roster_entries, and every staff
+// member who then opened their roster saw that shift as blank (whatever
+// rendered minutesToLabel(1030 * 60) — ≥1440 minutes, so it clamps back to
+// midnight — or formatted the stored value, came out meaningless).
+//
+// This catches exactly that class of typo — a decimal-hour value nowhere
+// near a real shift time — before Save/Submit can reach persist() at all.
+// MAX_SHIFT_HOUR is deliberately generous (30 = 6am the NEXT day) so it
+// never rejects a real late-closing shift; a bare "HHMM" typo (930, 1030,
+// 1800, 2200…) is always far past that no matter what time was meant.
+const MAX_SHIFT_HOUR = 30
+function findInvalidTimeEntries(entries) {
+  const bad = []
+  entries.forEach((entry) => {
+    ;['startTime', 'endTime'].forEach((field) => {
+      const raw = entry[field]
+      if (raw === '' || raw == null) return
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n < 0 || n > MAX_SHIFT_HOUR) {
+        bad.push({ staffName: entry.staffName, date: entry.date, field, value: raw })
+      }
+    })
+  })
+  return bad
+}
+
 export default function ManageRosterPage() {
   const { currentStoreId, accessibleStores, profile, refreshRosterUpdates, refreshBulletinUpdates } = useAuth()
   const location = useLocation()
@@ -89,6 +121,12 @@ export default function ManageRosterPage() {
   // warning above or the Clear-then-Submit confirm below, both of which are
   // fine to save/publish through once acknowledged.
   const [publishedDraftBlocked, setPublishedDraftBlocked] = useState(false)
+  // Jeff, 2026-10-30: an outright block, same shape as publishedDraftBlocked
+  // above (a plain OK modal, no "do it anyway" escape hatch) — see
+  // findInvalidTimeEntries' own comment for why this exists. Holds the list
+  // of bad cells (or null when there's nothing wrong) so the modal can name
+  // exactly which ones need fixing.
+  const [invalidTimeBlocked, setInvalidTimeBlocked] = useState(null)
   // Download template / Upload Excel / Export current grid used to be three
   // separate buttons crowding the toolbar — merged into one "Action"
   // dropdown at the right of the row (see the render below). `fileInputRef`
@@ -772,6 +810,15 @@ export default function ManageRosterPage() {
   // separate from and upstream of the understaffed-slots warning further
   // down, which is about staffing levels, not about publish-safety.
   function handleSaveOrSubmit(status) {
+    // Checked first, ahead of every other Save/Submit gate below — bad
+    // time values should never reach persist() regardless of publish
+    // state or staffing levels, and unlike those two this one has no
+    // "anyway" override.
+    const badEntries = findInvalidTimeEntries(entries)
+    if (badEntries.length) {
+      setInvalidTimeBlocked(badEntries)
+      return
+    }
     if (status === 'draft' && loadedPeriodStatus === 'submitted') {
       setPublishedDraftBlocked(true)
       return
@@ -1110,6 +1157,32 @@ export default function ManageRosterPage() {
             replace the live, already-published roster with {entries.length ? "what's currently on the grid" : 'an empty roster'}
             . Staff who can already see their published shifts for this week will see this change.
           </p>
+        </Modal>
+      )}
+
+      {invalidTimeBlocked && (
+        <Modal
+          open
+          onClose={() => setInvalidTimeBlocked(null)}
+          title="Some shift times don't look right"
+          footer={<Button onClick={() => setInvalidTimeBlocked(null)}>OK</Button>}
+        >
+          <div className="space-y-2 text-sm text-gray-700">
+            <p>
+              Shift times are entered as decimal hours — 10:30 is typed as <strong>10.5</strong>, not{' '}
+              <strong>1030</strong>. The following {invalidTimeBlocked.length === 1 ? 'cell doesn\'t' : 'cells don\'t'}{' '}
+              look like a valid time, so nothing has been saved or published yet. Fix{' '}
+              {invalidTimeBlocked.length === 1 ? 'it' : 'them'} and try again.
+            </p>
+            <ul className="list-inside list-disc space-y-1">
+              {invalidTimeBlocked.map((e, i) => (
+                <li key={i}>
+                  {e.staffName || 'Unnamed'} — {format(parseISO(e.date), 'EEE d MMM')} (
+                  {e.field === 'startTime' ? 'Start' : 'End'}): <strong>{String(e.value)}</strong>
+                </li>
+              ))}
+            </ul>
+          </div>
         </Modal>
       )}
 
