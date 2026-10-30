@@ -908,46 +908,25 @@ export default function ManageRosterPage() {
         ]
         return (
           <div className="mb-3">
-          {/* Jeff, 2026-10-30: "time format放在action按鈕上面(跟last,
-              current, next week tab同一行但最右邊)" — moved here from
-              beside View Staff's Availability/Action (same row's far right
-              now, via justify-between), and wraps onto its own line below
-              the tabs on a narrow phone rather than overlapping them. */}
-          <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
-            <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2">
-              {tabs.map(([label, start]) => {
-                const active = weekStart === start
-                return (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setWeekStart(start)}
-                    aria-pressed={active}
-                    className={
-                      active
-                        ? 'whitespace-nowrap rounded-full bg-brand-500 px-4 py-2 text-base font-bold text-white shadow-md ring-2 ring-brand-300 sm:px-6 sm:py-2.5 sm:text-lg'
-                        : 'whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500 hover:bg-brand-50 hover:text-brand-700 sm:px-4 sm:py-1.5 sm:text-sm'
-                    }
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
-            <label className="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
-              <span className="font-medium">Time format</span>
-              <select
-                className="input !w-auto !py-1 text-xs"
-                value={timeInputFormat}
-                onChange={(e) => setTimeInputFormat(e.target.value)}
-              >
-                {TIME_FORMAT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label} ({o.example})
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2">
+            {tabs.map(([label, start]) => {
+              const active = weekStart === start
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setWeekStart(start)}
+                  aria-pressed={active}
+                  className={
+                    active
+                      ? 'whitespace-nowrap rounded-full bg-brand-500 px-4 py-2 text-base font-bold text-white shadow-md ring-2 ring-brand-300 sm:px-6 sm:py-2.5 sm:text-lg'
+                      : 'whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500 hover:bg-brand-50 hover:text-brand-700 sm:px-4 sm:py-1.5 sm:text-sm'
+                  }
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
             {weekStart && !loadingPeriod && loadedPeriodStatus === null && (
               <div className="mt-1.5 text-sm text-gray-400">這一週還沒有已儲存的班表資料</div>
@@ -1061,6 +1040,35 @@ export default function ManageRosterPage() {
                   sm+, where the button genuinely is flush with the screen's
                   right edge again. */
               <div className="absolute left-0 z-30 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
+                {/* Jeff, 2026-10-30/31: "time format移到action裡面（在外面顯
+                    得有點亂），一樣選取後再選擇格式" — moved in here from its
+                    own standalone control next to the week tabs (both desktop
+                    and mobile share this one menu, so there's nothing
+                    separate to change per layout). Shown as its own
+                    unclosing section rather than two one-shot action
+                    buttons — a ✓ marks whichever of the two is currently
+                    active, same idea as the bold/filled "Current week" tab
+                    above. */}
+                <div className="px-3.5 pb-1 pt-2 text-xs font-semibold uppercase text-gray-400">Time format</div>
+                {TIME_FORMAT_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    className={`flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-sm hover:bg-brand-50 ${
+                      timeInputFormat === o.value ? 'font-medium text-brand-700' : 'text-gray-700'
+                    }`}
+                    onClick={() => {
+                      setActionMenuOpen(false)
+                      setTimeInputFormat(o.value)
+                    }}
+                  >
+                    <span>
+                      {o.label} ({o.example})
+                    </span>
+                    {timeInputFormat === o.value && <span aria-hidden="true">✓</span>}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-gray-100" />
                 {/* Jeff, 2026-10-24: "新增Copy Last Week的選項並放在最上面" —
                     see copyLastWeek() above for what it actually does. Its
                     own divider below separates it from the file-oriented
