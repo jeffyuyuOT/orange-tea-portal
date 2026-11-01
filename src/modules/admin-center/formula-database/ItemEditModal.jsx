@@ -375,7 +375,17 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
     setSteps((prev) => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, step_number: i + 1 })))
   }
 
-  async function save() {
+  // Jeff, 2026-11-02: "在save旁邊新增Silent Save的按鈕...這種save方式就不會
+  // 出現update提示，因為只是些許內容更改" — `silent` just adds one more
+  // column to the same update/insert payload (`silent_update`); the actual
+  // skip-the-push-notification logic lives entirely in the DB trigger
+  // (migration 0145, `notify_push_on_formula_update()`), which now returns
+  // early when `new.silent_update` is true. Explicitly setting it to `false`
+  // on an ordinary Save (not just leaving it out) matters: `.update()` only
+  // touches columns actually in the payload, so without this, saving
+  // normally right after a Silent Save would silently inherit that still-
+  // true value and keep skipping notifications from then on.
+  async function save(silent = false) {
     setSaving(true)
     try {
       let itemId = item.id
@@ -392,6 +402,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
         top_10: isDrink ? topTen : false,
         is_must_know: mustKnow,
         hide_from_formula: hideFromFormula,
+        silent_update: silent,
       }
       if (isNew) {
         const { data, error } = await supabase
@@ -503,9 +514,21 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
       extraWide
       title={isNew ? 'New Item' : 'Edit Item'}
       footer={
-        <Button onClick={save} disabled={saving || !nameEn}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          {!isNew && (
+            <Button
+              variant="secondary"
+              onClick={() => save(true)}
+              disabled={saving || !nameEn}
+              title="Saves without sending everyone a push notification — for a small edit that doesn't need to alert anyone."
+            >
+              {saving ? 'Saving…' : 'Silent Save'}
+            </Button>
+          )}
+          <Button onClick={() => save(false)} disabled={saving || !nameEn}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       }
     >
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
