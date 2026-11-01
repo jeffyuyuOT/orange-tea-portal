@@ -231,7 +231,7 @@ export async function loadOpeningBalance(storeId) {
   return unwrap(await supabase.from('bk_opening_balances').select('*').eq('store_id', storeId).maybeSingle())
 }
 
-export async function saveOpeningBalance(storeId, { startMonth, coh, ucoh }) {
+export async function saveOpeningBalance(storeId, { startMonth, coh, ucoh, dun }) {
   unwrap(
     await supabase.from('bk_opening_balances').upsert(
       {
@@ -239,6 +239,7 @@ export async function saveOpeningBalance(storeId, { startMonth, coh, ucoh }) {
         start_month: startMonth,
         coh: asNumber(coh),
         ucoh: asNumber(ucoh),
+        dun: asNumber(dun),
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'store_id' }
@@ -268,9 +269,9 @@ export async function loadCashMonth(storeId, year, month) {
       .order('entry_date')
       .order('created_at'),
   ])
-  const balRow = unwrap(bal)?.[0] ?? { coh: 0, ucoh: 0 }
+  const balRow = unwrap(bal)?.[0] ?? { coh: 0, ucoh: 0, dun: 0 }
   return {
-    open: { coh: asNumber(balRow.coh), ucoh: asNumber(balRow.ucoh) },
+    open: { coh: asNumber(balRow.coh), ucoh: asNumber(balRow.ucoh), dun: asNumber(balRow.dun) },
     sfDays: unwrap(sf) ?? [],
     cashDays: unwrap(cash) ?? [],
     entries: unwrap(entries) ?? [],

@@ -327,9 +327,10 @@ export function computeCashDay(oCa, cashDay, otherIncome = 0) {
 //   (SF cash here = O.CA + 其他收入 − D, see computeCashDay)
 //   COH  = opening COH  + Σ SF cash − Σ deposit + Σ withdraw − Σ Icost
 //   UCOH = opening UCOH + Σ D + Σ(+/−) − Σ Ucost − Σ 入金
-//   D    = Σ (D + +/−) of days whose 入庫 is NOT ticked
+//   耗損（未入庫）= opening 耗損（未入庫） + Σ (D + +/−) of days whose 入庫 is NOT ticked
+//                 (the balance carries over month to month like COH / UCOH; Jeff, 2026-11-01)
 //   P/L  = Σ D + Σ(+/−) − Σ Ucost
-export function computeCashSummary(openCoh, openUcoh, dayRows, entries) {
+export function computeCashSummary(openCoh, openUcoh, dayRows, entries, openDun = 0) {
   const sum = (arr) => round2(arr.reduce((a, b) => a + (b ?? 0), 0))
   const kindSum = (kind) => sum(entries.filter((e) => e.kind === kind).map((e) => toNum(e.amount)))
   const dep = kindSum('deposit')
@@ -343,7 +344,7 @@ export function computeCashSummary(openCoh, openUcoh, dayRows, entries) {
   const pmT = sum(dayRows.map((r) => r.pm))
   const dT = sum(dayRows.map((r) => r.d))
   const sfCashT = sum(dayRows.map((r) => r.sfCash))
-  const dUnstocked = sum(dayRows.filter((r) => !r.stocked).map((r) => (r.d ?? 0) + (r.pm ?? 0)))
+  const dUnstocked = round2((openDun ?? 0) + sum(dayRows.filter((r) => !r.stocked).map((r) => (r.d ?? 0) + (r.pm ?? 0))))
   return {
     coh: round2(openCoh + sfCashT - dep + wd - icost),
     ucoh: round2(openUcoh + dT + pmT - ucost - ruju),

@@ -221,7 +221,7 @@ const SIDE_LISTS = [
 // 分店現金: COH / UCOH / D / P/L for one store+month, the day-by-day table you
 // type 實 CA and D into, and the month's 收支 lists beside it.
 export default function StoreCashPanel({ stores, store, year, month, active, entriesVersion, drafts, onNavigate, onDirtyChange, onSaveReady, onEntriesChanged }) {
-  const [open, setOpen] = useState({ coh: 0, ucoh: 0 })
+  const [open, setOpen] = useState({ coh: 0, ucoh: 0, dun: 0 })
   const [sfMap, setSfMap] = useState({})
   const [cashDays, setCashDays] = useState({})
   const [entries, setEntries] = useState([])
@@ -372,7 +372,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     [dates, sfMap, cashDays, incomeMap]
   )
   const overLimit = useMemo(() => new Set(dLimitProblems(dayRows).map((r) => r.date)), [dayRows])
-  const summary = useMemo(() => computeCashSummary(open.coh, open.ucoh, dayRows, entries), [open, dayRows, entries])
+  const summary = useMemo(() => computeCashSummary(open.coh, open.ucoh, dayRows, entries, open.dun), [open, dayRows, entries])
 
   function setField(date, field, value) {
     setCashDays((prev) => ({ ...prev, [date]: { ...emptyCashDay(), ...prev[date], [field]: value } }))
@@ -475,6 +475,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         month: ob ? ob.start_month.slice(0, 7) : `${year}-${String(month).padStart(2, '0')}`,
         coh: ob ? numToInput(ob.coh) : '0',
         ucoh: ob ? numToInput(ob.ucoh) : '0',
+        dun: ob ? numToInput(ob.dun) : '0',
         error: '',
       })
     } catch (e) {
@@ -484,7 +485,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   async function saveBalance() {
     if (!/^\d{4}-\d{2}$/.test(balanceForm.month)) return setBalanceForm({ ...balanceForm, error: '請選擇開始月份。' })
     try {
-      await saveOpeningBalance(store.id, { startMonth: `${balanceForm.month}-01`, coh: balanceForm.coh, ucoh: balanceForm.ucoh })
+      await saveOpeningBalance(store.id, { startMonth: `${balanceForm.month}-01`, coh: balanceForm.coh, ucoh: balanceForm.ucoh, dun: balanceForm.dun })
       setBalanceForm(null)
       setReloadKey((k) => k + 1)
     } catch (e) {
@@ -563,7 +564,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard label="COH" value={summary.coh} hint={`上月月底 ${fmtMoney(open.coh)}`} />
             <SummaryCard label="UCOH" value={summary.ucoh} hint={`上月月底 ${fmtMoney(open.ucoh)}`} />
-            <SummaryCard label="耗損（未入庫）" value={summary.dUnstocked} hint="未勾入庫的耗損 + +/−" />
+            <SummaryCard label="耗損（未入庫）" value={summary.dUnstocked} hint={`上月月底 ${fmtMoney(open.dun)} + 本月未勾入庫的耗損 + +/−`} />
             <SummaryCard
               label="P/L"
               value={summary.pl}
@@ -766,7 +767,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         {balanceForm && (
           <div className="space-y-3">
             <Notice kind="info">
-              COH / UCOH 由這個起點逐月自動累計；起點之前的資料不會計入。之後修改任何舊月份，後面各月的「上月月底」會跟著重算。
+              COH / UCOH / 耗損（未入庫）由這個起點逐月自動累計；起點之前的資料不會計入。之後修改任何舊月份，後面各月的「上月月底」會跟著重算。
             </Notice>
             <Field label="從哪個月開始記帳">
               <input
@@ -781,6 +782,9 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
             </Field>
             <Field label="該月月初的 UCOH">
               <MoneyInput value={balanceForm.ucoh} onChange={(v) => setBalanceForm({ ...balanceForm, ucoh: v })} className="!border-brand-200 !bg-white !text-left" />
+            </Field>
+            <Field label="該月月初的耗損（未入庫）">
+              <MoneyInput value={balanceForm.dun} onChange={(v) => setBalanceForm({ ...balanceForm, dun: v })} className="!border-brand-200 !bg-white !text-left" />
             </Field>
             {balanceForm.error && <Notice kind="error">{balanceForm.error}</Notice>}
           </div>

@@ -109,13 +109,13 @@ export async function exportCashXlsx({ storeName, year, month, open, sfDaysMap, 
   const ws = wb.addWorksheet(monthLabel(year, month))
   const dates = monthDates(year, month)
   const dayRows = dates.map((date) => ({ date, ...computeCashDay(sfDaysMap[date], cashDaysMap[date]) }))
-  const s = computeCashSummary(open.coh, open.ucoh, dayRows, entries)
+  const s = computeCashSummary(open.coh, open.ucoh, dayRows, entries, open.dun)
 
   ws.addRow([`${storeName} — U 分店現金 ${monthLabel(year, month)}`]).font = { bold: true, size: 14 }
   ws.addRow([])
   styleHeader(ws.addRow(['COH', 'UCOH', '耗損 + +/− (未入庫)', 'P/L']))
   ws.addRow([s.coh, s.ucoh, s.dUnstocked, s.pl])
-  ws.addRow(['上月月底 COH', open.coh, '上月月底 UCOH', open.ucoh])
+  ws.addRow(['上月月底 COH', open.coh, '上月月底 UCOH', open.ucoh, '上月月底 耗損（未入庫）', open.dun ?? 0])
   ws.addRow([])
 
   styleHeader(ws.addRow(['Date', 'O.CA', '實 CA', '+/−', '耗損', '入庫', 'SF cash']))

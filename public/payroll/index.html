@@ -2019,7 +2019,14 @@ async function syncEmployeesFromStaffInfo(store, real){
     const existing = byProfileId.get(rs.profileId);
     if(existing){
       let changed = false;
-      ["dob","tfn","email","phone","bankAccountName","bankBsb","bankAccountNumber","name"].forEach(k=>{ if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; } });
+      // Jeff, 2026-10-29: OT Portal clears bank details 30 days after they were saved (migration 0155).
+      // PR keeps its own copy — a blank bank field from Staff Information must NOT overwrite it
+      // (a changed, non-blank value still does).
+      const BANK_KEYS = ["bankAccountName","bankBsb","bankAccountNumber"];
+      ["dob","tfn","email","phone",...BANK_KEYS,"name"].forEach(k=>{
+        if(BANK_KEYS.includes(k) && !rs[k]) return;
+        if(existing[k]!==rs[k]){ existing[k]=rs[k]; changed=true; }
+      });
       if(existing.hireDate!==rs.hireDate){ existing.hireDate = rs.hireDate; changed=true; }
       if(existing.resignDate){ existing.resignDate = null; changed=true; } // Staff Information 那邊重新在職了
       if(rs.cashInHand && existing.paymentType!=="CA"){
