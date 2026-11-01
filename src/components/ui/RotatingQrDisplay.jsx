@@ -26,6 +26,11 @@ export default function RotatingQrDisplay({ buildPayload, size = 300 }) {
 
     function draw() {
       if (cancelled || !canvasRef.current) return
+      // Jeff, 2026-11-01: a QR left in a background tab doesn't need redrawing
+      // (nobody can scan it), and every draw calls correctedNow() which can hit
+      // Supabase. The visibilitychange handler below redraws instantly the
+      // moment the tab is shown again, so scanning always sees a fresh code.
+      if (document.hidden) return
       QRCode.toCanvas(canvasRef.current, buildPayload(), { width: size, margin: 2 }).catch(() => {})
       lastDraw = Date.now()
       setNow(new Date())

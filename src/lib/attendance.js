@@ -37,6 +37,13 @@ let serverClockOffsetFetchedAt = 0
 const SERVER_CLOCK_REFRESH_MS = 5 * 60 * 1000 // clock drift is slow; no need to re-check often
 
 async function refreshServerClockOffset() {
+  // Jeff, 2026-11-01: record the ATTEMPT time up front, not only on success.
+  // The `Date` header of this cross-origin response isn't always readable
+  // from the browser, in which case the old success-only update never ran
+  // and correctedNow() re-fetched /auth/v1/health on EVERY QR redraw (~5,000
+  // log lines/day on the Supabase free plan's log-ingestion quota). Now a
+  // failed/unreadable attempt also waits out SERVER_CLOCK_REFRESH_MS.
+  serverClockOffsetFetchedAt = Date.now()
   try {
     const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/health`)
     const dateHeader = res.headers.get('date')
@@ -44,7 +51,6 @@ async function refreshServerClockOffset() {
       const serverMs = new Date(dateHeader).getTime()
       if (Number.isFinite(serverMs)) {
         serverClockOffsetMs = serverMs - Date.now()
-        serverClockOffsetFetchedAt = Date.now()
       }
     }
   } catch {

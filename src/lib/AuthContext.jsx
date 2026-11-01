@@ -34,6 +34,8 @@ function isNetworkError(error) {
 // indefinitely. The original request is simply abandoned, not aborted —
 // if it does eventually resolve, nothing is still listening for it.
 const REQUEST_TIMEOUT_MS = 8000
+// Min gap between app-foreground (visibilitychange) refreshes — see 2026-11-01 notes below.
+const FOREGROUND_REFRESH_MIN_MS = 5 * 60 * 1000
 function withTimeout(promise, ms = REQUEST_TIMEOUT_MS) {
   return Promise.race([
     promise,
@@ -406,10 +408,21 @@ export function AuthProvider({ children }) {
     })
   }, [])
 
+  // Jeff, 2026-11-01: Supabase free-plan log ingestion hit its 1 GB quota, and
+  // foreground refreshes (every tab switch / screen wake on every phone and
+  // shop PC) were a top source of requests — so a foreground refresh now only
+  // runs if the last one was over FOREGROUND_REFRESH_MIN_MS ago.
+  const lastStoreFlagsRefreshRef = useRef(Date.now())
   useEffect(() => {
     if (!session?.user) return undefined
     refreshStoreFlags()
-    const onVisible = () => { if (document.visibilityState === 'visible') refreshStoreFlags() }
+    lastStoreFlagsRefreshRef.current = Date.now()
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastStoreFlagsRefreshRef.current < FOREGROUND_REFRESH_MIN_MS) return
+      lastStoreFlagsRefreshRef.current = Date.now()
+      refreshStoreFlags()
+    }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [session?.user?.id, refreshStoreFlags])
@@ -730,10 +743,16 @@ export function AuthProvider({ children }) {
   // AppShell.jsx's push-notification-clearing effect already uses, just for
   // the opposite direction (making a new badge APPEAR promptly, not making a
   // stale one disappear).
+  const lastBadgesForegroundRefreshRef = useRef(Date.now())
   useEffect(() => {
     if (!profile?.id) return
     function onVisible() {
-      if (document.visibilityState === 'visible') refreshAllBadges()
+      if (document.visibilityState !== 'visible') return
+      // Jeff, 2026-11-01: skip if refreshed within FOREGROUND_REFRESH_MIN_MS
+      // (log-ingestion quota) — push notifications cover urgent items.
+      if (Date.now() - lastBadgesForegroundRefreshRef.current < FOREGROUND_REFRESH_MIN_MS) return
+      lastBadgesForegroundRefreshRef.current = Date.now()
+      refreshAllBadges()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
