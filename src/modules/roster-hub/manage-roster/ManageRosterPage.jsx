@@ -1034,8 +1034,8 @@ export default function ManageRosterPage() {
               sticky further down the page. */}
           <div className="relative" ref={actionMenuRef}>
             <Button variant="secondary" onClick={() => setActionMenuOpen((open) => !open)} title="Action" aria-label="Action">
-              <span className="sm:hidden" aria-hidden="true">⋯</span>
-              <span className="hidden sm:inline">Action ▾</span>
+              {/* Jeff, 2026-11-02: text on mobile too (was a ⋯ icon there). */}
+              Action ▾
             </Button>
             {actionMenuOpen && (
               /* Jeff, 2026-10-03 (screenshot): "點三個點跳出動作視窗還是會
