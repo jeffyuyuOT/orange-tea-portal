@@ -256,11 +256,16 @@ function EditTimeModal({ target, timeInputFormat, availabilityByProfile, leavesB
 
 function ShiftCell({ entry, onReplace, onEditTime }) {
   return (
-    <div className="rounded-lg border border-brand-100 bg-white px-2 py-1.5">
+    // Jeff, 2026-11-02: on a phone the name and time used to be stacked, so
+    // the two tap targets sat right on top of each other and it was easy to
+    // hit the wrong one. Below `sm` they now share one row — name on the
+    // left, time after it on the right, with a gap between and taller tap
+    // areas — while the 7-column desktop layout keeps the stacked cell.
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-brand-100 bg-white px-2 py-0.5 sm:block sm:py-1.5">
       <button
         type="button"
         onClick={() => onReplace(entry)}
-        className="block w-full truncate text-left text-xs font-semibold text-gray-800 underline decoration-dotted decoration-gray-300 underline-offset-2 hover:text-brand-700 hover:decoration-brand-500"
+        className="block min-w-0 flex-1 truncate py-2 text-left text-sm font-semibold text-gray-800 underline decoration-dotted decoration-gray-300 underline-offset-2 hover:text-brand-700 hover:decoration-brand-500 sm:w-full sm:flex-none sm:py-0 sm:text-xs"
         title="Click to swap in someone else for this shift"
       >
         {entry.staffName || 'Unnamed'}
@@ -268,7 +273,7 @@ function ShiftCell({ entry, onReplace, onEditTime }) {
       <button
         type="button"
         onClick={() => onEditTime(entry)}
-        className="mt-0.5 block w-full text-left text-[11px] text-brand-700 hover:underline"
+        className="block shrink-0 whitespace-nowrap py-2 pl-2 text-right text-sm text-brand-700 hover:underline sm:mt-0.5 sm:w-full sm:whitespace-normal sm:py-0 sm:pl-0 sm:text-left sm:text-[11px]"
         title="Click to change this shift's time"
       >
         {hourLabel(entry.startTime)} – {hourLabel(entry.endTime)}
