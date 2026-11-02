@@ -2,10 +2,18 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { dayHours, rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
-import { shiftConflictsWithAvailability, shiftConflictsWithLeave, leaveWindowOnDate, minutesToLabel } from '../../../lib/availability'
+import {
+  shiftConflictsWithAvailability,
+  shiftConflictsWithLeave,
+  leaveWindowOnDate,
+  minutesToLabel,
+  computeAvailableWindows,
+  availableWindowsWithLeave,
+} from '../../../lib/availability'
 import { loadRosterDisplaySettings, rosterTitleStyle } from '../../../lib/trainingJourney'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import { DayAvailabilityModal, PersonAvailabilityModal } from './StaffAvailabilityModal'
 
 // Always read the weekday off the actual date, never off its position in the
 // week — "Week starting (Mon)" is only a hint for what to pick, it doesn't
@@ -19,6 +27,16 @@ function weekdayLabel(dateStr) {
 
 function round2(n) {
   return Math.round(n * 100) / 100
+}
+
+// Jeff, 2026-11-02: "整天不行的員工，當天輸入時間的格子用不同顏色區別" — the
+// Start/End cells of a person on a day they can't work at all (declared
+// all-day unavailable, or approved leave covering whatever availability
+// they did declare) get this tint. `!` so it wins over the base .input
+// background/border.
+const BLOCKED_CELL_CLASS = '!border-rose-300 !bg-rose-100'
+function blockedTitle(reason) {
+  return reason === 'leave' ? 'On approved leave all day' : 'Unavailable all day'
 }
 
 // The same Name × day-of-week grid the manager already builds in Excel:
@@ -85,6 +103,11 @@ export default function RosterEntryGrid({
   // currently selected. Desktop already shows the full week in one row per
   // person (the table above), so this is mobile-only — see MobileStaffCard.
   const [weekSummaryRow, setWeekSummaryRow] = useState(null)
+  // Jeff, 2026-11-02: clicking a date header (desktop) / re-tapping the
+  // selected day tab (mobile) opens that day's availability popup; clicking
+  // a staff name opens weekSummaryRow's popup, which is now Availability
+  // (default) + Shift summary tabs instead of the shift list alone.
+  const [availabilityDate, setAvailabilityDate] = useState(null)
 
   // Jeff, 2026-10-02 (Training Journey spec, point 6): System Setting >
   // Roster Name Display Format + the 6 phase definitions — same fetch-once
@@ -124,6 +147,21 @@ export default function RosterEntryGrid({
     if (shiftConflictsWithAvailability(Number(start), Number(end), avail.dayRow, avail.windows)) {
       setConflictWarning({ type: 'availability', name: row.name, date, start: Number(start), end: Number(end) })
     }
+  }
+
+  // null (fine / nothing known yet), 'unavailable' (their own declared
+  // availability leaves no time that day) or 'leave' (approved leave is what
+  // takes the last of it). Never fires for rows without a profileId (pending/
+  // imported/manual names have no availability on file), and never before
+  // availability/leave have loaded — a still-loading week must not read as
+  // "everyone's blocked".
+  function dayBlock(row, date) {
+    if (!row.profileId) return null
+    const avail = availabilityByProfile?.[row.profileId]?.[date]
+    const leaveWindowsForDay = (leavesByProfile?.[row.profileId] ?? []).map((l) => leaveWindowOnDate(l, date)).filter(Boolean)
+    if (!avail && !leaveWindowsForDay.length) return null
+    if (availableWindowsWithLeave(avail?.dayRow, avail?.windows, leaveWindowsForDay).length) return null
+    return computeAvailableWindows(avail?.dayRow, avail?.windows).length === 0 ? 'unavailable' : 'leave'
   }
 
   const importedNames = useMemo(
@@ -353,8 +391,15 @@ export default function RosterEntryGrid({
                 Name
               </th>
               {weekDates.map((d) => (
-                <th key={d} colSpan={2} className="border border-brand-100 px-1 py-0.5 text-center font-medium text-brand-700">
-                  {weekdayLabel(d)} {d.slice(5)}
+                <th key={d} colSpan={2} className="border border-brand-100 p-0 text-center font-medium text-brand-700">
+                  <button
+                    type="button"
+                    onClick={() => setAvailabilityDate(d)}
+                    className="w-full px-1 py-0.5 hover:bg-brand-100"
+                    title="Click to see who's available this day"
+                  >
+                    {weekdayLabel(d)} {d.slice(5)}
+                  </button>
                 </th>
               ))}
               <th rowSpan={2} className="border border-brand-100 px-1.5 py-1 text-center font-medium text-brand-700">
@@ -391,6 +436,8 @@ export default function RosterEntryGrid({
                   displayFormat={displayFormat}
                   phases={phases}
                   timeInputFormat={timeInputFormat}
+                  onShowWeek={() => setWeekSummaryRow(row)}
+                  dayBlock={dayBlock}
                 />
               )
             })}
@@ -419,7 +466,9 @@ export default function RosterEntryGrid({
           {weekDates.map((d, i) => (
             <button
               key={d}
-              onClick={() => setMobileDayIdx(i)}
+              // Select the day first; tapping the already-selected day
+              // again shows that day's available time.
+              onClick={() => (i === mobileDayIdx ? setAvailabilityDate(d) : setMobileDayIdx(i))}
               className={`flex flex-1 flex-col items-center gap-0.5 border-b-2 py-2 text-xs font-medium ${
                 i === mobileDayIdx ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-transparent text-gray-400'
               }`}
@@ -448,6 +497,7 @@ export default function RosterEntryGrid({
                 phases={phases}
                 timeInputFormat={timeInputFormat}
                 onShowWeek={() => setWeekSummaryRow(row)}
+                dayBlock={dayBlock}
               />
             )
           })}
@@ -463,6 +513,10 @@ export default function RosterEntryGrid({
         </button>
         <span className="ml-2 text-xs text-gray-400">
           For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
+        </span>
+        <span className="ml-3 inline-flex items-center gap-1 text-xs text-gray-400">
+          <span className="inline-block h-3 w-3 rounded border border-rose-300 bg-rose-100" aria-hidden="true" />
+          Unavailable / on leave all day
         </span>
       </div>
 
@@ -495,38 +549,57 @@ export default function RosterEntryGrid({
         )}
       </Modal>
 
-      <Modal open={!!weekSummaryRow} onClose={() => setWeekSummaryRow(null)} title={weekSummaryRow ? `${weekSummaryRow.name}'s week` : ''}>
-        {weekSummaryRow && (
-          <div className="space-y-2">
-            {weekDates.map((date) => {
-              const entry = findEntry(weekSummaryRow, date)
-              const hasShift = entry?.startTime !== '' && entry?.startTime != null && entry?.endTime !== '' && entry?.endTime != null
-              return (
-                <div key={date} className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2">
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">{weekdayLabel(date)}</div>
-                    <div className="text-xs text-gray-400">{format(parseISO(date), 'd MMM')}</div>
-                  </div>
-                  {hasShift ? (
-                    <div className="text-right">
-                      <div className="text-base font-semibold text-brand-700">
-                        {minutesToLabel(Math.round(Number(entry.startTime) * 60))} – {minutesToLabel(Math.round(Number(entry.endTime) * 60))}
-                      </div>
-                      <div className="text-xs text-gray-400">{dayHours(entry)} hr worked</div>
+      <PersonAvailabilityModal
+        open={!!weekSummaryRow}
+        onClose={() => setWeekSummaryRow(null)}
+        profileId={weekSummaryRow?.profileId}
+        name={weekSummaryRow?.name ?? ''}
+        weekDates={weekDates}
+        staff={staff}
+        availabilityByProfile={availabilityByProfile}
+        leavesByProfile={leavesByProfile}
+        shiftSummary={
+          weekSummaryRow && (
+            <div className="space-y-2">
+              {weekDates.map((date) => {
+                const entry = findEntry(weekSummaryRow, date)
+                const hasShift = entry?.startTime !== '' && entry?.startTime != null && entry?.endTime !== '' && entry?.endTime != null
+                return (
+                  <div key={date} className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-800">{weekdayLabel(date)}</div>
+                      <div className="text-xs text-gray-400">{format(parseISO(date), 'd MMM')}</div>
                     </div>
-                  ) : (
-                    <span className="text-sm text-gray-300">Off</span>
-                  )}
-                </div>
-              )
-            })}
-            <div className="flex items-center justify-between border-t border-brand-100 pt-2 text-sm font-semibold text-brand-800">
-              <span>Week total</span>
-              <span>{rowTotals(weekSummaryRow).total || 0} hr</span>
+                    {hasShift ? (
+                      <div className="text-right">
+                        <div className="text-base font-semibold text-brand-700">
+                          {minutesToLabel(Math.round(Number(entry.startTime) * 60))} – {minutesToLabel(Math.round(Number(entry.endTime) * 60))}
+                        </div>
+                        <div className="text-xs text-gray-400">{dayHours(entry)} hr worked</div>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-300">Off</span>
+                    )}
+                  </div>
+                )
+              })}
+              <div className="flex items-center justify-between border-t border-brand-100 pt-2 text-sm font-semibold text-brand-800">
+                <span>Week total</span>
+                <span>{rowTotals(weekSummaryRow).total || 0} hr</span>
+              </div>
             </div>
-          </div>
-        )}
-      </Modal>
+          )
+        }
+      />
+
+      <DayAvailabilityModal
+        open={!!availabilityDate}
+        onClose={() => setAvailabilityDate(null)}
+        dateStr={availabilityDate}
+        staff={staff}
+        availabilityByProfile={availabilityByProfile}
+        leavesByProfile={leavesByProfile}
+      />
     </div>
   )
 }
@@ -586,7 +659,9 @@ function parseHourInput(raw, format) {
   return format === 'compact' ? compactToDecimalHours(n) : n
 }
 
-function HourInput({ value, onChange, onBlur, disabled, className = '', style, title, format = 'decimal' }) {
+// Exported so RosterSummaryView's "edit shift time" popup types times with
+// the same Decimal/Compact parsing as the grid.
+export function HourInput({ value, onChange, onBlur, disabled, className = '', style, title, format = 'decimal' }) {
   const [focused, setFocused] = useState(false)
   const [draft, setDraft] = useState(() => formatHourForDisplay(value, format))
 
@@ -623,7 +698,7 @@ function HourInput({ value, onChange, onBlur, disabled, className = '', style, t
   )
 }
 
-function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, timeInputFormat }) {
+function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, timeInputFormat, onShowWeek, dayBlock }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -649,10 +724,12 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
           <div className="flex items-center gap-1.5">
             <div className="min-w-0 flex-1">
               {row.profileId ? (
-                <span
-                  className={displayFormat === 'original' && notQualified ? 'text-red-600' : undefined}
+                <button
+                  type="button"
+                  onClick={() => onShowWeek?.(row)}
+                  className={`text-left underline decoration-dotted decoration-gray-300 underline-offset-2 hover:decoration-brand-500 ${displayFormat === 'original' && notQualified ? 'text-red-600' : ''}`}
                   style={colorStyle}
-                  title={displayFormat === 'original' && notQualified ? 'Not yet Qualified' : undefined}
+                  title={displayFormat === 'original' && notQualified ? "Not yet Qualified — click to see this week's availability" : "Click to see this week's availability"}
                 >
                   {row.name || <span className="text-gray-400">Unnamed</span>}
                   {titleStyle?.icon && (
@@ -661,7 +738,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                     </span>
                   )}
                   {titleStyle?.badge && <span className="ml-1 text-[10px] font-normal text-gray-400">{titleStyle.badge}</span>}
-                </span>
+                </button>
               ) : (
                 <input
                   className="input !px-1.5 !py-0.5 text-xs"
@@ -678,6 +755,8 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
         </td>
         {weekDates.map((date) => {
           const entry = findEntry(row, date)
+          const block = dayBlock?.(row, date)
+          const cellClass = `${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''} ${block ? BLOCKED_CELL_CLASS : ''}`
           return (
             <Fragment key={date}>
               <td className="border border-brand-100 px-0.5 py-0.5">
@@ -686,8 +765,9 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   disabled={nameEmpty}
                   onChange={(v) => updateCell(row, date, { startTime: v })}
                   onBlur={() => onCheckConflict?.(row, date)}
-                  className={displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}
+                  className={cellClass}
                   style={colorStyle}
+                  title={block ? blockedTitle(block) : undefined}
                   format={timeInputFormat}
                 />
               </td>
@@ -697,8 +777,9 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
                   disabled={nameEmpty}
                   onChange={(v) => updateCell(row, date, { endTime: v })}
                   onBlur={() => onCheckConflict?.(row, date)}
-                  className={displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}
+                  className={cellClass}
                   style={colorStyle}
+                  title={block ? blockedTitle(block) : undefined}
                   format={timeInputFormat}
                 />
               </td>
@@ -743,7 +824,7 @@ function StaffRowPair({ row, weekDates, findEntry, updateCell, renameRow, remove
 // instead of two wide table rows. Wk/WKD totals still reflect the whole
 // week (computed the same way as desktop) so switching days doesn't lose
 // sight of the running total.
-function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, timeInputFormat, onShowWeek }) {
+function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRow, total, wkd, onCheckConflict, displayFormat, phases, timeInputFormat, onShowWeek, dayBlock }) {
   const nameEmpty = !row.name.trim()
   const isPersisted = row.kind === 'staff' || row.kind === 'pending'
   const removeTitle = isPersisted
@@ -753,6 +834,8 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
   const titleStyle = displayFormat !== 'original' && row.kind === 'staff' ? rosterTitleStyle(row, phases, displayFormat) : null
   const colorStyle = titleStyle?.color ? { color: titleStyle.color } : undefined
   const entry = findEntry(row, date)
+  const block = dayBlock?.(row, date)
+  const blockClass = block ? BLOCKED_CELL_CLASS : ''
   // Jeff, 2026-10-02: "想辦法讓名字，S/E/B的資訊，刪除跟total work hr的資訊
   // 都放在同一行嗎，名字的字可以再縮小一點讓後面空間大一點" — Start/End/
   // Break used to be their own labeled 3-column grid below the name/
@@ -806,8 +889,9 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
         disabled={nameEmpty}
         onChange={(v) => updateCell(row, date, { startTime: v })}
         onBlur={() => onCheckConflict?.(row, date)}
-        className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}`}
+        className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''} ${blockClass}`}
         style={colorStyle}
+        title={block ? blockedTitle(block) : undefined}
         format={timeInputFormat}
       />
       <span className="shrink-0 text-[10px] font-medium text-gray-400">E</span>
@@ -816,8 +900,9 @@ function MobileStaffCard({ row, date, findEntry, updateCell, renameRow, removeRo
         disabled={nameEmpty}
         onChange={(v) => updateCell(row, date, { endTime: v })}
         onBlur={() => onCheckConflict?.(row, date)}
-        className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''}`}
+        className={`!w-11 shrink-0 !px-0.5 text-xs ${displayFormat === 'original' && notQualified ? 'text-red-600 font-medium' : ''} ${blockClass}`}
         style={colorStyle}
+        title={block ? blockedTitle(block) : undefined}
         format={timeInputFormat}
       />
       <span className="shrink-0 text-[10px] font-medium text-red-500" title="Half-hour units — 1 = 30 min, 2 = 1 hr">

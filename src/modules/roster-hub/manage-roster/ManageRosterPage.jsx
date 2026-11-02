@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { addDays, format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
@@ -6,9 +6,9 @@ import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import Modal from '../../../components/ui/Modal'
 import RosterEntryGrid, { formatHourForDisplay } from './RosterEntryGrid'
+import RosterSummaryView from './RosterSummaryView'
 import UnderstaffedWarnings, { computeUnderstaffedWarnings } from './UnderstaffedWarnings'
 import ImportReconcileModal from './ImportReconcileModal'
-import StaffAvailabilityModal from './StaffAvailabilityModal'
 import {
   downloadRosterTemplate,
   parseRosterGrid,
@@ -171,17 +171,15 @@ export default function ManageRosterPage() {
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const actionMenuRef = useRef(null)
   const fileInputRef = useRef(null)
-  // "View Staff's Availability" — read-only, sits beside the Action
-  // dropdown rather than inside it since it's a lookup, not a
-  // destructive/file operation the way the other three menu items are.
-  const [availabilityModalOpen, setAvailabilityModalOpen] = useState(false)
-  // Jeff, 2026-10-27: lifted out of RosterEntryGrid (which owned this
-  // itself until now) so StaffAvailabilityModal's new "By Date" tab can
-  // default-expand to whichever day is currently showing in the mobile
-  // day-tabs below ("手機板的點by date的話會預設展開顯示正在選取排班表的
-  // 那一天") — RosterEntryGrid still reads/writes it exactly the same way,
-  // just via props now instead of its own useState.
+  // Which day the mobile day-tabs below currently show (lifted out of
+  // RosterEntryGrid, which passes it back down as props).
   const [mobileDayIdx, setMobileDayIdx] = useState(0)
+  // Jeff, 2026-11-02: the toolbar's Summary / Input page toggle (it took the
+  // spot "View Staff's Availability" used to have). true swaps the entry grid
+  // for RosterSummaryView — only offered once this week has a saved or
+  // published roster (loadedPeriodStatus, below), see the effect after the
+  // availability fetch.
+  const [summaryMode, setSummaryMode] = useState(false)
   // Jeff, 2026-10-02: "上面的那一段說明改到instruction小圖示放在submit那一
   // 行的最右邊，點擊圖示在跳出視窗顯示這一段說明" — the "Fill in the grid
   // below..." paragraph that used to sit permanently under the page title
@@ -440,6 +438,14 @@ export default function ManageRosterPage() {
       cancelled = true
     }
   }, [weekStart, staff])
+
+  // Landing on a week with nothing saved yet (picking another week, Last/
+  // Next week) drops back to the Input page — Summary only makes sense for a
+  // week that already has a saved/published roster. Waits for loadingPeriod
+  // so the previous week's status isn't mistaken for this one's.
+  useEffect(() => {
+    if (summaryMode && !loadingPeriod && loadedPeriodStatus === null) setSummaryMode(false)
+  }, [summaryMode, loadingPeriod, loadedPeriodStatus])
 
   const weekDates = weekStart ? Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(weekStart), i), 'yyyy-MM-dd')) : []
   // Pending staff show up in the downloadable template and "current grid"
@@ -997,17 +1003,26 @@ export default function ManageRosterPage() {
         </div>
 
         <div className="flex items-end gap-2 sm:gap-3">
+          {/* Jeff, 2026-11-02: Summary / Input page toggle, in the spot the
+              old "View Staff's Availability" button had. Only usable once
+              this week has saved/published data (you can always leave
+              Summary). Mobile shows an icon, like the old button did. */}
           <Button
             variant="secondary"
-            onClick={() => setAvailabilityModalOpen(true)}
-            disabled={!weekStart}
-            title="View Staff's Availability"
-            aria-label="View Staff's Availability"
+            onClick={() => setSummaryMode((on) => !on)}
+            disabled={!weekStart || loadingPeriod || (!summaryMode && loadedPeriodStatus === null)}
+            title={
+              summaryMode
+                ? 'Back to the Input page'
+                : loadedPeriodStatus === null
+                  ? 'Summary is available once this week has a saved or published roster'
+                  : 'Summary of this week'
+            }
+            aria-label={summaryMode ? 'Input page' : 'Summary'}
           >
-            <span className="sm:hidden" aria-hidden="true">👥</span>
-            <span className="hidden sm:inline">View Staff's Availability</span>
+            <span className="sm:hidden" aria-hidden="true">{summaryMode ? '✏️' : '📋'}</span>
+            <span className="hidden sm:inline">{summaryMode ? 'Input page' : 'Summary'}</span>
           </Button>
-
           {/* Jeff, 2026-10-02 (screenshot): this dropdown used to be z-10,
               same as the grid's sticky day/date header below it (see
               RosterEntryGrid's 2026-10-01 "freeze header on scroll" change)
@@ -1144,19 +1159,37 @@ export default function ManageRosterPage() {
         </p>
       </Modal>
 
-      <RosterEntryGrid
-        staff={staff}
-        pendingStaff={pendingStaff}
-        weekDates={weekDates}
-        entries={entries}
-        setEntries={setEntries}
-        onHideStaff={persistHideStaff}
-        availabilityByProfile={availabilityByProfile}
-        leavesByProfile={leavesByProfile}
-        mobileDayIdx={mobileDayIdx}
-        setMobileDayIdx={setMobileDayIdx}
-        timeInputFormat={timeInputFormat}
-      />
+      {/* Kept mounted (just hidden) while Summary is showing, so anything the
+          grid holds locally — "+ Add row" names not yet typed hours for —
+          is still there when switching back to the Input page. */}
+      <div className={summaryMode ? 'hidden' : undefined}>
+        <RosterEntryGrid
+          staff={staff}
+          pendingStaff={pendingStaff}
+          weekDates={weekDates}
+          entries={entries}
+          setEntries={setEntries}
+          onHideStaff={persistHideStaff}
+          availabilityByProfile={availabilityByProfile}
+          leavesByProfile={leavesByProfile}
+          mobileDayIdx={mobileDayIdx}
+          setMobileDayIdx={setMobileDayIdx}
+          timeInputFormat={timeInputFormat}
+        />
+      </div>
+      {summaryMode && (
+        <RosterSummaryView
+          staff={staff}
+          weekDates={weekDates}
+          entries={entries}
+          setEntries={setEntries}
+          availabilityByProfile={availabilityByProfile}
+          leavesByProfile={leavesByProfile}
+          mobileDayIdx={mobileDayIdx}
+          setMobileDayIdx={setMobileDayIdx}
+          timeInputFormat={timeInputFormat}
+        />
+      )}
 
       <label className="mt-4 block">
         <span className="mb-1 block text-xs font-medium text-gray-500">Notes</span>
@@ -1170,16 +1203,6 @@ export default function ManageRosterPage() {
           known={importReview.known}
           onCancel={() => setImportReview(null)}
           onConfirm={confirmReview}
-        />
-      )}
-
-      {weekStart && (
-        <StaffAvailabilityModal
-          open={availabilityModalOpen}
-          onClose={() => setAvailabilityModalOpen(false)}
-          staff={staff}
-          weekStart={weekStart}
-          mobileDayIdx={mobileDayIdx}
         />
       )}
 

@@ -1,130 +1,37 @@
 import { useEffect, useState } from 'react'
-import { addDays, format, parseISO } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 import { rosterDisplayName } from '../../../lib/excelRoster'
-import {
-  weekDatesFrom,
-  loadWeekAvailabilityForProfiles,
-  describeDayWithLeave,
-  availableWindowsWithLeave,
-  leaveWindowOnDate,
-} from '../../../lib/availability'
+import { describeDayWithLeave, availableWindowsWithLeave, leaveWindowOnDate } from '../../../lib/availability'
 import { timeToMinutes, formatTickLabel, buildHourlyTicks, pickColor } from '../../../lib/timelineBar'
 
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+// Jeff, 2026-11-02: the old "View Staff's Availability" button + its
+// By Date / By Person tabbed modal are gone. The same two views now hang
+// off the roster grid itself:
+//   - click a date header (desktop) / tap the already-selected day tab
+//     (mobile) -> DayAvailabilityModal, "by date" (everyone's available
+//     time that day as a color-bar timeline);
+//   - click a staff name -> PersonAvailabilityModal, "by person" (that
+//     person's available time for the week) with a second "Shift summary"
+//     tab holding what the name click used to show (their scheduled shifts
+//     + total hours). Availability is the default tab.
+// Availability + leave data are the week's data ManageRosterPage already
+// loads for the shift-conflict check, passed in as props — no second fetch.
+// Only the store's open/close hours (the timeline axis) are fetched here.
 
-// Jeff, 2026-09: "在roster hub上的manage roster的action旁邊新增view staff's
-// availability，點擊則會跳出視窗顯示編排該週員工登記的available time" — a
-// read-only view of everyone's registered availability for the week. Staff
-// with nothing saved for a day just read "All day available" (the same
-// default computeAvailableWindows falls back to when there's no row), so
-// this list is complete for every staff member on the roster, not just the
-// ones who've actually filled something in.
-//
-// Jeff, 2026-10-01: "view staff available time的視窗能做到員工時間資訊用展
-// 開顯示，預設不展開，所以視窗一開始是名字的清單，要看哪一個員工再點擊名字
-// 展開。再點擊一下則收起" — collapsed by default; the modal opens as a plain
-// name list and clicking a name expands just that person's day-by-day grid
-// (click again to collapse).
-//
-// Jeff, 2026-10-27: "manager roster在看員工available time的頁面，上面新增
-// tab"By Person" and "By Date"" — the view above is now just the "By
-// Person" tab, unchanged. "By Date" is new: Monday–Sunday, click a day to
-// expand and see everyone with any available time that day drawn as a
-// color-bar timeline (one bar per person), scaled to the store's open/close
-// hours from Roster Hub Setting's Labour allocation tab — "其操作方法跟
-// labour allocation看時間色條的邏輯一樣", so this reuses that tab's exact
-// axis/tick/color mechanics (lib/timelineBar.js) rather than a lookalike
-// copy. Desktop hover shows a tooltip; mobile tap opens a small popup
-// instead (see DayTimeline below). "手機板的點by date的話會預設展開顯示正
-// 在選取排班表的那一天" — handled by the mobileDayIdx prop, lifted up from
-// RosterEntryGrid's own mobile day-tabs so this modal can read which day
-// those tabs currently show.
-export default function StaffAvailabilityModal({ open, onClose, staff, weekStart, mobileDayIdx }) {
+function dayShort(dateStr) {
+  return format(parseISO(dateStr), 'EEE')
+}
+
+// Store's configured open/close hours, same shape RosterSettingsPage.jsx
+// loads for its own Labour allocation timeline.
+function useStoreHours(open) {
   const { currentStoreId } = useAuth()
-  const [byProfile, setByProfile] = useState(null)
-  // profileId -> that profile's active leave_requests rows touching this
-  // week — fetched alongside availability so a day's declared pattern can
-  // be reconciled against leave before it's shown (describeDayWithLeave).
-  // Jeff, 2026-10-02: "manager roster看staff's available time時會把leave的
-  // 時間加上去" — see availability.js's describeDayWithLeave comment for why.
-  const [leavesByProfile, setLeavesByProfile] = useState({})
-  // Jeff, 2026-10-01: "view staff available time的視窗能做到員工時間資訊用展
-  // 開顯示，預設不展開，所以視窗一開始是名字的清單，要看哪一個員工再點擊名字
-  // 展開。再點擊一下則收起" — collapsed by default; clicking a name toggles
-  // just that person's row independently of every other one (a Set of
-  // expanded profile ids, same toggle pattern MessagePage.jsx's thread
-  // expand/collapse already uses), so more than one can be open at once if
-  // that's what someone wants.
-  const [expandedIds, setExpandedIds] = useState(new Set())
-
-  // Jeff, 2026-10-27: "預設在by date" — By Date is now the modal's default
-  // tab (it's also listed first in the tab row — see the reorder below).
-  const [tab, setTab] = useState('date')
-  // Store's configured open/close hours, same shape RosterSettingsPage.jsx
-  // loads for its own Labour allocation timeline.
   const [storeHours, setStoreHours] = useState({ open: '', close: '' })
-  // By-Date accordion open/closed state — a Set of 'yyyy-MM-dd' strings,
-  // same toggle pattern as expandedIds above.
-  const [expandedDates, setExpandedDates] = useState(new Set())
-  // Mobile has no hover, so tapping a color bar opens this popup instead —
-  // { profile, dateStr, desc } | null.
-  const [mobileDetail, setMobileDetail] = useState(null)
-
-  function toggleExpanded(profileId) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(profileId)) next.delete(profileId)
-      else next.add(profileId)
-      return next
-    })
-  }
-
-  function toggleDate(dateStr) {
-    setExpandedDates((prev) => {
-      const next = new Set(prev)
-      if (next.has(dateStr)) next.delete(dateStr)
-      else next.add(dateStr)
-      return next
-    })
-  }
-
-  useEffect(() => {
-    if (!open) return
-    setByProfile(null)
-    setLeavesByProfile({})
-    const profileIds = staff.map((s) => s.id)
-    const weekStartDate = parseISO(weekStart)
-    const weekEndExclusive = addDays(weekStartDate, 7)
-    Promise.all([
-      loadWeekAvailabilityForProfiles(profileIds, weekStart),
-      profileIds.length
-        ? supabase
-            .from('leave_requests')
-            .select('*')
-            .in('profile_id', profileIds)
-            .eq('status', 'active')
-            .lt('start_at', weekEndExclusive.toISOString())
-            .gt('end_at', weekStartDate.toISOString())
-        : Promise.resolve({ data: [] }),
-    ]).then(([avail, { data: leaves }]) => {
-      setByProfile(avail)
-      const grouped = {}
-      ;(leaves ?? []).forEach((l) => {
-        ;(grouped[l.profile_id] ??= []).push(l)
-      })
-      setLeavesByProfile(grouped)
-    })
-    // `staff` is re-derived from a fresh query each time ManageRosterPage
-    // loads — comparing its length keeps this from re-fetching every render
-    // once the modal's open without missing a genuine roster change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, weekStart, staff.length])
-
   useEffect(() => {
     if (!open || !currentStoreId) return
     supabase
@@ -139,84 +46,62 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
         })
       })
   }, [open, currentStoreId])
+  return storeHours
+}
 
-  // Reset to a clean state every time the modal opens, and — mobile only —
-  // default-expand whichever day RosterEntryGrid's own mobile day-tabs are
-  // currently showing ("手機板的點by date的話會預設展開顯示正在選取排班表
-  // 的那一天"). Checked once on open rather than kept reactive, since the
-  // point is just "start where the grid was", not tracking it afterwards.
+// ManageRosterPage resets availabilityByProfile to {} while (re)loading and
+// every loaded profile has an entry, so "first profile missing" == not
+// loaded yet. Without this a still-loading week would read as "All day
+// available" for everyone (the no-row default).
+function availabilityLoading(staff, availabilityByProfile) {
+  return staff.length > 0 && !availabilityByProfile?.[staff[0].id]
+}
+
+function leavesOnDate(leavesByProfile, profileId, dateStr) {
+  return (leavesByProfile?.[profileId] ?? []).map((l) => leaveWindowOnDate(l, dateStr)).filter(Boolean)
+}
+
+export function DayAvailabilityModal({ open, onClose, dateStr, staff, availabilityByProfile, leavesByProfile }) {
+  const storeHours = useStoreHours(open)
+  // Mobile has no hover, so tapping a color bar opens this popup instead —
+  // { profile, desc } | null.
+  const [mobileDetail, setMobileDetail] = useState(null)
+
   useEffect(() => {
-    if (!open) return
-    setTab('date')
-    setMobileDetail(null)
-    let initial = new Set()
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches) {
-      const weekDates = weekDatesFrom(weekStart)
-      const d = weekDates[Math.min(mobileDayIdx ?? 0, weekDates.length - 1)]
-      if (d) initial = new Set([d])
-    }
-    setExpandedDates(initial)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+    if (open) setMobileDetail(null)
+  }, [open, dateStr])
 
-  if (!open) return null
+  if (!open || !dateStr) return null
 
-  const dates = weekDatesFrom(weekStart)
   const sorted = [...staff].sort((a, b) => rosterDisplayName(a).localeCompare(rosterDisplayName(b)))
-
   const windowStart = storeHours.open ? timeToMinutes(storeHours.open) : 0
   let windowEnd = storeHours.close ? timeToMinutes(storeHours.close) : 1440
   if (windowEnd <= windowStart) windowEnd = 1440
   const span = windowEnd - windowStart
-  // Jeff's spec for this tab explicitly asked for a tick every hour
-  // ("時間也是每一小時一個刻度" / "有辦法詳細一點嗎"), unlike
-  // RosterSettingsPage's own timeline which widens its step for a long
-  // window — see buildHourlyTicks' own comment.
+  // A tick every hour (Jeff: "時間也是每一小時一個刻度").
   const ticks = buildHourlyTicks(windowStart, windowEnd)
 
   // Every staff member with any available time on `dateStr` (leave already
-  // reconciled in), one color per person — "一個人一個色條" — threaded
-  // sequentially through the sorted list the same way RosterSettingsPage's
-  // WeeklyTimelineView threads prevColor through a day's rules, so two
-  // people shown back-to-back never land on the same color.
-  //
-  // Jeff, 2026-10-27: "員工的色條也是要在營業時間內，雖然他是填all day
-  // available系統是會讀成從12am開始" — availableWindowsWithLeave answers in
-  // real minutes-since-midnight (an "All day available" person is literally
-  // 0–1440), but this timeline's axis only spans the store's open/close
-  // window. Without clipping, that person's bar math goes negative/past
-  // 100% and the segment renders off the visible track — clip every window
-  // to [windowStart, windowEnd] here, same as RosterSettingsPage.jsx's
-  // TimeSlotBar clips a shift to its own window, so nothing is ever drawn
-  // (or tapped/hovered) outside business hours.
-  // Jeff, 2026-10-27 (later): "顯示資訊也是顯示all day available，before幾
-  // 點，after幾點，或是有特別的時間段" — the hover tooltip / tap popup text
-  // should read the same way the By Person tab already does (mode-aware:
-  // "All day available" / "Before 2:00 PM" / "After 2:00 PM" / an explicit
-  // range list), not a literal readout of the business-hours-clipped bar
-  // segments above — so `desc` is computed separately via
-  // describeDayWithLeave, from the UNCLIPPED availability, same call the By
-  // Person tab makes for this exact (dayRow, windows, leave) triple.
-  function peopleForDate(dateStr) {
-    let prevColor = null
-    return sorted
-      .map((s) => {
-        const entry = byProfile?.[s.id]?.[dateStr]
-        const leaveWindowsForDay = (leavesByProfile[s.id] ?? [])
-          .map((l) => leaveWindowOnDate(l, dateStr))
-          .filter(Boolean)
-        const rawWindows = availableWindowsWithLeave(entry?.dayRow, entry?.windows, leaveWindowsForDay)
-        const windows = rawWindows
-          .map((w) => ({ start: Math.max(w.start, windowStart), end: Math.min(w.end, windowEnd) }))
-          .filter((w) => w.end > w.start)
-        if (!windows.length) return null
-        const desc = describeDayWithLeave(entry?.dayRow, entry?.windows, leaveWindowsForDay)
-        const color = pickColor(s.id, prevColor)
-        prevColor = color
-        return { profile: s, windows, desc, color }
-      })
-      .filter(Boolean)
-  }
+  // reconciled in), one color per person, threaded sequentially so two
+  // people shown back-to-back never share a color. Windows are clipped to
+  // the store's open/close hours ("員工的色條也是要在營業時間內"), while
+  // `desc` comes from the UNCLIPPED availability so the tooltip/popup reads
+  // "All day available" / "Before 2:00 PM" / explicit ranges.
+  let prevColor = null
+  const people = sorted
+    .map((s) => {
+      const entry = availabilityByProfile?.[s.id]?.[dateStr]
+      const leaveWindows = leavesOnDate(leavesByProfile, s.id, dateStr)
+      const windows = availableWindowsWithLeave(entry?.dayRow, entry?.windows, leaveWindows)
+        .map((w) => ({ start: Math.max(w.start, windowStart), end: Math.min(w.end, windowEnd) }))
+        .filter((w) => w.end > w.start)
+      if (!windows.length) return null
+      const desc = describeDayWithLeave(entry?.dayRow, entry?.windows, leaveWindows)
+      const color = pickColor(s.id, prevColor)
+      prevColor = color
+      return { profile: s, windows, desc, color }
+    })
+    .filter(Boolean)
 
   return (
     <>
@@ -224,105 +109,27 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
         open={open}
         onClose={onClose}
         wide
-        title={`Staff Availability — week of ${format(parseISO(weekStart), 'd MMM yyyy')}`}
+        title={`Available — ${format(parseISO(dateStr), 'EEE d MMM yyyy')}`}
         footer={
           <Button variant="secondary" onClick={onClose}>
             Close
           </Button>
         }
       >
-        {!byProfile ? (
+        {availabilityLoading(sorted, availabilityByProfile) ? (
           <LoadingSpinner />
+        ) : !people.length ? (
+          <p className="text-sm text-gray-400">No one available this day.</p>
         ) : (
           <>
-            <div className="mb-3 flex gap-2">
-              <TabButton active={tab === 'date'} onClick={() => setTab('date')}>
-                By Date
-              </TabButton>
-              <TabButton active={tab === 'person'} onClick={() => setTab('person')}>
-                By Person
-              </TabButton>
-            </div>
-
-            {tab === 'person' ? (
-              !sorted.length ? (
-                <p className="text-sm text-gray-400">No staff on this store's roster.</p>
-              ) : (
-                <div className="space-y-2">
-                  {sorted.map((s) => {
-                    const isOpen = expandedIds.has(s.id)
-                    return (
-                      <div key={s.id} className="rounded-lg border border-brand-100 p-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleExpanded(s.id)}
-                          className="flex w-full items-center justify-between text-left text-sm font-semibold text-gray-800"
-                        >
-                          <span>{rosterDisplayName(s)}</span>
-                          <span className="text-xs font-normal text-gray-400">{isOpen ? '▲' : '▼'}</span>
-                        </button>
-                        {isOpen && (
-                          <div className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-7">
-                            {dates.map((dateStr, i) => {
-                              const entry = byProfile[s.id]?.[dateStr]
-                              const leaveWindowsForDay = (leavesByProfile[s.id] ?? [])
-                                .map((l) => leaveWindowOnDate(l, dateStr))
-                                .filter(Boolean)
-                              const desc = describeDayWithLeave(entry?.dayRow, entry?.windows, leaveWindowsForDay)
-                              return (
-                                <div key={dateStr}>
-                                  <span className="text-xs font-medium text-gray-400">
-                                    {DAY_LABELS[i]} {format(parseISO(dateStr), 'd/M')}
-                                  </span>
-                                  <div className={desc === 'Unavailable' ? 'text-red-600' : 'text-gray-700'}>{desc}</div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            ) : (
-              <div className="space-y-2">
-                {dates.map((dateStr, i) => {
-                  const isOpen = expandedDates.has(dateStr)
-                  const people = isOpen ? peopleForDate(dateStr) : null
-                  return (
-                    <div key={dateStr} className="rounded-lg border border-brand-100 p-3">
-                      <button
-                        type="button"
-                        onClick={() => toggleDate(dateStr)}
-                        className="flex w-full items-center justify-between text-left text-sm font-semibold text-gray-800"
-                      >
-                        <span>
-                          {DAY_LABELS[i]} {format(parseISO(dateStr), 'd MMM')}
-                        </span>
-                        <span className="text-xs font-normal text-gray-400">
-                          {isOpen && people ? `${people.length} available  ` : ''}
-                          {isOpen ? '▲' : '▼'}
-                        </span>
-                      </button>
-                      {isOpen && (
-                        !people.length ? (
-                          <p className="mt-2 text-sm text-gray-400">No one available this day.</p>
-                        ) : (
-                          <DayTimeline
-                            people={people}
-                            windowStart={windowStart}
-                            span={span}
-                            ticks={ticks}
-                            onTapPerson={(profile, desc) => setMobileDetail({ profile, dateStr, desc })}
-                          />
-                        )
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            <p className="text-xs text-gray-400">{people.length} available</p>
+            <DayTimeline
+              people={people}
+              windowStart={windowStart}
+              span={span}
+              ticks={ticks}
+              onTapPerson={(profile, desc) => setMobileDetail({ profile, desc })}
+            />
           </>
         )}
       </Modal>
@@ -339,14 +146,78 @@ export default function StaffAvailabilityModal({ open, onClose, staff, weekStart
           }
         >
           <p className="text-sm text-gray-700">
-            <span className="font-medium text-gray-500">
-              {DAY_LABELS[dates.indexOf(mobileDetail.dateStr)]} {format(parseISO(mobileDetail.dateStr), 'd MMM')}:{' '}
-            </span>
+            <span className="font-medium text-gray-500">{format(parseISO(dateStr), 'EEE d MMM')}: </span>
             {mobileDetail.desc}
           </p>
         </Modal>
       )}
     </>
+  )
+}
+
+// `shiftSummary` is the already-rendered "scheduled shifts + week total"
+// body (RosterEntryGrid owns the roster entries it's built from).
+export function PersonAvailabilityModal({
+  open,
+  onClose,
+  profileId,
+  name,
+  weekDates,
+  staff,
+  availabilityByProfile,
+  leavesByProfile,
+  shiftSummary,
+}) {
+  const [tab, setTab] = useState('availability')
+
+  useEffect(() => {
+    if (open) setTab('availability')
+  }, [open, profileId])
+
+  if (!open) return null
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`${name}'s week`}
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <div className="mb-3 flex gap-2">
+        <TabButton active={tab === 'availability'} onClick={() => setTab('availability')}>
+          Availability
+        </TabButton>
+        <TabButton active={tab === 'shift'} onClick={() => setTab('shift')}>
+          Shift summary
+        </TabButton>
+      </div>
+
+      {tab === 'shift' ? (
+        shiftSummary
+      ) : availabilityLoading(staff, availabilityByProfile) ? (
+        <LoadingSpinner />
+      ) : (
+        <div className="space-y-2">
+          {weekDates.map((dateStr) => {
+            const entry = availabilityByProfile?.[profileId]?.[dateStr]
+            const desc = describeDayWithLeave(entry?.dayRow, entry?.windows, leavesOnDate(leavesByProfile, profileId, dateStr))
+            return (
+              <div key={dateStr} className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2">
+                <div>
+                  <div className="text-sm font-semibold text-gray-800">{dayShort(dateStr)}</div>
+                  <div className="text-xs text-gray-400">{format(parseISO(dateStr), 'd MMM')}</div>
+                </div>
+                <div className={`text-right text-sm ${desc === 'Unavailable' ? 'text-red-600' : 'text-gray-700'}`}>{desc}</div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Modal>
   )
 }
 
@@ -373,7 +244,15 @@ function TabButton({ active, onClick, children }) {
 // people as narrow side-by-side columns; tap opens a popup rather than
 // relying on hover ("手機板則是點擊色條會出現視窗顯示員工當天可以的時間").
 function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
-  const [hoverId, setHoverId] = useState(null)
+  // { id, x, w } | null — x is the mouse's offset inside that person's bar
+  // row and w the row's width, so the tooltip can sit right next to the
+  // pointer (Jeff, 2026-11-02: the detail popup used to be pinned to the
+  // far-left edge of the row no matter where on the color bar you hovered).
+  const [hover, setHover] = useState(null)
+  const trackHover = (id) => (e) => {
+    const rect = e.currentTarget.parentElement.getBoundingClientRect()
+    setHover({ id, x: e.clientX - rect.left, w: rect.width })
+  }
 
   return (
     <div className="mt-2">
@@ -422,14 +301,20 @@ function DayTimeline({ people, windowStart, span, ticks, onTapPerson }) {
                     minWidth: '6px',
                     backgroundColor: color,
                   }}
-                  onMouseEnter={() => setHoverId(profile.id)}
-                  onMouseLeave={() => setHoverId((cur) => (cur === profile.id ? null : cur))}
+                  onMouseEnter={trackHover(profile.id)}
+                  onMouseMove={trackHover(profile.id)}
+                  onMouseLeave={() => setHover((cur) => (cur?.id === profile.id ? null : cur))}
                 >
                   {rosterDisplayName(profile)}
                 </div>
               ))}
-              {hoverId === profile.id && (
-                <div className="absolute -top-8 left-0 z-10 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] text-white shadow">
+              {hover?.id === profile.id && (
+                // Centered on the pointer, but clamped so a hover near either
+                // end of the bar doesn't push the tooltip outside the modal.
+                <div
+                  className="pointer-events-none absolute -top-8 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] text-white shadow"
+                  style={{ left: Math.min(Math.max(hover.x, 60), Math.max(hover.w - 60, 60)) }}
+                >
                   {desc}
                 </div>
               )}
