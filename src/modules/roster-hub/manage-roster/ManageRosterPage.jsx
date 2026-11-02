@@ -1020,8 +1020,9 @@ export default function ManageRosterPage() {
             }
             aria-label={summaryMode ? 'Input page' : 'Summary'}
           >
-            <span className="sm:hidden" aria-hidden="true">{summaryMode ? '✏️' : '📋'}</span>
-            <span className="hidden sm:inline">{summaryMode ? 'Input page' : 'Summary'}</span>
+            {/* Jeff, 2026-11-02: plain text on mobile too (it was a 📋/✏️ icon
+                there) — the toolbar row has room for the words. */}
+            {summaryMode ? 'Input page' : 'Summary'}
           </Button>
           {/* Jeff, 2026-10-02 (screenshot): this dropdown used to be z-10,
               same as the grid's sticky day/date header below it (see
