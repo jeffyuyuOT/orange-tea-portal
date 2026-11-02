@@ -995,8 +995,8 @@ export default function ManageRosterPage() {
             type="button"
             onClick={() => setShowInstructions(true)}
             className="shrink-0 rounded-full border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:bg-gray-50 hover:text-brand-600"
-            title="How to fill in the grid"
-            aria-label="How to fill in the grid"
+            title="How to use Manage Roster"
+            aria-label="How to use Manage Roster"
           >
             ℹ️
           </button>
@@ -1147,16 +1147,87 @@ export default function ManageRosterPage() {
         </div>
       </div>
 
-      <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="How to fill in the grid">
-        <p className="text-sm text-gray-600">
-          {/* Jeff, 2026-10-30: matches whichever Time format is currently
-              selected (see TIME_FORMAT_OPTIONS above) — the example here
-              needs to be the one actually being typed, not always Decimal's. */}
-          Fill in the grid below — Start/End hours (e.g.{' '}
-          {timeInputFormat === 'compact' ? '1100, 2230 for 10:30pm' : '11, 22.5 for 10:30pm'}) and each day's Break
-          in half-hour units (1 = 30 min, 2 = 1 hr) — or download the template, fill it in Excel, and upload it
-          back. Total hr and WKD hr are calculated automatically.
-        </p>
+      {/* Jeff, 2026-11-02: grew from the single "fill in the grid" paragraph to
+          also cover the availability popups, the all-day-unavailable shading
+          and the Summary page, so the ℹ️ is where someone learns them. */}
+      <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="How to use Manage Roster" wide>
+        <div className="space-y-4 text-sm text-gray-600">
+          <section>
+            <h3 className="mb-1 font-semibold text-gray-800">Input page — filling in the roster</h3>
+            <p>
+              {/* Jeff, 2026-10-30: matches whichever Time format is currently
+                  selected (see TIME_FORMAT_OPTIONS above) — the example here
+                  needs to be the one actually being typed, not always Decimal's. */}
+              Fill in the grid — Start/End hours (e.g.{' '}
+              {timeInputFormat === 'compact' ? '1100, 2230 for 10:30pm' : '11, 22.5 for 10:30pm'}) and each day's
+              Break in half-hour units (1 = 30 min, 2 = 1 hr) — or download the template, fill it in Excel, and
+              upload it back. Total hr and WKD hr are calculated automatically.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-1 font-semibold text-gray-800">Checking availability</h3>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                <span className="font-medium text-gray-700">By date:</span> click a date at the top of the grid (on a
+                phone, tap the day tab that is already selected) to see everyone who is available that day. Each
+                colour bar is one person's available time — hover over it (or tap it on a phone) for the exact time.
+                Leave is already taken out.
+              </li>
+              <li>
+                <span className="font-medium text-gray-700">By person:</span> click a staff name to see that person's
+                availability for the week. The Availability tab opens first; switch to Shift summary to see the shifts
+                you have scheduled for them and their week total.
+              </li>
+              <li>
+                A shift outside someone's declared availability, or during approved leave, shows a warning when you
+                leave the cell. You can still keep the shift.
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="mb-1 font-semibold text-gray-800">Shaded Start/End cells</h3>
+            <p>
+              <span className="mr-1 inline-block h-3 w-3 rounded border border-rose-300 bg-rose-100 align-middle" />
+              Pink Start/End cells mean that person is unavailable all day, or on approved leave all day (hover over
+              the cell to see which). You can still enter hours there — it is just a flag while you build the week.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-1 font-semibold text-gray-800">Summary page</h3>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                Click <span className="font-medium text-gray-700">Summary</span> (next to Action) to switch the grid
+                into a summary of the week. It is only available once this week has a saved or published roster. The
+                button then becomes <span className="font-medium text-gray-700">Input page</span> — click it to go
+                back to the grid.
+              </li>
+              <li>
+                Each day lists only the people working that day, earliest start first, with their name and shift
+                time.
+              </li>
+              <li>
+                <span className="font-medium text-gray-700">Change who works a shift:</span> click the name. Everyone
+                is listed with their availability for that day — fully available first (all-day available at the top),
+                then partly available (more of the shift covered comes first, shown in yellow), then unavailable (red).
+                Anyone already working that day is greyed out. Click a name to swap them in; the shift's time and break
+                stay the same.
+              </li>
+              <li>
+                <span className="font-medium text-gray-700">Change a shift's time:</span> click the time, enter the new
+                Start and End, then Save time. If the new time is outside that person's availability or during their
+                leave, a warning asks <span className="font-medium text-gray-700">No save</span> (keeps the original
+                time) or <span className="font-medium text-gray-700">Save anyway</span>.
+              </li>
+              <li>
+                Changes made on the Summary page are not saved to the database until you click Save (not published)
+                or Submit &amp; Publish.
+              </li>
+            </ul>
+          </section>
+        </div>
       </Modal>
 
       {/* Kept mounted (just hidden) while Summary is showing, so anything the
