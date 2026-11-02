@@ -109,7 +109,14 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   const [videos, setVideos] = useState([]) // titled videos — a drink or shop-training item can have more than one
   const [steps, setSteps] = useState([])
   const [visibleStoreIds, setVisibleStoreIds] = useState(null) // null = all stores
-  const [saving, setSaving] = useState(false)
+  // Jeff, 2026-11-02 (Silent Save follow-up): "我發現我按slicence save旁邊的
+  // save按鈕也會一起跑saving" — this used to be a single `saving` boolean
+  // shared by both buttons' `disabled`/label, so clicking either one made
+  // BOTH show "Saving…" even though only one save() call was actually
+  // running. Tracking WHICH button is in flight (null when idle) lets each
+  // button show its own label while both still correctly disable during any
+  // save — you still can't fire two saves on the same item at once.
+  const [savingMode, setSavingMode] = useState(null) // null | 'save' | 'silent'
   // Which "+ from file repository" picker is currently open, if any — only
   // one at a time, so a single bit of state covers all four insertion
   // points (custom image, a step's media by index, notes media, a video
@@ -376,17 +383,24 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
   }
 
   // Jeff, 2026-11-02: "在save旁邊新增Silent Save的按鈕...這種save方式就不會
-  // 出現update提示，因為只是些許內容更改" — `silent` just adds one more
-  // column to the same update/insert payload (`silent_update`); the actual
-  // skip-the-push-notification logic lives entirely in the DB trigger
-  // (migration 0145, `notify_push_on_formula_update()`), which now returns
-  // early when `new.silent_update` is true. Explicitly setting it to `false`
-  // on an ordinary Save (not just leaving it out) matters: `.update()` only
-  // touches columns actually in the payload, so without this, saving
-  // normally right after a Silent Save would silently inherit that still-
-  // true value and keep skipping notifications from then on.
+  // 出現update提示，因為只是些許內容更改" — `silent` adds one more column to
+  // the same update/insert payload (`silent_update`). Explicitly setting it
+  // to `false` on an ordinary Save (not just leaving it out) matters:
+  // `.update()` only touches columns actually in the payload, so without
+  // this, saving normally right after a Silent Save would silently inherit
+  // that still-true value and keep skipping notifications from then on.
+  //
+  // Jeff, 2026-11-02 (follow-up): "還是有[收到通知]" (screenshot showed the
+  // Sidebar red dot + Update tab still flagging the item) — `silent_update`
+  // alone only stopped the push (migration 0164); it never stopped
+  // `updated_at` itself from bumping, and the in-app "unseen update"
+  // indicator (src/lib/formulaUpdates.js) is driven entirely by
+  // `updated_at`, nothing push-related. Migration 0165 teaches the BEFORE
+  // UPDATE trigger that sets `updated_at` to pin it to its old value
+  // whenever `silent_update` is true, so a Silent Save now leaves no visible
+  // trace anywhere — not the push, not the red dot, not the Update tab.
   async function save(silent = false) {
-    setSaving(true)
+    setSavingMode(silent ? 'silent' : 'save')
     try {
       let itemId = item.id
       const base = {
@@ -502,7 +516,7 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
     } catch (err) {
       alert(err.message)
     } finally {
-      setSaving(false)
+      setSavingMode(null)
     }
   }
 
@@ -519,14 +533,14 @@ export default function ItemEditModal({ item, nextSortOrder, onClose, onSaved })
             <Button
               variant="secondary"
               onClick={() => save(true)}
-              disabled={saving || !nameEn}
-              title="Saves without sending everyone a push notification — for a small edit that doesn't need to alert anyone."
+              disabled={savingMode !== null || !nameEn}
+              title="Saves without flagging an update anywhere (no push, no red dot, no Update tab) — for a small edit that doesn't need to alert anyone."
             >
-              {saving ? 'Saving…' : 'Silent Save'}
+              {savingMode === 'silent' ? 'Saving…' : 'Silent Save'}
             </Button>
           )}
-          <Button onClick={() => save(false)} disabled={saving || !nameEn}>
-            {saving ? 'Saving…' : 'Save'}
+          <Button onClick={() => save(false)} disabled={savingMode !== null || !nameEn}>
+            {savingMode === 'save' ? 'Saving…' : 'Save'}
           </Button>
         </div>
       }
