@@ -1206,8 +1206,8 @@ export default function ManageRosterPage() {
                 back to the grid.
               </li>
               <li>
-                Each day lists only the people working that day, earliest start first, with their name and shift
-                time.
+                Each day lists only the people working that day, earliest start first, with their name, shift time
+                and breaks (B×1 = one half-hour break, B×2 = one hour; nothing shown means no break).
               </li>
               <li>
                 <span className="font-medium text-gray-700">Change who works a shift:</span> click the name. Everyone
@@ -1217,10 +1217,11 @@ export default function ManageRosterPage() {
                 stay the same.
               </li>
               <li>
-                <span className="font-medium text-gray-700">Change a shift's time:</span> click the time, enter the new
-                Start and End, then Save time. If the new time is outside that person's availability or during their
-                leave, a warning asks <span className="font-medium text-gray-700">No save</span> (keeps the original
-                time) or <span className="font-medium text-gray-700">Save anyway</span>.
+                <span className="font-medium text-gray-700">Change a shift's time or break:</span> click the time,
+                change Start, End and/or Break (in half-hour units — 1 = 30 min, 2 = 1 hr), then Save. If the new
+                time is outside that person's availability or during their leave, a warning asks{' '}
+                <span className="font-medium text-gray-700">No save</span> (keeps the original time) or{' '}
+                <span className="font-medium text-gray-700">Save anyway</span>.
               </li>
               <li>
                 Changes made on the Summary page are not saved to the database until you click Save (not published)

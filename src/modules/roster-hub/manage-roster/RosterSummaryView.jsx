@@ -200,9 +200,15 @@ function EditTimeModal({ target, timeInputFormat, availabilityByProfile, leavesB
   // NaN = something typed that isn't a time in that format.
   const [start, setStart] = useState(target.startTime)
   const [end, setEnd] = useState(target.endTime)
+  // Jeff, 2026-11-03: Break is edited here too — same unit as the grid's
+  // Break (½h) row (half-hour units: 1 = 30 min, 2 = 1 hr), always plain
+  // decimal typing (never the Compact time format — it isn't a clock time).
+  // '' = no break.
+  const [brk, setBrk] = useState(target.breakHours ?? '')
 
   const startNum = Number(start)
   const endNum = Number(end)
+  const brkEmpty = brk === '' || brk == null
   let error = ''
   if (start === '' || end === '') error = 'Enter both a start and an end time.'
   else if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) {
@@ -212,6 +218,9 @@ function EditTimeModal({ target, timeInputFormat, availabilityByProfile, leavesB
         : 'Times need to be hours, like 9 or 10.5 (= 10:30).'
   } else if (startNum < 0 || endNum > MAX_SHIFT_HOUR || startNum > MAX_SHIFT_HOUR) error = 'That time is out of range.'
   else if (endNum <= startNum) error = 'End time has to be after the start time.'
+  else if (!brkEmpty && (!Number.isFinite(Number(brk)) || Number(brk) < 0)) {
+    error = 'Break needs to be a number of half-hours (1 = 30 min, 2 = 1 hr), or left blank.'
+  }
 
   const avail = target.profileId ? availabilityByProfile?.[target.profileId]?.[target.date] : null
   const availText = avail
@@ -228,8 +237,8 @@ function EditTimeModal({ target, timeInputFormat, availabilityByProfile, leavesB
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!!error} onClick={() => onSave(startNum, endNum)}>
-            Save time
+          <Button disabled={!!error} onClick={() => onSave(startNum, endNum, brkEmpty ? '' : Number(brk))}>
+            Save
           </Button>
         </>
       }
@@ -243,7 +252,17 @@ function EditTimeModal({ target, timeInputFormat, availabilityByProfile, leavesB
           <span className="mb-1 block text-xs font-medium text-gray-500">End</span>
           <HourInput value={end} onChange={setEnd} format={timeInputFormat} className="!w-24 !py-1.5 !text-sm" />
         </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-red-500">Break (½h)</span>
+          <HourInput
+            value={brk}
+            onChange={setBrk}
+            className="!w-20 !py-1.5 !text-sm text-red-600"
+            title="Half-hour units — 1 = 30 min, 2 = 1 hr"
+          />
+        </label>
       </div>
+      <p className="mt-1.5 text-[11px] text-gray-400">Break is in half-hour units — 1 = 30 min, 2 = 1 hr. Leave blank for no break.</p>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       {availText && (
         <p className="mt-3 text-xs text-gray-500">
@@ -274,9 +293,22 @@ function ShiftCell({ entry, onReplace, onEditTime }) {
         type="button"
         onClick={() => onEditTime(entry)}
         className="block shrink-0 whitespace-nowrap py-2 pl-2 text-right text-sm text-brand-700 hover:underline sm:mt-0.5 sm:w-full sm:whitespace-normal sm:py-0 sm:pl-0 sm:text-left sm:text-[13px]"
-        title="Click to change this shift's time"
+        title="Click to change this shift's time and break"
       >
         {hourLabel(entry.startTime)} – {hourLabel(entry.endTime)}
+        {/* Jeff, 2026-11-03: how many break units (½h each) this shift has,
+            right after the time — hidden when there's no break. Kept to a
+            short "B×1" in its own small red tag (set apart from the time by
+            the tag's background and gap) so the Summary stays easy to scan;
+            the edit popup still says "Break (½h)" in full. */}
+        {Number(entry.breakHours) > 0 && (
+          <span
+            className="ml-2.5 inline-block whitespace-nowrap rounded bg-red-50 px-1.5 py-px text-[11px] font-semibold text-red-500"
+            title={`Break ×${Number(entry.breakHours)} (half-hour units — 1 = 30 min, 2 = 1 hr)`}
+          >
+            B×{Number(entry.breakHours)}
+          </span>
+        )}
       </button>
     </div>
   )
@@ -321,8 +353,10 @@ export default function RosterSummaryView({
     })
   }
 
-  function applyTime(target, start, end) {
-    setEntries((prev) => prev.map((e) => (sameEntry(e, target) ? { ...e, startTime: start, endTime: end } : e)))
+  function applyTime(target, start, end, breakHours) {
+    setEntries((prev) =>
+      prev.map((e) => (sameEntry(e, target) ? { ...e, startTime: start, endTime: end, breakHours } : e))
+    )
   }
 
   // Jeff, 2026-11-02: the availability/leave check used to run AFTER the new
@@ -330,16 +364,21 @@ export default function RosterSummaryView({
   // time in place. Now the check runs first: a conflict holds the change in
   // `conflictWarning` (nothing applied yet) until "Save anyway"; "No save" /
   // closing the popup just drops it, so the original time stays.
-  function saveTime(start, end) {
+  function saveTime(start, end, breakHours) {
     const target = editing
     setEditing(null)
     if (!target) return
-    const type = findConflict(target.profileId, target.date, start, end, availabilityByProfile, leavesByProfile)
+    // Only a changed shift time is checked against availability/leave — if
+    // just the break was edited, the shift itself is exactly as before.
+    const timeChanged = Number(target.startTime) !== start || Number(target.endTime) !== end
+    const type = timeChanged
+      ? findConflict(target.profileId, target.date, start, end, availabilityByProfile, leavesByProfile)
+      : null
     if (type) {
-      setConflictWarning({ type, target, name: target.staffName, date: target.date, start, end })
+      setConflictWarning({ type, target, name: target.staffName, date: target.date, start, end, breakHours })
       return
     }
-    applyTime(target, start, end)
+    applyTime(target, start, end, breakHours)
   }
 
   const mobileDate = weekDates[Math.min(mobileDayIdx, weekDates.length - 1)]
@@ -439,7 +478,7 @@ export default function RosterSummaryView({
               onClick={() => {
                 const w = conflictWarning
                 setConflictWarning(null)
-                if (w) applyTime(w.target, w.start, w.end)
+                if (w) applyTime(w.target, w.start, w.end, w.breakHours)
               }}
             >
               Save anyway
