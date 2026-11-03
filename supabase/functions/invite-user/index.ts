@@ -36,15 +36,23 @@ Deno.serve(async (req: Request) => {
     const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // Who is calling?
+    // getUser() asks Supabase Auth whether this session is still live. That matters:
+    // signing out revokes the session on the server, but a token from it still passes
+    // the platform's own signature check until it expires - so without this, a
+    // signed-out browser tab could still run these functions (2026-11-03: exactly
+    // what a stale, signed-out tab did while testing).
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data: userData, error: userError } = await admin.auth.getUser(token);
-    if (userError || !userData?.user) return json({ error: "Not signed in." }, 401);
+    if (userError || !userData?.user) {
+      return json({ error: "Your sign-in has expired. Sign out, sign in again, then retry." }, 401);
+    }
     const callerId = userData.user.id;
-    const { data: caller } = await admin
+    const { data: caller, error: callerError } = await admin
       .from("profiles")
       .select("role, is_active, primary_store_id")
       .eq("id", callerId)
       .single();
+    if (callerError) return json({ error: `Could not check your permissions: ${callerError.message}` }, 500);
     if (!caller || !caller.is_active) return json({ error: "Not allowed." }, 403);
     const isAdmin = ["admin", "developer"].includes(caller.role);
 
