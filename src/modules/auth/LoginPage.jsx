@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../../lib/AuthContext'
 import Button from '../../components/ui/Button'
 import AuthLayout from './AuthLayout'
+import ResetEmailForm from './ResetEmailForm'
 
 // Jeff, 2026-10-07: "training staff現在不需要經過training code就可以登入" —
 // this used to have a second step after a training-role account's regular
@@ -16,6 +17,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Jeff, 2026-11-03: "Forgot password?" swaps this screen for the shared
+  // email-a-reset-link form (ResetEmailForm.jsx).
+  const [forgot, setForgot] = useState(false)
 
   async function handleLogin(e) {
     e.preventDefault()
@@ -28,6 +32,14 @@ export default function LoginPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (forgot) {
+    return (
+      <AuthLayout title="Forgot password">
+        <ResetEmailForm onCancel={() => setForgot(false)} />
+      </AuthLayout>
+    )
   }
 
   return (
@@ -57,6 +69,16 @@ export default function LoginPage() {
         <Button type="submit" disabled={busy} className="w-full">
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setError('')
+            setForgot(true)
+          }}
+          className="block w-full text-center text-sm text-brand-600 hover:underline"
+        >
+          Forgot password?
+        </button>
       </form>
     </AuthLayout>
   )

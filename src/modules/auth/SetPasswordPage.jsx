@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/AuthContext'
 import Button from '../../components/ui/Button'
 import AuthLayout from './AuthLayout'
+import ResetEmailForm from './ResetEmailForm'
 
 // Reached from the link inside a Supabase "Invite user" or "Reset
 // password" email (see main.jsx, which routes both link shapes here), and
@@ -249,21 +250,20 @@ export default function SetPasswordPage() {
   }
 
   if (status === 'invalid') {
+    // Jeff, 2026-11-03: an expired / already-used invite (or reset) link used
+    // to say "ask an admin to resend". Now the person can type their email
+    // right here and get a fresh set-password email — sent automatically if
+    // that email exists in Supabase (see ResetEmailForm.jsx).
     return (
       <AuthLayout title="Link expired">
-        <p className="text-sm text-gray-600">
-          This link is invalid, has expired, or has already been used. Ask an admin to resend the invite or password
-          reset email, then open that new link right away.
+        <p className="mb-4 text-sm text-gray-600">
+          This link is invalid, has expired, or has already been used. Enter your email to get a new one.
         </p>
-        <p className="mt-3 text-sm text-gray-600">
-          If the link was opened from inside a chat app (LINE, Messenger, etc.) rather than a regular browser, that
-          can also invalidate it before you ever tap it — those apps often "preview" links automatically. Try
-          long-pressing the link and choosing "Open in Browser" (or copy it and paste it into Safari/Chrome)
-          instead of tapping it directly in the chat.
+        <ResetEmailForm submitLabel="Send new link" onCancel={() => navigate('/')} />
+        <p className="mt-4 text-xs text-gray-500">
+          Tip: if you open the link from inside a chat app (LINE, Messenger, etc.), the app can "preview" it and use it
+          up before you tap it. Long-press the link and choose "Open in Browser" (or paste it into Safari/Chrome).
         </p>
-        <Button variant="secondary" className="mt-4 w-full" onClick={() => navigate('/')}>
-          Back to sign in
-        </Button>
       </AuthLayout>
     )
   }
