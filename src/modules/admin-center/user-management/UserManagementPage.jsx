@@ -7,6 +7,7 @@ import Badge from '../../../components/ui/Badge'
 import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import UserDetailModal from './UserDetailModal'
+import InviteUserModal from './InviteUserModal'
 
 export default function UserManagementPage() {
   const { profile, accessibleStores } = useAuth()
@@ -14,6 +15,9 @@ export default function UserManagementPage() {
   const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
   const [selected, setSelected] = useState(null)
+  // Jeff, 2026-11-03: "+ Invite user" (InviteUserModal.jsx) — notice shows the last invite that went out.
+  const [inviting, setInviting] = useState(false)
+  const [inviteNotice, setInviteNotice] = useState('')
   // Pending staff — someone to schedule and try out before formally
   // inviting them in Supabase, no account needed yet (see migration
   // 0027's comment on roster_pending_staff). Managed here alongside real
@@ -160,28 +164,35 @@ export default function UserManagementPage() {
     <div>
       <h1 className="mb-1 text-xl font-semibold text-gray-900">User Management</h1>
       <p className="mb-4 text-sm text-gray-500">
-        Set each user's role, store, and page-level access. New accounts are created by inviting them via the
-        Supabase dashboard (Authentication &gt; Users &gt; Invite) — they'll appear here to configure once they
-        sign up. See the README for wiring up a self-service invite flow.
+        Set each user's role, store, and page-level access. Use "+ Invite user" to create a new account — they get an
+        email to set their password, then show up here.
       </p>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <select className="input w-56" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
-          <option value="all">All stores</option>
-          <option value="unassigned">Unassigned (no store)</option>
-          {accessibleStores.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input w-56"
-          placeholder="Search by name or email"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      {/* Jeff, 2026-11-03: store filter and search at half the page width, with
+          "+ Invite user" beside them (full width stacked on a phone). */}
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex w-full flex-col gap-2 sm:w-1/2">
+          <select className="input" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
+            <option value="all">All stores</option>
+            <option value="unassigned">Unassigned (no store)</option>
+            {accessibleStores.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <input className="input" placeholder="Search by name or email" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <Button
+          onClick={() => {
+            setInviteNotice('')
+            setInviting(true)
+          }}
+        >
+          + Invite user
+        </Button>
       </div>
+      {inviteNotice && <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{inviteNotice}</p>}
 
       {!visibleUsers.length ? (
         <EmptyState label="No users found." />
@@ -205,6 +216,19 @@ export default function UserManagementPage() {
             </button>
           ))}
         </div>
+      )}
+
+      {inviting && (
+        <InviteUserModal
+          defaultStoreId={storeFilter === 'all' || storeFilter === 'unassigned' ? '' : storeFilter}
+          onClose={() => setInviting(false)}
+          onInvited={({ stay, email } = {}) => {
+            load()
+            if (stay) return
+            setInviting(false)
+            setInviteNotice(`Invite sent to ${email}.`)
+          }}
+        />
       )}
 
       {selected && (

@@ -128,6 +128,30 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // genuinely shouldn't use Bulletin at all just gets deactivated instead.
   const [saving, setSaving] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  // Jeff, 2026-11-03: "user的編輯頁面也新增重設密碼按鍵，按了即重寄該user reset
+  // password email" — sends Supabase's standard reset-password email straight
+  // to this person (works for someone who was invited but never set a
+  // password too). Supabase only allows one per address per minute.
+  const [resetState, setResetState] = useState({ status: 'idle', message: '' })
+  async function sendResetEmail() {
+    if (!user.email) {
+      setResetState({ status: 'error', message: 'This user has no email on file.' })
+      return
+    }
+    setResetState({ status: 'sending', message: '' })
+    const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+      redirectTo: `${window.location.origin}/set-password`,
+    })
+    if (error) {
+      const wait = error.status === 429 || /rate limit|security purposes|too many/i.test(error.message)
+      setResetState({
+        status: 'error',
+        message: wait ? 'An email was just sent. Please wait a minute before sending another.' : error.message,
+      })
+      return
+    }
+    setResetState({ status: 'sent', message: `Reset password email sent to ${user.email}.` })
+  }
 
   // Fresh Audit flags straight from the DB — accessibleStores is loaded at
   // login, so it goes stale after Audit is ticked in Store Management.
@@ -448,10 +472,19 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
             ))}
           </select>
         </label>
-        <label className="mt-5 flex items-center gap-2 text-sm text-gray-600">
-          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-          Active
-        </label>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            Active
+          </label>
+          {/* Jeff, 2026-11-03: Reset password sits right of Active. */}
+          <Button variant="secondary" onClick={sendResetEmail} disabled={resetState.status === 'sending'}>
+            {resetState.status === 'sending' ? 'Sending…' : 'Reset password'}
+          </Button>
+        </div>
+        {resetState.message && (
+          <p className={`col-span-3 -mt-1 text-sm ${resetState.status === 'error' ? 'text-red-600' : 'text-green-700'}`}>{resetState.message}</p>
+        )}
       </div>
 
       {accessibleStores.length > 1 && (
