@@ -8,6 +8,8 @@ import { rosterDisplayName, pendingRosterName } from '../../../lib/excelRoster'
 import { isActiveStoreMember } from '../../../lib/storeVisibility'
 import StaffDetailModal from './StaffDetailModal'
 import PendingStaffDetailModal from './PendingStaffDetailModal'
+import InviteStaffModal from './InviteStaffModal'
+import Button from '../../../components/ui/Button'
 
 export default function StaffListPage() {
   const { currentStoreId } = useAuth()
@@ -16,6 +18,9 @@ export default function StaffListPage() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [selectedPending, setSelectedPending] = useState(null)
+  // Jeff, 2026-11-03: "+ Invite user" here is limited to a plain Staff on THIS store (InviteStaffModal.jsx).
+  const [inviting, setInviting] = useState(false)
+  const [inviteNotice, setInviteNotice] = useState('')
 
   async function load() {
     if (!currentStoreId) return
@@ -58,8 +63,21 @@ export default function StaffListPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">Staff Information</h1>
-      <p className="mb-4 text-sm text-gray-500">View and edit staff details for this store.</p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="mb-1 text-xl font-semibold text-gray-900">Staff Information</h1>
+          <p className="text-sm text-gray-500">View and edit staff details for this store.</p>
+        </div>
+        <Button
+          onClick={() => {
+            setInviteNotice('')
+            setInviting(true)
+          }}
+        >
+          + Invite user
+        </Button>
+      </div>
+      {inviteNotice && <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{inviteNotice}</p>}
 
       {loading ? (
         <LoadingSpinner />
@@ -67,7 +85,7 @@ export default function StaffListPage() {
         <>
           <h2 className="mb-2 text-sm font-semibold text-brand-700">Staff</h2>
           {!staff.length ? (
-            <EmptyState label="No staff at this store yet. Add them in Admin Center > User Management." />
+            <EmptyState label="No staff at this store yet. Use + Invite user above." />
           ) : (
             <div className="mb-6 divide-y divide-brand-100 rounded-xl border border-brand-100 bg-white">
               {staff.map((s) => (
@@ -123,6 +141,16 @@ export default function StaffListPage() {
         </>
       )}
 
+      {inviting && (
+        <InviteStaffModal
+          onClose={() => setInviting(false)}
+          onInvited={(email) => {
+            setInviting(false)
+            setInviteNotice(`Invite sent to ${email}.`)
+            load()
+          }}
+        />
+      )}
       {selected && (
         <StaffDetailModal
           staff={selected}

@@ -4,6 +4,7 @@ import { useAuth } from '../../../lib/AuthContext'
 import { SECTIONS, getEffectivePages, roleSelectOptions, roleLabelFor } from '../../../lib/permissions'
 import Modal from '../../../components/ui/Modal'
 import Button from '../../../components/ui/Button'
+import { invokeFunction } from '../../../lib/invokeFunction'
 
 // Small ⓘ next to an option — click it to show the detail, click again (or
 // anywhere else) to hide it.
@@ -128,6 +129,8 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
   // genuinely shouldn't use Bulletin at all just gets deactivated instead.
   const [saving, setSaving] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState('')
   // Jeff, 2026-11-03: "user的編輯頁面也新增重設密碼按鍵，按了即重寄該user reset
   // password email" — sends Supabase's standard reset-password email straight
   // to this person (works for someone who was invited but never set a
@@ -381,16 +384,22 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
     onSaved()
   }
 
-  // "Remove" here is the same soft-deactivate as Shop Management > Staff
-  // Information's "Remove staff" — sets is_active false rather than
-  // deleting anything, so roster/leave/quiz history is preserved. A true
-  // delete of the login itself can only be done from the Supabase
-  // Dashboard (Authentication > Users), and even then only cascades
-  // cleanly if this person never created content that other tables track
-  // by who-created-it (announcements, formula/quiz items, uploaded
-  // files, etc.) — those reference profiles without cascading.
-  async function deactivate() {
-    await supabase.from('profiles').update({ is_active: false }).eq('id', user.id)
+  // Jeff, 2026-11-03: "在user management remove就會permanent delete...並同步從
+  // supabase移除" — Remove here now deletes the person for good, login included
+  // (delete-users Edge Function). It used to just set them inactive; that is still
+  // what Shop Management > Staff Information's "Remove staff" does (and what
+  // un-ticking Active above does), and those people can be deleted later from
+  // the "Inactive users" window on the User Management page.
+  async function permanentlyDelete() {
+    setRemoving(true)
+    setRemoveError('')
+    const { data, error } = await invokeFunction('delete-users', { user_ids: [user.id] })
+    setRemoving(false)
+    const failure = error || data?.failed?.[0]?.error
+    if (failure) {
+      setRemoveError(failure)
+      return
+    }
     onSaved()
   }
 
@@ -402,7 +411,7 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
       title={`${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email}
       footer={
         <>
-          <Button variant="danger" onClick={() => setConfirmRemove(true)}>
+          <Button variant="danger" disabled={user.id === me?.id} onClick={() => setConfirmRemove(true)}>
             Remove
           </Button>
           <Button onClick={save} disabled={saving}>
@@ -553,14 +562,15 @@ export default function UserDetailModal({ user, onClose, onSaved }) {
 
       {confirmRemove && (
         <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          Remove {firstName || user.email} from active staff? This sets them inactive rather than
-          permanently deleting their history — they'll stop being able to sign in, but their roster, leave,
-          and quiz records are kept.
+          Permanently delete {`${firstName} ${lastName}`.trim() || user.email}? Their login is removed from Supabase and so are
+          their clock in/out records, leave, availability, study and quiz records, and uploaded documents. This cannot
+          be undone. (To just stop them signing in but keep their history, untick Active and Save instead.)
+          {removeError && <p className="mt-2 font-medium">{removeError}</p>}
           <div className="mt-2 flex gap-2">
-            <Button variant="danger" onClick={deactivate}>
-              Confirm remove
+            <Button variant="danger" disabled={removing} onClick={permanentlyDelete}>
+              {removing ? 'Deleting…' : 'Yes, delete permanently'}
             </Button>
-            <Button variant="secondary" onClick={() => setConfirmRemove(false)}>
+            <Button variant="secondary" disabled={removing} onClick={() => setConfirmRemove(false)}>
               Cancel
             </Button>
           </div>

@@ -8,6 +8,7 @@ import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import UserDetailModal from './UserDetailModal'
 import InviteUserModal from './InviteUserModal'
+import InactiveUsersModal from './InactiveUsersModal'
 
 export default function UserManagementPage() {
   const { profile, accessibleStores } = useAuth()
@@ -18,6 +19,8 @@ export default function UserManagementPage() {
   // Jeff, 2026-11-03: "+ Invite user" (InviteUserModal.jsx) — notice shows the last invite that went out.
   const [inviting, setInviting] = useState(false)
   const [inviteNotice, setInviteNotice] = useState('')
+  // Jeff, 2026-11-03: "Inactive users" under Invite user — everyone inactive across all stores, with permanent delete.
+  const [showInactive, setShowInactive] = useState(false)
   // Pending staff — someone to schedule and try out before formally
   // inviting them in Supabase, no account needed yet (see migration
   // 0027's comment on roster_pending_staff). Managed here alongside real
@@ -183,14 +186,19 @@ export default function UserManagementPage() {
           </select>
           <input className="input" placeholder="Search by name or email" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <Button
-          onClick={() => {
-            setInviteNotice('')
-            setInviting(true)
-          }}
-        >
-          + Invite user
-        </Button>
+        <div className="flex flex-col gap-2 sm:items-stretch">
+          <Button
+            onClick={() => {
+              setInviteNotice('')
+              setInviting(true)
+            }}
+          >
+            + Invite user
+          </Button>
+          <Button variant="secondary" onClick={() => setShowInactive(true)}>
+            Inactive users
+          </Button>
+        </div>
       </div>
       {inviteNotice && <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{inviteNotice}</p>}
 
@@ -230,6 +238,8 @@ export default function UserManagementPage() {
           }}
         />
       )}
+
+      {showInactive && <InactiveUsersModal onClose={() => setShowInactive(false)} onChanged={load} />}
 
       {selected && (
         <UserDetailModal
