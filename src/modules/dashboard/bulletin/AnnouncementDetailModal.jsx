@@ -7,6 +7,7 @@ import Badge from '../../../components/ui/Badge'
 import SimpleRichTextEditor from '../../../components/ui/SimpleRichTextEditor'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
 import AnnouncementViewersModal from './AnnouncementViewersModal'
+import VotePanel from './VotePanel'
 import { deleteStorageImages } from '../../../lib/richTextImages'
 
 // The category dropdown is really just a friendlier front end over two
@@ -23,6 +24,26 @@ const CATEGORY_OPTIONS = [
   { value: 'important', label: 'Important' },
   { value: 'customer_complaint', label: 'Customer Complaint' },
 ]
+
+// Jeff, 2026-11-07: announcement Type, beside Category. 'vote' notices carry
+// a set of options everyone ticks (up to vote_max_choices each), live counts
+// and an optional deadline (migration 0166).
+const TYPE_OPTIONS = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'vote', label: 'Vote' },
+]
+
+// <input type="datetime-local"> wants local 'YYYY-MM-DDTHH:mm', not an ISO/UTC string.
+function toLocalInput(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function newQuestion() {
+  return { id: null, title: '', max: 1, options: [{ id: null, label: '' }, { id: null, label: '' }] }
+}
 
 function nameOf(profile) {
   return `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email
@@ -75,6 +96,12 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [content, setContent] = useState('')
   const [isImportant, setIsImportant] = useState(false)
   const [category, setCategory] = useState('normal')
+  const [announcementType, setAnnouncementType] = useState('normal')
+  const [voteDeadline, setVoteDeadline] = useState('') // local datetime-local string, '' = no deadline
+  // One announcement can hold several questions, each with its own options + max.
+  const [voteQuestions, setVoteQuestions] = useState([newQuestion()])
+  const [voteSavedDeadline, setVoteSavedDeadline] = useState(null)
+  const [voteRefresh, setVoteRefresh] = useState(0)
   // Defaults to just the store this modal was opened from — ticking more
   // boxes is opt-in, so behaviour for anyone who never touches this section
   // (shop_manager, or a single-store admin/developer) is unchanged.
@@ -117,6 +144,12 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   const [deleting, setDeleting] = useState(false)
 
   const isComplaint = category === 'customer_complaint'
+  const isVote = announcementType === 'vote'
+  // Only options with text count; a question needs at least 2 of them.
+  const cleanVoteQuestions = voteQuestions
+    .map((q) => ({ ...q, options: q.options.filter((o) => o.label.trim()) }))
+    .filter((q) => q.options.length > 0)
+  const voteInvalid = isVote && (!cleanVoteQuestions.length || cleanVoteQuestions.some((q) => q.options.length < 2))
   const isCreator = !!profile && profile.id === createdBy
   // Who can edit the title/content or delete/retract this post: the
   // original creator (of a staff-posted item — see migration 0056),
@@ -170,6 +203,20 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           setSolvedByName(data.solved_by_name ?? null)
           setSolvedAt(data.solved_at ?? null)
           setMergeComments(!!data.merge_comments_into_content)
+          setAnnouncementType(data.announcement_type ?? 'normal')
+          setVoteDeadline(toLocalInput(data.vote_deadline))
+          setVoteSavedDeadline(data.vote_deadline ?? null)
+          if (data.announcement_type === 'vote') {
+            supabase.rpc('get_vote_results', { p_announcement_id: announcementId }).then(({ data: rows }) => {
+              if (!rows?.length) return
+              const map = new Map()
+              for (const r of rows) {
+                if (!map.has(r.question_id)) map.set(r.question_id, { id: r.question_id, title: r.question_title, max: r.question_max, options: [] })
+                map.get(r.question_id).options.push({ id: r.option_id, label: r.label })
+              }
+              setVoteQuestions([...map.values()])
+            })
+          }
         }
       })
     supabase
@@ -279,9 +326,26 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
     }
   }
 
+  function updateQuestion(qi, patch) {
+    setVoteQuestions((prev) => prev.map((q, i) => (i === qi ? { ...q, ...patch } : q)))
+  }
+
+  function setOptionLabel(qi, oi, label) {
+    setVoteQuestions((prev) =>
+      prev.map((q, i) => (i === qi ? { ...q, options: q.options.map((o, j) => (j === oi ? { ...o, label } : o)) } : q))
+    )
+  }
+
   async function save() {
     setSaving(true)
     try {
+      const voteFields = isVote
+        ? {
+            announcement_type: 'vote',
+            vote_deadline: voteDeadline ? new Date(voteDeadline).toISOString() : null,
+            vote_max_choices: 1, // legacy column; each question has its own max now
+          }
+        : { announcement_type: 'normal', vote_deadline: null, vote_max_choices: 1 }
       // created_by_name/actor_name are permanent text snapshots (not a
       // live join) — so "who posted this" still shows correctly even
       // after that person's account is later removed.
@@ -318,10 +382,24 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               updated_by: profile.id,
               updated_by_name: actorName,
               broadcast_group_id: broadcastGroupId,
+              ...voteFields,
             })
             .select()
             .single()
           if (error) throw error
+          if (isVote) {
+            // Each store's copy gets its own independent options + tally.
+            const { error: optError } = await supabase.rpc('set_vote_questions', {
+              p_announcement_id: data.id,
+              p_questions: cleanVoteQuestions.map((q) => ({
+                id: null,
+                title: q.title.trim(),
+                max: Number(q.max) || 1,
+                options: q.options.map((o) => ({ id: null, label: o.label.trim() })),
+              })),
+            })
+            if (optError) throw optError
+          }
           await supabase
             .from('announcement_history')
             .insert({ announcement_id: data.id, action: 'created', actor_id: profile.id, actor_name: actorName })
@@ -352,9 +430,26 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             merge_comments_into_content: mergeComments,
             updated_by: profile.id,
             updated_by_name: actorName,
+            // Type itself can't be changed after creation; for a vote notice
+            // only the deadline / per-user max are editable here.
+            ...(isVote ? { vote_deadline: voteFields.vote_deadline } : {}),
           })
           .eq('id', announcementId)
         if (error) throw error
+        if (isVote) {
+          const { error: optError } = await supabase.rpc('set_vote_questions', {
+            p_announcement_id: announcementId,
+            p_questions: cleanVoteQuestions.map((q) => ({
+              id: q.id,
+              title: q.title.trim(),
+              max: Number(q.max) || 1,
+              options: q.options.map((o) => ({ id: o.id, label: o.label.trim() })),
+            })),
+          })
+          if (optError) throw optError
+          setVoteSavedDeadline(voteFields.vote_deadline)
+          setVoteRefresh((n) => n + 1)
+        }
         await supabase
           .from('announcement_history')
           .insert({ announcement_id: announcementId, action: 'edited', actor_id: profile.id, actor_name: actorName })
@@ -370,6 +465,8 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
         if (readError) console.error('Failed to mark announcement as read:', readError)
       }
       onSaved()
+    } catch (err) {
+      alert(`Save failed: ${err?.message ?? err}`)
     } finally {
       setSaving(false)
     }
@@ -581,7 +678,7 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             <Button variant="secondary" onClick={() => (isNew ? onClose() : setEditing(false))}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving || !title || (canBroadcast && !selectedStoreIds.length)}>
+            <Button onClick={save} disabled={saving || !title || voteInvalid || (canBroadcast && !selectedStoreIds.length)}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </>
@@ -614,20 +711,37 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             placeholder="Title"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
           />
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Category</span>
-            <select
-              className="input max-w-xs"
-              value={categorySelectValue}
-              onChange={(e) => onCategorySelect(e.target.value)}
-            >
-              {CATEGORY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Category</span>
+              <select
+                className="input max-w-xs"
+                value={categorySelectValue}
+                onChange={(e) => onCategorySelect(e.target.value)}
+              >
+                {CATEGORY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Type</span>
+              <select
+                className="input max-w-xs"
+                value={announcementType}
+                disabled={!isNew}
+                onChange={(e) => setAnnouncementType(e.target.value)}
+              >
+                {TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {/* Jeff, 2026-10-30: "admin或發文者要有edit跟comment兩個選項，因為
               這兩個是不同的動作...而且edit的話還是可以在comment merge下更改
               內容，只有comment才鎖住原文" — "原文不能改,只能插入或加" (the
@@ -649,6 +763,89 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
             placeholder="Notice content…"
             imageUploadPath={`announcements/${storeId}`}
           />
+          {isVote && (
+            <div className="space-y-3 rounded-lg border border-gray-200 p-3">
+              {voteQuestions.map((q, qi) => (
+                <div key={qi} className="space-y-2 rounded-lg bg-gray-50 p-3">
+                  <div className="flex gap-2">
+                    <input
+                      value={q.title}
+                      onChange={(e) => updateQuestion(qi, { title: e.target.value })}
+                      placeholder={`Question ${qi + 1} (what are people voting on?)`}
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium focus:border-brand-400 focus:outline-none"
+                    />
+                    {voteQuestions.length > 1 && (
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-gray-400 hover:text-red-500"
+                        onClick={() => setVoteQuestions((prev) => prev.filter((_, i) => i !== qi))}
+                      >
+                        Remove question
+                      </button>
+                    )}
+                  </div>
+                  {q.options.map((o, oi) => (
+                    <div key={oi} className="flex gap-2 pl-3">
+                      <input
+                        value={o.label}
+                        onChange={(e) => setOptionLabel(qi, oi, e.target.value)}
+                        placeholder={`Option ${oi + 1}`}
+                        className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-gray-400 hover:text-red-500"
+                        onClick={() =>
+                          updateQuestion(qi, { options: q.options.length > 1 ? q.options.filter((_, j) => j !== oi) : q.options })
+                        }
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap items-center gap-4 pl-3">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                      onClick={() => updateQuestion(qi, { options: [...q.options, { id: null, label: '' }] })}
+                    >
+                      + Add option
+                    </button>
+                    <label className="flex items-center gap-2 text-xs text-gray-500">
+                      Max choices per person
+                      <input
+                        type="number"
+                        min={1}
+                        max={Math.max(1, q.options.filter((o) => o.label.trim()).length)}
+                        value={q.max}
+                        onChange={(e) => updateQuestion(qi, { max: e.target.value })}
+                        className="input w-20"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                onClick={() => setVoteQuestions((prev) => [...prev, newQuestion()])}
+              >
+                + Add another question
+              </button>
+              {!isNew && (
+                <p className="text-xs text-gray-400">Removing an option or question also deletes the votes it received.</p>
+              )}
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-500">Deadline (optional, applies to all questions)</span>
+                <input
+                  type="datetime-local"
+                  value={voteDeadline}
+                  onChange={(e) => setVoteDeadline(e.target.value)}
+                  className="input"
+                />
+              </label>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} />
             Mark as important
@@ -721,6 +918,14 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           )}
 
           <RichTextViewer html={content} highlightId={highlightedCommentId} />
+
+          {isVote && (
+            <VotePanel
+              key={`${announcementId}-${voteRefresh}`}
+              announcementId={announcementId}
+              deadline={voteSavedDeadline}
+            />
+          )}
 
           {/* Jeff, 2026-10-30: tells the creator themselves why the Edit
               button above just disappeared — admin never sees this (they're
