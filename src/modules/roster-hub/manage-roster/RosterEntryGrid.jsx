@@ -93,6 +93,7 @@ export default function RosterEntryGrid({
   // this dialog is purely a heads-up they click past, never something that
   // reverts or blocks the entry.
   const [conflictWarning, setConflictWarning] = useState(null)
+  const [showAddHelp, setShowAddHelp] = useState(false)
 
   // Jeff, 2026-10-24: "手機板manage roster時，如果點擊員工的名字，上面會顯示
   // 該員工這個禮拜目前牌的時間" — mobile's day-tabs (below) only ever show
@@ -509,10 +510,36 @@ export default function RosterEntryGrid({
 
       <div className="border-t border-brand-100 p-2 text-sm">
         <button onClick={addRow} className="rounded-lg border border-brand-300 px-3 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
-          + Add row
+          Add staff without account
         </button>
-        <span className="ml-2 text-xs text-gray-400">
-          For a casual/one-off name not in Staff Information yet — type a name in, then fill in their hours.
+        <span className="relative ml-2 inline-block align-middle">
+          <button
+            type="button"
+            onClick={() => setShowAddHelp((v) => !v)}
+            aria-label="About removing staff and adding staff without an account"
+            aria-expanded={showAddHelp}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-brand-300 text-xs font-bold italic text-brand-700 hover:bg-brand-50"
+          >
+            i
+          </button>
+          {showAddHelp && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowAddHelp(false)} aria-hidden="true" />
+              <div
+                role="dialog"
+                className="absolute bottom-full left-0 z-50 mb-2 w-72 max-w-[80vw] rounded-lg border border-brand-200 bg-white p-3 text-xs leading-relaxed text-gray-600 shadow-lg sm:w-96"
+              >
+                <p>
+                  If you remove an employee with an account from the roster, you can restore them via Roster Staff Order
+                  in Settings.
+                </p>
+                <p className="mt-2">
+                  Use 'Add staff without account' for casual or one-off staff not in Staff Information yet—simply type in
+                  their name and fill in their hours.
+                </p>
+              </div>
+            </>
+          )}
         </span>
         <span className="ml-3 inline-flex items-center gap-1 text-xs text-gray-400">
           <span className="inline-block h-3 w-3 rounded border border-rose-300 bg-rose-100" aria-hidden="true" />
