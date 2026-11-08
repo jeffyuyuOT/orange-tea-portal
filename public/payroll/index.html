@@ -2197,9 +2197,10 @@ function fmtLocalHM(occurredAt){
 // roster_entries has no unpaid-break column and no break-time information
 // anywhere else in OT Portal, so every roster-sourced shift is imported as
 // continuous (brk:0) -- see the header comment above.
-async function fetchStoresFromRoster(dateFrom, dateTo){
+async function fetchStoresFromRoster(dateFrom, dateTo, importStores){
+  importStores = importStores || realStores;
   const warnings = [];
-  const storeIds = realStores.map(s=>s.id);
+  const storeIds = importStores.map(s=>s.id);
   if(!storeIds.length) return {stores:[], warnings};
   const { data: periods, error: perr } = await sb
     .from('roster_periods')
@@ -2222,7 +2223,7 @@ async function fetchStoresFromRoster(dateFrom, dateTo){
   for(const row of (entries||[])){
     const period = periodById.get(row.roster_period_id);
     if(!period) continue;
-    const realStore = realStores.find(s=>s.id===period.store_id);
+    const realStore = importStores.find(s=>s.id===period.store_id);
     if(!realStore) continue;
     if(!row.start_time || !row.end_time){ continue; } // an entry with no times recorded contributes no hours
     const sH = timeToHours(row.start_time.slice(0,5));
@@ -2255,9 +2256,10 @@ async function fetchStoresFromRoster(dateFrom, dateTo){
 // attendance_events already reflects any manager/admin correction (edits
 // are applied in place on the punch itself, migration 0062) -- no separate
 // "as edited" query needed, this IS the corrected data.
-async function fetchStoresFromAttendance(dateFrom, dateTo){
+async function fetchStoresFromAttendance(dateFrom, dateTo, importStores){
+  importStores = importStores || realStores;
   const warnings = [];
-  const storeIds = realStores.map(s=>s.id);
+  const storeIds = importStores.map(s=>s.id);
   if(!storeIds.length) return {stores:[], warnings};
   // Fetch each profile's FULL punch history at these stores (not bounded to
   // the selected period) and pair chronologically before filtering to the
@@ -2292,7 +2294,7 @@ async function fetchStoresFromAttendance(dateFrom, dateTo){
     for(const s of sessions){
       if(s.inProgress){ openCount++; continue; } // still clocked in, no clock-out yet -- not counted, same as dailyTotals()
       if(!s.date || s.date<dateFrom || s.date>dateTo || s.minutes==null) continue;
-      const realStore = realStores.find(rs=>rs.id===(s.clockIn.store_id||s.clockOut.store_id));
+      const realStore = importStores.find(rs=>rs.id===(s.clockIn.store_id||s.clockOut.store_id));
       if(!realStore) continue;
       const profileId = s.clockIn.profile_id || s.clockOut.profile_id;
       const override = rosterNameByKey.get(`${realStore.id}:${profileId}`);
@@ -2319,10 +2321,20 @@ async function importFromOTPortal(){
   if(!source){ toast("請先到「系統設置 > 匯入班表來源」選擇要匯入 OT Portal 班表還是 Attendance Logs"); return; }
   await loadRealStores(); // refresh against 分店管理 current active store list
   if(!realStores.length){ toast("「分店管理」目前沒有任何啟用中的分店"); return; }
+  // Jeff, 2026-11-08: 從 OT Portal 匯入時，只抓「資料管理 > 分店管理」裡已經
+  // 有的店面（名稱完全相符，不分大小寫、去頭尾空白，同 findRealStore）；
+  // 分店管理沒有的 OT Portal 分店直接不抓，也不再自動建立新分店。
+  const importStores = realStores.filter(rs=>{
+    const nm = (rs.name||"").trim().toLowerCase();
+    return nm && currentStores.some(cs=>(cs.name||"").trim().toLowerCase()===nm);
+  });
+  const skippedStores = realStores.filter(rs=>!importStores.includes(rs));
+  if(!importStores.length){ toast("OT Portal 的分店都不在「資料管理 > 分店管理」裡，沒有可匯入的分店"); return; }
   try{
     const res = source==="attendance"
-      ? await fetchStoresFromAttendance(workingSheet.dateFrom, workingSheet.dateTo)
-      : await fetchStoresFromRoster(workingSheet.dateFrom, workingSheet.dateTo);
+      ? await fetchStoresFromAttendance(workingSheet.dateFrom, workingSheet.dateTo, importStores)
+      : await fetchStoresFromRoster(workingSheet.dateFrom, workingSheet.dateTo, importStores);
+    if(skippedStores.length) res.warnings.push(`以下 OT Portal 分店不在「資料管理 > 分店管理」裡，已略過不匯入：${skippedStores.map(s=>s.name).join("、")}`);
     if(!res.stores.length){ toast("OT Portal 在目前選擇的日期區間內沒有可匯入的資料"); return; }
     await ingestParsedStores(res.stores, res.warnings);
   }catch(err){ toast("從 OT Portal 匯入失敗: "+err.message); }
