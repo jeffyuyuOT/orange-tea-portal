@@ -1966,6 +1966,11 @@ async function fetchRealStaffForStore(realStoreId){
     if(!p || seen.has(p.id)) return;
     if(!p.is_active) return;
     if(NON_PAYROLL_STAFF_ROLES.includes(p.role)) return;
+    // Jeff, 2026-11-08: Staff Information 頁面不會列出 User Management 裡
+    // 「Join store activity」沒勾的人（isActiveStoreMember：join_store_activity
+    // !== false），PR 同步也要一樣，否則這些人（例如 derek、jeff test）
+    // 會一直被同步進員工資料管理。
+    if(p.join_store_activity === false) return;
     seen.add(p.id);
     out.push({
       profileId: p.id,
