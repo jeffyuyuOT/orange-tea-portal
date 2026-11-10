@@ -638,7 +638,15 @@ export function AuthProvider({ children }) {
   // store-switch-specific since every store's answer is already known
   // ahead of time.
   const refreshTimeDiscrepancies = useCallback(async () => {
-    if (!profile?.id || !canAccessPage(getEffectivePages(profile, overrides), 'shop_management.staff_time_logs') || !accessibleStores.length) {
+    // Jeff, 2026-11-11: "admin的身分者在staff time log不用出現時間差提示" — admin/developer never
+    // get the clocked-vs-rostered red dots (managers do; Attendance Exceptions is still there).
+    if (
+      !profile?.id ||
+      profile.role === 'admin' ||
+      profile.role === 'developer' ||
+      !canAccessPage(getEffectivePages(profile, overrides), 'shop_management.staff_time_logs') ||
+      !accessibleStores.length
+    ) {
       setStoreTimeDiscrepancies({})
       return
     }

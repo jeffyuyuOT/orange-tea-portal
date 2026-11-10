@@ -100,7 +100,8 @@ export default function StaffTimeLogsPage() {
   }, [currentStoreId, profile?.role])
 
   useEffect(() => {
-    if (!currentStoreId || !profile?.id || !staff.length) {
+    // Jeff, 2026-11-11: admin/developer don't get time-difference prompts here (see AuthContext).
+    if (!currentStoreId || !profile?.id || !staff.length || profile.role === 'admin' || profile.role === 'developer') {
       setDiscrepancies({})
       setViewedAtBySubject(new Map())
       return
@@ -297,7 +298,13 @@ export default function StaffTimeLogsPage() {
   }
 
   if (showExceptions) {
-    return <AttendanceExceptionsView staff={staff} currentStoreId={currentStoreId} onBack={() => setShowExceptions(false)} />
+    return <AttendanceExceptionsView
+        staff={staff}
+        currentStoreId={currentStoreId}
+        canEdit={canEdit}
+        editor={editor}
+        onBack={() => setShowExceptions(false)}
+      />
   }
 
   return (
@@ -309,7 +316,7 @@ export default function StaffTimeLogsPage() {
         <button
           onClick={() => setShowExceptions(true)}
           disabled={loading || !staff.length}
-          className="rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+          className="ml-auto rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-40"
         >
           Attendance Exceptions
         </button>
