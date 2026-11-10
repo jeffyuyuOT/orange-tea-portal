@@ -36,7 +36,6 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState([])
   const [showNoted, setShowNoted] = useState(false)
-  const [rosterCard, setRosterCard] = useState(null)
   const [punchCard, setPunchCard] = useState(null)
   const [syncRow, setSyncRow] = useState(null)
   const [form, setForm] = useState({ startTime: '', endTime: '', breakHalfHours: '' })
@@ -126,6 +125,12 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
     setSyncRow({ ...row, proposal: p })
   }
 
+  function closeDayWindows(profileId, date) {
+    const k = `${profileId}|${date}`
+    setPunchCard((c) => (c?.key === k ? null : c))
+    setSyncRow((r) => (r && `${r.profileId}|${r.date}` === k ? null : r))
+  }
+
   async function confirmSync() {
     if (!syncRow) return
     if (!form.startTime || !form.endTime) {
@@ -151,14 +156,14 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
       return
     }
     setFlash(`Roster updated: ${nameById.get(syncRow.profileId)}, ${format(parseISO(syncRow.date), 'EEE d MMM')}`)
-    setSyncRow(null)
-    // The card for this row, if open, would now show the old roster values.
-    setRosterCard((c) => (c && c.key === `${syncRow.profileId}|${syncRow.date}` ? null : c))
+    // Jeff, 2026-11-11: applying closes every window for that day, so nothing has to be
+    // closed one by one afterwards.
+    closeDayWindows(syncRow.profileId, syncRow.date)
     setReloadTick((t) => t + 1)
     refreshTimeDiscrepancies?.()
   }
 
-  const cardsOpen = !!(rosterCard || punchCard || syncRow)
+  const cardsOpen = !!(punchCard || syncRow)
 
   return (
     <div className={cardsOpen ? 'pb-72' : undefined}>
@@ -245,30 +250,15 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
                   <div className="text-sm font-medium text-gray-800">{name}</div>
                   <div className="text-xs text-gray-500">{format(parseISO(d.date), 'EEE d MMM')}</div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setRosterCard({
-                      key,
-                      name,
-                      date: d.date,
-                      start: d.rosterStartTime,
-                      end: d.rosterEndTime,
-                      breakHalfHours: d.rosterBreakHalfHours,
-                      scheduledMinutes: d.scheduledMinutes,
-                    })
-                  }
-                  className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-left text-sm hover:bg-blue-100"
-                  title="Show the rostered shift"
-                >
+                {/* Roster box: plain info (no window) — rostered time, break, and total after break. */}
+                <div className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-left text-sm" title="Rostered shift">
                   <span className="block text-[11px] font-bold uppercase tracking-wide text-blue-600">Roster</span>
-                  <span className="whitespace-nowrap font-semibold tabular-nums text-blue-900 underline decoration-dotted underline-offset-2">
-                    {rosterText}
-                  </span>
+                  <span className="whitespace-nowrap font-semibold tabular-nums text-blue-900">{rosterText}</span>
                   {rosterBreak && (
                     <span className="ml-1.5 rounded bg-red-50 px-1.5 py-px text-[11px] font-semibold text-red-500">B{rosterBreak}</span>
                   )}
-                </button>
+                  <span className="ml-1.5 text-xs font-semibold tabular-nums text-blue-700">· {formatMinutes(d.scheduledMinutes)}</span>
+                </div>
                 <button
                   type="button"
                   onClick={() =>
@@ -303,24 +293,9 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
                 >
                   Sync
                 </button>
-                {/* Roster / Clocked / Sync windows open side by side right under the row they were opened from. */}
-                {(rosterCard?.key === key || punchCard?.key === key || (syncRow && `${syncRow.profileId}|${syncRow.date}` === key)) && (
+                {/* Clocked / Sync windows open side by side right under the row they were opened from. */}
+                {(punchCard?.key === key || (syncRow && `${syncRow.profileId}|${syncRow.date}` === key)) && (
                   <div className="pointer-events-none absolute left-2 right-2 top-full z-40 mt-1.5 flex flex-col gap-2 sm:left-44 sm:right-auto sm:flex-row sm:flex-wrap sm:items-start">
-                    {rosterCard?.key === key && (
-                      <FloatCard
-                        tone="blue"
-                        tag="Roster"
-                        title={`${rosterCard.name} — rostered shift`}
-                        subtitle={format(parseISO(rosterCard.date), 'EEE, MMM d')}
-                        onClose={() => setRosterCard(null)}
-                      >
-                        <Row label="Scheduled time">
-                          {rosterCard.start && rosterCard.end ? `${rosterCard.start.slice(0, 5)}–${rosterCard.end.slice(0, 5)}` : '—'}
-                        </Row>
-                        <Row label="Break">{formatBreakUnits(rosterCard.breakHalfHours) ?? 'None'}</Row>
-                        <Row label="Rostered (after break)">{formatMinutes(rosterCard.scheduledMinutes)}</Row>
-                      </FloatCard>
-                    )}
                     {punchCard?.key === key && (
                       <FloatCard
                         tone="green"
@@ -436,11 +411,14 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
           side
           anchor={editCell.anchor}
           editor={editor}
-          onClose={() => setEditCell(null)}
-          onSaved={() => {
+          onClose={() => {
+            // Closing the editor (cancel, ✕ or after saving) closes that day's other windows too.
+            closeDayWindows(editCell.profileId, editCell.date)
             setEditCell(null)
-            // The open Clocked / Roster windows would show the old numbers.
-            setPunchCard(null)
+          }}
+          onSaved={() => {
+            closeDayWindows(editCell.profileId, editCell.date)
+            setEditCell(null)
             setReloadTick((t) => t + 1)
             refreshTimeDiscrepancies?.()
           }}
