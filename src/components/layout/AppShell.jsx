@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
@@ -17,7 +17,9 @@ import MyRosterQuickModal from './MyRosterQuickModal'
 import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
 import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
-import { watchForUpdate, applyUpdate, isUpdateReady } from '../../lib/swUpdate'
+import { watchForUpdate, applyUpdate } from '../../lib/swUpdate'
+import { pendingReleaseNotes, markNotesSeen } from '../../lib/releaseNotes'
+import WhatsNewModal from './WhatsNewModal'
 
 // Jeff, 2026-10-26: BK's nightly backup has to run from anywhere in the app, not only
 // while the BK page is open, so the guard lives here (loaded only for people who can open BK).
@@ -216,26 +218,22 @@ export default function AppShell() {
   // one case worth covering proactively rather than waiting for a full
   // close.
   //
-  // Jeff, 2026-11-10: "登入後10秒跳出有更新版本視窗要求更新...在admin centre的系統設定裡
-  // 新增跳出更新視窗的開關" — on top of the silent apply above, an admin can switch on an
-  // "Update now / Later" popup (Admin Center > System Setting > Update Available Popup,
-  // app_display_settings.update_prompt_enabled, migration 0168; off by default). It only
-  // appears once ALL of these hold: an update is actually waiting, this session has been
-  // open for 10 seconds (someone who opened the app just to clock in is not held up), the
-  // QR scanner / clock-in result isn't on screen, they haven't already tapped Later this
-  // session, and the setting is on — re-read from the database at that moment, so an admin
-  // flipping it takes effect without anyone reloading. Later hides it until the next time
-  // the app is opened; My Information > Check for Updates is unaffected either way.
-  const [updateReady, setUpdateReady] = useState(false)
+  // Jeff, 2026-11-10: "如果是悄悄更新那就不需要綁定了，而是系統設置的開關會彈出視窗顯示
+  // 更新了哪些，有看過的就不會列出...admin可以控制累積一定量再彈出視窗告訴大家多了什麼功能" —
+  // the update itself stays silent (above, and swUpdate.js); what an admin controls is a
+  // "What's new" popup listing changes (lib/releaseNotes.js) this person hasn't seen yet. It
+  // only appears when the switch in Admin Center > System Setting > What's New Popup
+  // (app_display_settings.update_prompt_enabled, migration 0168; off by default) is on —
+  // re-read from the database each time, so flipping it needs no reload — and only once the
+  // app has been open for 10 seconds (someone who opened it just to clock in isn't held up)
+  // and the QR scanner / clock-in result isn't on screen. While the switch is off nothing is
+  // shown and nothing is marked as seen, so notes pile up until it's turned on.
   const [promptDelayDone, setPromptDelayDone] = useState(false)
   const [promptTick, setPromptTick] = useState(0)
-  const [showUpdatePrompt, setShowUpdatePrompt] = useState(false)
-  const [applyingUpdate, setApplyingUpdate] = useState(false)
-  const updatePromptDismissed = useRef(false)
+  const [whatsNew, setWhatsNew] = useState([])
 
   useEffect(() => {
-    const cancelWatch = watchForUpdate(() => setUpdateReady(true))
-    if (isUpdateReady()) setUpdateReady(true)
+    const cancelWatch = watchForUpdate(() => {})
     const delay = setTimeout(() => setPromptDelayDone(true), 10000)
     function onVisibility() {
       if (document.visibilityState === 'hidden') applyUpdate()
@@ -265,19 +263,21 @@ export default function AppShell() {
   const clockInOut = useClockInOut(profile?.id, accessibleStores)
   const scannerBusy = canClockInOut && (clockInOut.showScanner || !!clockInOut.feedback)
   useEffect(() => {
-    if (!updateReady || !promptDelayDone || scannerBusy || showUpdatePrompt || updatePromptDismissed.current) return
+    if (!profile?.id || !promptDelayDone || scannerBusy || whatsNew.length) return
+    const pending = pendingReleaseNotes(profile.id, (key) => canAccessPage(effectivePages, key))
+    if (!pending.length) return
     let active = true
     supabase
       .from('app_display_settings')
       .select('update_prompt_enabled')
       .maybeSingle()
       .then(({ data }) => {
-        if (active && data?.update_prompt_enabled && !updatePromptDismissed.current) setShowUpdatePrompt(true)
+        if (active && data?.update_prompt_enabled) setWhatsNew(pending)
       })
     return () => {
       active = false
     }
-  }, [updateReady, promptDelayDone, scannerBusy, showUpdatePrompt, promptTick])
+  }, [profile?.id, effectivePages, promptDelayDone, scannerBusy, whatsNew.length, promptTick])
   // Same "nothing to navigate between" check as Sidebar.jsx (see its
   // 2026-10-01 comment) — hides the hamburger button and drawer too, not
   // just the desktop <aside>, for a role resolved down to one page.
@@ -503,44 +503,14 @@ export default function AppShell() {
         <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
       )}
 
-      {showUpdatePrompt && (
-        <Modal
-          open
-          onClose={() => {
-            updatePromptDismissed.current = true
-            setShowUpdatePrompt(false)
+      {whatsNew.length > 0 && (
+        <WhatsNewModal
+          notes={whatsNew}
+          onDone={() => {
+            markNotesSeen(profile.id, whatsNew.map((n) => n.id))
+            setWhatsNew([])
           }}
-          title="🔄 New version available"
-          footer={
-            <>
-              <button
-                onClick={() => {
-                  updatePromptDismissed.current = true
-                  setShowUpdatePrompt(false)
-                }}
-                disabled={applyingUpdate}
-                className="rounded-lg border border-gray-200 px-3.5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40"
-              >
-                Later
-              </button>
-              <button
-                onClick={() => {
-                  setApplyingUpdate(true)
-                  applyUpdate()
-                }}
-                disabled={applyingUpdate}
-                className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-              >
-                {applyingUpdate ? 'Updating…' : 'Update now'}
-              </button>
-            </>
-          }
-        >
-          <p className="text-sm text-gray-700">
-            A new version of the app is ready. Tap <b>Update now</b> to get it — the app reloads and takes a few
-            seconds. You can also tap <b>Later</b> and update any time from My Information &gt; Check for Updates.
-          </p>
-        </Modal>
+        />
       )}
 
       {showQualifiedPopup && (

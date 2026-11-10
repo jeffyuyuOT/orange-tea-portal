@@ -187,15 +187,21 @@ export default function MyRosterQuickModal({ open, onClose }) {
             return (
               <li
                 key={dayStr}
-                className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isToday ? 'bg-brand-50' : ''}`}
+                className={`flex items-center gap-3 border-l-4 px-3 py-2.5 ${
+                  isToday ? 'border-brand-500 bg-brand-50' : 'border-transparent'
+                }`}
               >
-                <div className="w-20 shrink-0 text-sm font-medium text-gray-700">
+                {/* Jeff, 2026-11-10: time right beside the date, and every row's time starting at
+                    the same spot whether or not it has a break — the date column is a fixed
+                    width, the time a fixed-width tabular-number slot, and the B×n tag always
+                    follows in its own slot. Today is marked by the left bar + tint instead of a
+                    "Today" word, which used to wrap the date onto two lines. */}
+                <div className="w-[5.5rem] shrink-0 whitespace-nowrap text-sm font-medium text-gray-700">
                   {format(d, 'EEE d/M')}
-                  {isToday && <span className="ml-1 text-[10px] font-semibold text-brand-600">Today</span>}
                 </div>
                 {shift ? (
-                  <div className="flex items-center gap-2 text-sm text-gray-800">
-                    <span className="whitespace-nowrap font-medium">
+                  <>
+                    <span className="w-[7.5rem] shrink-0 whitespace-nowrap text-sm font-medium tabular-nums text-gray-800">
                       {shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}
                     </span>
                     {Number(shift.break_half_hours) > 0 && (
@@ -206,7 +212,7 @@ export default function MyRosterQuickModal({ open, onClose }) {
                         B×{Number(shift.break_half_hours)}
                       </span>
                     )}
-                  </div>
+                  </>
                 ) : (
                   <span className="text-sm text-gray-300">—</span>
                 )}
