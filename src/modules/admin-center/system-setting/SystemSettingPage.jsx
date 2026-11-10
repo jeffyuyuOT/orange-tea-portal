@@ -5,6 +5,7 @@ import ImportFilePanel from './ImportFilePanel'
 import MenuExportPanel from './MenuExportPanel'
 import SidebarOrderPanel from './SidebarOrderPanel'
 import RosterDisplayFormatPanel from './RosterDisplayFormatPanel'
+import AppUpdatePromptPanel from './AppUpdatePromptPanel'
 
 export default function SystemSettingPage() {
   const [busy, setBusy] = useState(false)
@@ -54,6 +55,8 @@ export default function SystemSettingPage() {
       <SidebarOrderPanel />
 
       <RosterDisplayFormatPanel />
+
+      <AppUpdatePromptPanel />
 
       <MenuExportPanel />
 

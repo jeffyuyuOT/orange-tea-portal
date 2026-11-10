@@ -26,6 +26,9 @@ import { applyUpdate } from './swUpdate'
 // the right call (same as this button has always done) — main.jsx's
 // `controllerchange` listener handles the actual reload once that handover
 // completes, same as before.
+// Long enough for a phone on mobile data to pull the whole precache.
+const INSTALL_WAIT_MS = 45000
+
 export async function checkForAppUpdate() {
   if (!('serviceWorker' in navigator)) return { supported: false, updateFound: false }
   let reg = await navigator.serviceWorker.getRegistration()
@@ -48,13 +51,43 @@ export async function checkForAppUpdate() {
     ]).catch(() => null)
   }
   if (!reg) return { supported: true, updateFound: false }
-  await reg.update()
-  if (reg.installing) {
-    // Give the newly-found worker a moment to finish installing so
-    // reg.waiting is actually set below — it isn't ready to skipWaiting the
-    // instant `update()` resolves. Capped so the button never hangs if
-    // something unexpected happens (e.g. install fails).
-    const installingWorker = reg.installing
+  // Jeff, 2026-11-10: "check for update都要登出再登入才找的到更新版本" — the old version of
+  // this decided "already latest" far too early, in three ways:
+  //  - reg.update() can reject (offline / flaky mobile network) and that went
+  //    unhandled, so the button either stuck on "Checking…" or the result was read
+  //    as up to date;
+  //  - update() resolves once the new sw.js has been fetched, but the new worker then
+  //    has to download the whole precache before it reaches "waiting" — on a phone
+  //    that routinely takes longer than the old 5 s cap, so reg.waiting was still
+  //    empty and it reported "latest version"; by the time the person logged out and
+  //    in again the download had finished and the same check suddenly found it;
+  //  - a worker that was ALREADY waiting (found earlier by the background check) was
+  //    only noticed if update() happened to run cleanly first.
+  // So: use an already-waiting worker straight away, treat a failed check as "couldn't
+  // check" instead of "up to date", and wait up to INSTALL_WAIT_MS for a worker that is
+  // still installing.
+  if (reg.waiting) {
+    applyUpdate(reg)
+    return { supported: true, updateFound: true }
+  }
+  let sawUpdateFound = false
+  const onFound = () => {
+    sawUpdateFound = true
+  }
+  reg.addEventListener('updatefound', onFound)
+  try {
+    await reg.update()
+  } catch {
+    reg.removeEventListener('updatefound', onFound)
+    return { supported: true, updateFound: false, failed: true }
+  }
+  // updatefound can be delivered a beat after update() resolves.
+  if (!reg.installing && !reg.waiting && !sawUpdateFound) {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+  }
+  reg.removeEventListener('updatefound', onFound)
+  const installingWorker = reg.installing
+  if (installingWorker && installingWorker.state === 'installing') {
     await new Promise((resolve) => {
       const onChange = () => {
         if (installingWorker.state !== 'installing') {
@@ -63,9 +96,12 @@ export async function checkForAppUpdate() {
         }
       }
       installingWorker.addEventListener('statechange', onChange)
-      setTimeout(resolve, 5000)
+      setTimeout(resolve, INSTALL_WAIT_MS)
     })
   }
-  if (reg.waiting) applyUpdate(reg)
-  return { supported: true, updateFound: !!reg.waiting }
+  if (reg.waiting) {
+    applyUpdate(reg)
+    return { supported: true, updateFound: true }
+  }
+  return { supported: true, updateFound: false }
 }

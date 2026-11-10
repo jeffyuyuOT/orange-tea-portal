@@ -18,9 +18,29 @@
 // handover completes either way.
 let readyRegistration = null
 
+// Jeff, 2026-11-10: "為什麼我現在手機板都沒有做到悄悄更新的動作" — two gaps kept the
+// silent apply above from ever having anything to apply on a phone:
+//  1. Nothing here ever ASKED the browser whether a newer sw.js exists. The browser
+//     only checks on its own — on a genuinely fresh page navigation, or roughly once a
+//     day in the background — and an installed home-screen app that is just locked and
+//     resumed never navigates, so it could sit on an old build for a long time with no
+//     waiting worker at all (pwaUpdate.js's own comment describes the same thing).
+//     So the registration is now asked to update() when the app starts, whenever it
+//     comes back to the foreground, and every UPDATE_CHECK_MS while it stays open.
+//  2. getRegistration() alone can come back empty on some phones (the Samsung case
+//     pwaUpdate.js's 2026-10-27 comment describes), which meant this listener never
+//     attached and readyRegistration was never set — so applyUpdate() had nothing to
+//     act on even when a new worker WAS waiting. Same `serviceWorker.ready` fallback
+//     pwaUpdate.js already uses.
+const UPDATE_CHECK_MS = 15 * 60 * 1000
+const MIN_CHECK_GAP_MS = 60 * 1000
+
 export function watchForUpdate(onReady) {
   if (!('serviceWorker' in navigator)) return () => {}
   let cancelled = false
+  let timer = null
+  let lastCheck = 0
+  let activeReg = null
 
   function announceIfWaiting(reg) {
     if (reg?.waiting && !cancelled) {
@@ -29,8 +49,34 @@ export function watchForUpdate(onReady) {
     }
   }
 
-  navigator.serviceWorker.getRegistration().then((reg) => {
+  function checkForNewVersion() {
+    if (cancelled || !activeReg) return
+    const now = Date.now()
+    if (now - lastCheck < MIN_CHECK_GAP_MS) return
+    lastCheck = now
+    // A failed check (offline, flaky mobile network) is simply retried at the next
+    // trigger — nothing for the user to see.
+    activeReg.update().catch(() => {})
+  }
+
+  function onVisible() {
+    if (document.visibilityState === 'visible') checkForNewVersion()
+  }
+
+  async function findRegistration() {
+    let reg = await navigator.serviceWorker.getRegistration()
+    if (!reg) {
+      reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+      ]).catch(() => null)
+    }
+    return reg
+  }
+
+  findRegistration().then((reg) => {
     if (!reg || cancelled) return
+    activeReg = reg
     // Covers an update that arrived (and finished installing) before this
     // listener was attached — e.g. one found by a navigation/periodic check
     // on an earlier page of the same session.
@@ -42,10 +88,15 @@ export function watchForUpdate(onReady) {
         if (installing.state === 'installed') announceIfWaiting(reg)
       })
     })
+    checkForNewVersion()
+    timer = setInterval(checkForNewVersion, UPDATE_CHECK_MS)
+    document.addEventListener('visibilitychange', onVisible)
   })
 
   return () => {
     cancelled = true
+    if (timer) clearInterval(timer)
+    document.removeEventListener('visibilitychange', onVisible)
   }
 }
 

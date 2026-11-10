@@ -27,8 +27,12 @@ export default function MyInformationPage() {
 
   async function handleCheckForUpdate() {
     setUpdateStatus('checking')
-    const { supported, updateFound } = await checkForAppUpdate()
-    setUpdateStatus(!supported ? 'unsupported' : updateFound ? 'updating' : 'uptodate')
+    try {
+      const { supported, updateFound, failed } = await checkForAppUpdate()
+      setUpdateStatus(!supported ? 'unsupported' : failed ? 'failed' : updateFound ? 'updating' : 'uptodate')
+    } catch {
+      setUpdateStatus('failed')
+    }
   }
 
   useEffect(() => {
@@ -183,10 +187,13 @@ export default function MyInformationPage() {
             onClick={handleCheckForUpdate}
             disabled={updateStatus === 'checking' || updateStatus === 'updating'}
           >
-            {updateStatus === 'checking' ? 'Checking…' : '🔄 Check for Updates'}
+            {updateStatus === 'checking' ? 'Checking… (can take up to a minute)' : '🔄 Check for Updates'}
           </Button>
           {updateStatus === 'updating' && <p className="text-sm text-brand-600">Update found — reloading…</p>}
           {updateStatus === 'uptodate' && <p className="text-sm text-gray-500">You're already on the latest version.</p>}
+          {updateStatus === 'failed' && (
+            <p className="text-sm text-red-600">Couldn't check for updates — check your connection and try again.</p>
+          )}
           {updateStatus === 'unsupported' && <p className="text-sm text-gray-500">Not available on this browser.</p>}
         </div>
         <p className="mt-2 text-xs text-gray-400">
