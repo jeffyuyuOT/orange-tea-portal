@@ -646,7 +646,8 @@ function hoursToTimeStr(h){
   return `${pad2(hh)}:${pad2(mm)}`;
 }
 function fmtMoney(n){
-  n = Math.round((n||0)*100)/100;
+  n = round2(n); // round2 is a hoisted function declaration, see its comment
+
   return n.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 function fmtHours(n){
@@ -2701,6 +2702,7 @@ function renderMasterTable(rows, editing){
     }
     body += `</tr>`;
   });
+  totals.total = round2(totals.total); totals.bank = round2(totals.bank); totals.cash = round2(totals.cash); totals.tax = round2(totals.tax);
   body += `<tr class="total-row"><td>Total</td><td>${fmtHours(totals.hr)}</td><td>${fmtMoney(totals.total)}</td><td>${fmtMoney(totals.bank)}</td><td>${fmtMoney(totals.cash)}</td><td>${fmtMoney(totals.tax)}</td>`;
   cols.forEach(([k])=>{ const v=adjTotals[k]; body += `<td>${v<0?'-':''}${fmtHours(Math.abs(v))}</td>`; });
   body += `<td>${fmtMoney(totals.bonus)}</td><td></td>${editing?'<td></td>':''}</tr>`;
@@ -2884,11 +2886,26 @@ function wireTab1(){
     await ingestParsedStores(res.stores, res.warnings);
   };
   const editBtn = $("#t1-edit");
-  if(editBtn) editBtn.onclick = ()=>{ editingOutput=!editingOutput; renderMain(); };
+  if(editBtn) editBtn.onclick = async ()=>{
+    const wasEditing = editingOutput;
+    editingOutput = !editingOutput;
+    renderMain();
+    if(wasEditing){
+      const payWarn = collectPayWarnings(workingSheet);
+      if(hasPayWarnings(payWarn)) await showPayWarningsModal(payWarn);
+    }
+  };
   const saveBtn = $("#t1-savedraft");
   if(saveBtn) saveBtn.onclick = ()=>saveWorkingSheet(workingSheet.status==="completed" ? "completed" : "draft");
   const submitBtn = $("#t1-submit");
-  if(submitBtn) submitBtn.onclick = ()=>confirmSubmit();
+  if(submitBtn) submitBtn.onclick = async ()=>{
+    const payWarn = collectPayWarnings(workingSheet);
+    if(hasPayWarnings(payWarn)){
+      const goOn = await showPayWarningsModal(payWarn, {confirmLabel:"仍要提交"});
+      if(!goOn) return;
+    }
+    confirmSubmit();
+  };
   const exportMasterBtn = $("#t1-export-master");
   if(exportMasterBtn) exportMasterBtn.onclick = ()=>exportSheetToXlsx(workingSheet, {view:"master"});
   const exportAcctBtn = $("#t1-export-accounting");
@@ -3334,6 +3351,78 @@ function showUnregisteredModal(items){
     };
   });
 }
+// Jeff, 2026-11-10: 兩種情況要跳出警示視窗：
+//  (1) School student 的總時數超過依 QLD 學校日曆算出的每週時數上限
+//      (row.hourCap，見 schoolStudentHourCap)。超過的部分目前會被
+//      splitAwardCash 轉成 cash 時數。
+//  (2) 任何人（FT/PT/Casual，含 school student）超過可報時數上限 (hourCap)
+//      而轉成 cash 時數，但對應類別的 Cash rate 沒填（0 或空白）——會讓
+//      這些 cash 時數算出 $0，等於漏發薪水。
+// CA / Direct 不適用（CA 沒有上限切分；Direct 另有自己的 hour limit 公式）。
+function collectPayWarnings(sheet){
+  const overCap = [], noCashRate = [];
+  if(!sheet || !sheet.stores) return {overCap, noCashRate};
+  const cols = bucketCols(currentSettings ? currentSettings.weekendSplit : true);
+  const labelOf = {}; cols.forEach(([k,l])=>{ labelOf[k]=l; });
+  const keys = ["weekday","saturday","sunday","publicHoliday"];
+  Object.values(sheet.stores).forEach(sd=>{
+    (sd.rows||[]).forEach(row=>{
+      if(row.paymentType==="CA" || row.paymentType==="Direct" || row.noCapSplit) return;
+      const res = rowTotal(row);
+      const cash = res.cashHours || {};
+      const excess = round2(keys.reduce((a,k)=>a+(cash[k]||0),0));
+      if(excess<=0) return;
+      const totalHrs = round2(keys.reduce((a,k)=>a+Math.max(0,(res.hoursFinal&&res.hoursFinal[k])||0),0));
+      if(row.schoolCapBasis){
+        const basisLabel = row.schoolCapBasis==="term" ? "上學週 每週 12 hr"
+          : row.schoolCapBasis==="holiday" ? "假期週 每週 38 hr" : "含上學週 + 假期週";
+        overCap.push({store: sd.storeName||"", name: row.name, cap: row.hourCap, total: totalHrs, excess, basisLabel, unknownYear: !!row.schoolCapUnknownYear});
+      }
+      const missing = keys.filter(k=> (cash[k]||0)>0 && !(Number(row.cashRates&&row.cashRates[k])>0));
+      if(missing.length){
+        noCashRate.push({store: sd.storeName||"", name: row.name, cap: row.hourCap, total: totalHrs, excess,
+          buckets: missing.map(k=>`${labelOf[k]||k} ${round2(cash[k])} hr`).join("、")});
+      }
+    });
+  });
+  return {overCap, noCashRate};
+}
+function hasPayWarnings(w){ return !!(w && (w.overCap.length || w.noCashRate.length)); }
+// Resolves true when the user chooses to continue, false when they go back.
+// Only one global modal exists (openModal), so callers must make sure no other
+// modal they still need is open when calling this.
+function showPayWarningsModal(w, opts){
+  opts = opts||{};
+  return new Promise(resolve=>{
+    let html = "";
+    if(w.overCap.length){
+      const rowsHtml = w.overCap.map(i=>`<tr><td>${escapeHtml(i.store)}</td><td>${escapeHtml(i.name)}</td><td>${fmtHours(i.total)}</td><td>${fmtHours(i.cap)}${i.unknownYear?' ⚠️':''}</td><td>${fmtHours(i.excess)}</td><td>${escapeHtml(i.basisLabel)}</td></tr>`).join("");
+      html += `
+      <h4 style="margin:6px 0;">🎓 School student 超過時數上限</h4>
+      <p class="small muted">下列 School student 的總時數超過依 QLD Child Employment Regulation 算出的時數上限，超過的時數目前會被轉成 cash 時數計薪，請確認班表是否需要調整${w.overCap.some(i=>i.unknownYear)?'（⚠️ 標示的列：該年度沒有 QLD 學校日曆，已用較嚴格的上學週上限，請手動確認）':''}：</p>
+      <div class="table-wrap" style="max-height:200px;"><table><thead><tr><th>分店</th><th>員工</th><th>總時數</th><th>時數上限</th><th>超過</th><th>上限依據</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+    }
+    if(w.noCashRate.length){
+      const rowsHtml = w.noCashRate.map(i=>`<tr><td>${escapeHtml(i.store)}</td><td>${escapeHtml(i.name)}</td><td>${fmtHours(i.cap)}</td><td>${fmtHours(i.excess)}</td><td>${escapeHtml(i.buckets)}</td></tr>`).join("");
+      html += `
+      <h4 style="margin:10px 0 6px;">💵 超過申報時數轉成 cash，但沒有填 Cash rate</h4>
+      <p class="small muted">下列員工超過可報時數 (hr cap) 的時數會轉成 cash，但對應類別的 Cash rate 是 0 或空白，這些時數目前算出來是 $0。請到「資料管理 → 員工資料管理」補上 Cash rate：</p>
+      <div class="table-wrap" style="max-height:200px;"><table><thead><tr><th>分店</th><th>員工</th><th>可報時數上限</th><th>超過時數</th><th>缺 Cash rate 的類別 (cash 時數)</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+    }
+    const m = openModal(`
+      <div class="modal-header"><h3>⚠️ 請注意</h3><button class="close-x" id="mclose">✕</button></div>
+      ${html}
+      <div class="toolbar">
+        <button class="primary" id="mok">${escapeHtml(opts.confirmLabel||"知道了")}</button>
+        ${opts.confirmLabel ? `<button id="mback">返回修改</button>` : ""}
+      </div>
+    `, {wide:true});
+    const done = (v)=>{ closeModal(); resolve(v); };
+    $("#mclose",m).onclick = ()=>done(!opts.confirmLabel);
+    $("#mok",m).onclick = ()=>done(true);
+    const back = $("#mback",m); if(back) back.onclick = ()=>done(false);
+  });
+}
 async function ingestParsedStores(parsedStores, warnings){
   warnings = warnings||[];
   parsedStores = mergeParsedStores(parsedStores);
@@ -3461,6 +3550,8 @@ async function ingestParsedStores(parsedStores, warnings){
     if(warnBox && warnings.length){
       warnBox.innerHTML = `<div class="helpbox">${warnings.map(w=>escapeHtml(w)).join("<br>")}</div>`;
     }
+    const payWarn = collectPayWarnings(workingSheet);
+    if(hasPayWarnings(payWarn)) await showPayWarningsModal(payWarn);
   };
   if(allDateIssues.length){
     // Offer to widen the calc sheet's date range to also cover the out-of-range
@@ -3793,7 +3884,15 @@ async function exportTabularWorkbook(sheetsData, filenameBase){
     }
   }
 }
-function round2(n){ return Math.round((n||0)*100)/100; }
+// Jeff, 2026-11-08: 現金（及所有金額）一定要四捨五入到小數點第二位。
+// Math.round(n*100)/100 遇到剛好差半分的值會被浮點誤差吃掉（例如 1.005
+// 變成 1.00），所以加一個極小的 epsilon，並對負數用「離零越遠」的對稱
+// 四捨五入（-1.005 → -1.01），跟正數一致。
+function round2(n){
+  n = Number(n)||0;
+  const sign = n<0 ? -1 : 1;
+  return sign * Math.round(Math.abs(n)*100 + 1e-7)/100;
+}
 
 /* =========================================================================
    PART 8: Tab 2 — 歷史紀錄 (計算表紀錄 + 入離職紀錄 子分頁)
