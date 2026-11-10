@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import StoreSwitcher from './StoreSwitcher'
@@ -17,7 +17,10 @@ import MyRosterQuickModal from './MyRosterQuickModal'
 import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
 import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
-import { watchForUpdate, applyUpdate } from '../../lib/swUpdate'
+import { watchForUpdate, applyUpdate, requestUpdateCheck, isUpdateReady } from '../../lib/swUpdate'
+import { checkForAppUpdate } from '../../lib/pwaUpdate'
+import { isNewBuildAvailable } from '../../lib/appVersion'
+import UpdatePromptModal from './UpdatePromptModal'
 import { pendingReleaseNotes, markNotesSeen } from '../../lib/releaseNotes'
 import WhatsNewModal from './WhatsNewModal'
 
@@ -232,20 +235,75 @@ export default function AppShell() {
   const [promptTick, setPromptTick] = useState(0)
   const [whatsNew, setWhatsNew] = useState([])
 
+  // Jeff, 2026-11-11: "現在手機板還是沒有自動更新...讓admin控制update彈出視窗...update now或者是
+  // update when close the app...悄悄更新的功能就可以移除" — the silent apply-on-background is
+  // gone. A newer version is detected two ways (version.json build id, and a waiting service
+  // worker); when the admin switch is on, a popup offers "Update now" or "Update when I close
+  // the app" (applied the moment the app goes to the background / the phone locks). Shown
+  // after the same 10 s delay and never over the scanner / clock-in result.
+  const [newVersion, setNewVersion] = useState(false)
+  const [updatePromptOpen, setUpdatePromptOpen] = useState(false)
+  const [updateDeferred, setUpdateDeferred] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateMessage, setUpdateMessage] = useState('')
+  const updateOnHide = useRef(false)
+
   useEffect(() => {
-    const cancelWatch = watchForUpdate(() => {})
+    const cancelWatch = watchForUpdate(() => {
+      setNewVersion(true)
+      if (updateOnHide.current && document.visibilityState === 'hidden') applyUpdate()
+    })
     const delay = setTimeout(() => setPromptDelayDone(true), 10000)
+    let cancelled = false
+    function checkBuild() {
+      isNewBuildAvailable().then((yes) => {
+        if (yes && !cancelled) setNewVersion(true)
+      })
+    }
+    checkBuild()
+    const buildTimer = setInterval(checkBuild, 10 * 60 * 1000)
     function onVisibility() {
-      if (document.visibilityState === 'hidden') applyUpdate()
-      else setPromptTick((t) => t + 1)
+      if (document.visibilityState === 'hidden') {
+        if (updateOnHide.current) applyUpdate()
+      } else {
+        checkBuild()
+        setPromptTick((t) => t + 1)
+      }
     }
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
+      cancelled = true
       cancelWatch()
       clearTimeout(delay)
+      clearInterval(buildTimer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
+
+  async function handleUpdateNow() {
+    setUpdateBusy(true)
+    setUpdateMessage('')
+    const r = await checkForAppUpdate()
+    if (r.updateFound) {
+      setUpdateMessage('Updating… the app will reload in a moment.')
+      return
+    }
+    setUpdateBusy(false)
+    setUpdateMessage(
+      r.failed
+        ? "Couldn't reach the server — please check your connection and try again."
+        : 'The new version is still being prepared. Choose "Update when I close the app", or close and reopen the app in a minute.'
+    )
+  }
+
+  function handleUpdateLater() {
+    updateOnHide.current = true
+    requestUpdateCheck()
+    if (isUpdateReady() && document.visibilityState === 'hidden') applyUpdate()
+    setUpdatePromptOpen(false)
+    setUpdateDeferred(true)
+  }
+
   // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店
   // 跟姓名的中間嗎" — a one-tap shortcut in the header itself, reachable from
   // ANY page, not just after navigating into My Dashboard > Time & Attendance
@@ -263,7 +321,21 @@ export default function AppShell() {
   const clockInOut = useClockInOut(profile?.id, accessibleStores)
   const scannerBusy = canClockInOut && (clockInOut.showScanner || !!clockInOut.feedback)
   useEffect(() => {
-    if (!profile?.id || !promptDelayDone || scannerBusy || whatsNew.length) return
+    if (!newVersion || !profile?.id || !promptDelayDone || scannerBusy || updatePromptOpen || updateDeferred) return
+    let active = true
+    supabase
+      .from('app_display_settings')
+      .select('update_prompt_enabled')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (active && data?.update_prompt_enabled) setUpdatePromptOpen(true)
+      })
+    return () => {
+      active = false
+    }
+  }, [newVersion, profile?.id, promptDelayDone, scannerBusy, updatePromptOpen, updateDeferred, promptTick])
+  useEffect(() => {
+    if (!profile?.id || !promptDelayDone || scannerBusy || whatsNew.length || updatePromptOpen) return
     const pending = pendingReleaseNotes(profile.id, (key) => canAccessPage(effectivePages, key))
     if (!pending.length) return
     let active = true
@@ -277,7 +349,7 @@ export default function AppShell() {
     return () => {
       active = false
     }
-  }, [profile?.id, effectivePages, promptDelayDone, scannerBusy, whatsNew.length, promptTick])
+  }, [profile?.id, effectivePages, promptDelayDone, scannerBusy, whatsNew.length, updatePromptOpen, promptTick])
   // Same "nothing to navigate between" check as Sidebar.jsx (see its
   // 2026-10-01 comment) — hides the hamburger button and drawer too, not
   // just the desktop <aside>, for a role resolved down to one page.
@@ -501,6 +573,19 @@ export default function AppShell() {
           tapping 📷 again before they'd even registered the first result. */}
       {canClockInOut && clockInOut.feedback && (
         <ClockFeedbackModal feedback={clockInOut.feedback} onClose={clockInOut.dismissFeedback} />
+      )}
+
+      {updatePromptOpen && (
+        <UpdatePromptModal
+          busy={updateBusy}
+          message={updateMessage}
+          onUpdateNow={handleUpdateNow}
+          onLater={handleUpdateLater}
+          onDismiss={() => {
+            setUpdatePromptOpen(false)
+            setUpdateDeferred(true)
+          }}
+        />
       )}
 
       {whatsNew.length > 0 && (

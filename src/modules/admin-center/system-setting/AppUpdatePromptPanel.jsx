@@ -4,11 +4,12 @@ import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
 import LoadingSpinner from '../../../components/ui/LoadingSpinner'
 
-// Jeff, 2026-11-10: admin switch for the "What's new" popup AppShell.jsx shows (migration
-// 0168, a column on the app_display_settings singleton; list in lib/releaseNotes.js). The app
-// updates itself quietly either way — this only decides whether people are TOLD what changed,
-// so small tweaks don't pop up constantly: leave it off while notes build up, turn it on when
-// there's enough to announce, and each person sees what they haven't seen yet, once.
+// Jeff, 2026-11-10/11: admin switch for the popups AppShell.jsx shows about new versions
+// (migration 0168, a column on the app_display_settings singleton). When on, staff who open
+// the app after a new version is out get an "Update now / Update when I close the app" popup,
+// and then a "What's new" list of the changes they haven't seen yet (lib/releaseNotes.js).
+// The app no longer updates itself silently; when this is off nobody is prompted (people can
+// still update from My Information > Check for Updates), so small tweaks don't nag everyone.
 export default function AppUpdatePromptPanel() {
   const { profile } = useAuth()
   const [enabled, setEnabled] = useState(null)
@@ -36,12 +37,14 @@ export default function AppUpdatePromptPanel() {
 
   return (
     <section className="rounded-xl border border-brand-100 bg-white p-4">
-      <h2 className="mb-1 text-sm font-semibold text-brand-700">What's New Popup</h2>
+      <h2 className="mb-1 text-sm font-semibold text-brand-700">Update Popup</h2>
       <p className="mb-3 text-sm text-gray-500">
-        The app already updates itself quietly in the background. This switch controls whether staff also see a
-        "What's new" popup listing the changes they haven't seen yet (about 10 seconds after they open the app, and
-        not while they are scanning to clock in/out). Keep it off while small changes build up, then turn it on when
-        there is enough worth announcing — everyone sees each item once. Nothing is lost while it is off.
+        When this is on and a new version of the app is out, staff see a popup about 10 seconds after opening the
+        app (never while scanning to clock in/out) with two choices: "Update now", or "Update when I close the app"
+        (applied when they switch away or lock the phone). After updating they also see a "What's new" list of
+        changes they haven't seen yet. Keep it off while small changes build up, then turn it on when there is
+        enough to announce. While it is off, nobody is prompted — staff can still update themselves from My
+        Information &gt; Check for Updates.
       </p>
 
       {enabled === null ? (
@@ -49,7 +52,7 @@ export default function AppUpdatePromptPanel() {
       ) : (
         <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Show the "What's new" popup
+          Show the update popup (and "What's new")
         </label>
       )}
 

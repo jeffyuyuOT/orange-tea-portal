@@ -17,6 +17,16 @@
 // controllerchange listener still does the actual page reload once the
 // handover completes either way.
 let readyRegistration = null
+// Set by watchForUpdate once it has a registration — lets requestUpdateCheck() below ask the
+// browser to look for (and start downloading) a newer version on demand.
+let activeRegistration = null
+
+// Jeff, 2026-11-11: the silent apply-on-background was removed. AppShell.jsx now shows an
+// admin-controlled popup ("Update now" / "Update when I close the app"); this just starts
+// the download so a worker is already waiting by the time the app goes to the background.
+export function requestUpdateCheck() {
+  activeRegistration?.update().catch(() => {})
+}
 
 // Jeff, 2026-11-10: "為什麼我現在手機板都沒有做到悄悄更新的動作" — two gaps kept the
 // silent apply above from ever having anything to apply on a phone:
@@ -77,6 +87,7 @@ export function watchForUpdate(onReady) {
   findRegistration().then((reg) => {
     if (!reg || cancelled) return
     activeReg = reg
+    activeRegistration = reg
     // Covers an update that arrived (and finished installing) before this
     // listener was attached — e.g. one found by a navigation/periodic check
     // on an earlier page of the same session.

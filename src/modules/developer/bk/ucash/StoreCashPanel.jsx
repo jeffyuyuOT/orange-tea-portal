@@ -25,7 +25,7 @@ import {
   toggleStocked,
   weekdayOf,
 } from '../bkUtils'
-import { listCashDayRows, listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance } from '../bkData'
+import { listCashDayRows, listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance, stockDaysBefore } from '../bkData'
 import { exportCashXlsx } from '../bkExcel'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
@@ -228,6 +228,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [stockPrior, setStockPrior] = useState(false) // a 入庫 tick was made here → on save, also tick every day of earlier months
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
@@ -269,9 +270,11 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
         const draft = drafts?.current?.[`${store.id}|${year}|${month}`]
         if (draft) {
           setCashDays(draft.cashDays)
+          setStockPrior(!!draft.stockPrior)
           setDirty(true)
         } else {
           setCashDays(cashDaysFromRows(data.cashDays))
+          setStockPrior(false)
           setDirty(false)
         }
         loadedKeyRef.current = `${store.id}|${year}|${month}`
@@ -296,13 +299,13 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       return
     }
     if (loadedKeyRef.current === draftKey) {
-      if (dirty) store[draftKey] = { cashDays }
+      if (dirty) store[draftKey] = { cashDays, stockPrior }
       else delete store[draftKey]
     }
     const total = Object.keys(store).length
     setOtherDrafts(total - (store[draftKey] ? 1 : 0))
     onDirtyChange?.(total > 0)
-  }, [cashDays, dirty, draftKey, drafts, onDirtyChange])
+  }, [cashDays, dirty, stockPrior, draftKey, drafts, onDirtyChange])
 
   // Coming back to the tab / entries edited elsewhere: refresh the parts that
   // live outside this table (O.CA, opening balance, 收支) but keep what's typed.
@@ -389,6 +392,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       }
       return out
     })
+    if (checked) setStockPrior(true)
     setDirty(true)
     setMsg('')
   }
@@ -412,6 +416,12 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
       let saved = 0
       if (dirty) {
         await saveCashDays(store.id, cashDays)
+        // 入庫 ticked here → every earlier day (earlier months too) is ticked as well.
+        if (stockPrior) {
+          await stockDaysBefore(store.id, monthStart(year, month))
+          setStockPrior(false)
+          setReloadKey((k) => k + 1) // the opening 耗損（未入庫） balance changed
+        }
         setDirty(false)
         saved += 1
       }
@@ -436,6 +446,7 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
             continue
           }
           await saveCashDays(sid, draft.cashDays)
+          if (draft.stockPrior) await stockDaysBefore(sid, monthStart(Number(y), Number(m)))
           delete drafts.current[key]
           saved += 1
         } catch (e) {

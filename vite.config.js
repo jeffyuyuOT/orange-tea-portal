@@ -3,9 +3,23 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Jeff, 2026-11-11: a build id the running app can compare with the one on the server, so
+// the "new version" popup (AppShell.jsx / lib/appVersion.js) doesn't depend only on the
+// service worker noticing a change. Baked into the bundle as __APP_BUILD_ID__ and also
+// written to version.json (fetched with no-store; kept out of the precache below).
+const BUILD_ID = Date.now().toString(36)
+const versionFile = {
+  name: 'ot-version-file',
+  generateBundle() {
+    this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: BUILD_ID }) })
+  },
+}
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: { __APP_BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [
+    versionFile,
     react(),
     tailwindcss(),
     VitePWA({
@@ -66,7 +80,7 @@ export default defineConfig({
         //                        (named by chunkFileNames further down)
         //   assets/exceljs*.js   Excel import / export library
         //   assets/xlsx-*.js     SheetJS (POS xls / xlsx import)
-        globIgnores: ['payroll/**', 'assets/dev-*.js', 'assets/exceljs*.js', 'assets/xlsx-*.js'],
+        globIgnores: ['version.json', 'payroll/**', 'assets/dev-*.js', 'assets/exceljs*.js', 'assets/xlsx-*.js'],
         // Cache those left-out files on first use. File names are content-hashed,
         // so CacheFirst can never serve a stale version of the same name.
         runtimeCaching: [

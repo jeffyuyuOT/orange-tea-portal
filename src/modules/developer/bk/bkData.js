@@ -301,6 +301,19 @@ export async function saveCashDays(storeId, rows) {
   if (removals.length) unwrap(await supabase.from('bk_cash_days').delete().eq('store_id', storeId).in('day', removals))
 }
 
+// Jeff, 2026-11-02: ticking 入庫 on a day also ticks every earlier day — including days of EARLIER
+// months, so the ticks always form a prefix. Ticks every still-unticked day of the store before `beforeDay`.
+export async function stockDaysBefore(storeId, beforeDay) {
+  unwrap(
+    await supabase
+      .from('bk_cash_days')
+      .update({ d_stocked: true, updated_at: new Date().toISOString() })
+      .eq('store_id', storeId)
+      .lt('day', beforeDay)
+      .eq('d_stocked', false)
+  )
+}
+
 export async function saveEntry(storeId, form) {
   const payload = {
     entry_date: form.entry_date,
