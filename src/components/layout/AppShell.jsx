@@ -249,6 +249,12 @@ export default function AppShell() {
   const [updateBusy, setUpdateBusy] = useState(false)
   const [updateMessage, setUpdateMessage] = useState('')
   const updateOnHide = useRef(false)
+  // How often to look for a new version / how soon the popup may come back after being closed
+  // with ✕ (Jeff, 2026-11-11: not often — a late update is harmless). "Update when I close the
+  // app" is never asked again; the update just happens.
+  const BUILD_CHECK_GAP_MS = 2 * 60 * 60 * 1000
+  const REPROMPT_GAP_MS = 4 * 60 * 60 * 1000
+  const updateDismissedAt = useRef(0)
 
   useEffect(() => {
     const cancelWatch = watchForUpdate(() => {
@@ -256,13 +262,16 @@ export default function AppShell() {
       if (updateOnHide.current && document.visibilityState === 'hidden') applyUpdate()
     })
     let cancelled = false
+    let lastBuildCheck = 0
     function checkBuild() {
+      if (Date.now() - lastBuildCheck < BUILD_CHECK_GAP_MS) return
+      lastBuildCheck = Date.now()
       isNewBuildAvailable().then((yes) => {
         if (yes && !cancelled) setNewVersion(true)
       })
     }
     checkBuild()
-    const buildTimer = setInterval(checkBuild, 10 * 60 * 1000)
+    const buildTimer = setInterval(checkBuild, BUILD_CHECK_GAP_MS)
     function onVisibility() {
       if (document.visibilityState === 'hidden') {
         if (updateOnHide.current) applyUpdate()
@@ -322,6 +331,7 @@ export default function AppShell() {
   const scannerBusy = canClockInOut && (clockInOut.showScanner || !!clockInOut.feedback)
   useEffect(() => {
     if (!newVersion || !profile?.id || !promptDelayDone || scannerBusy || updatePromptOpen || updateDeferred) return
+    if (Date.now() - updateDismissedAt.current < REPROMPT_GAP_MS) return
     let active = true
     supabase
       .from('app_display_settings')
@@ -588,8 +598,9 @@ export default function AppShell() {
           onUpdateNow={handleUpdateNow}
           onLater={handleUpdateLater}
           onDismiss={() => {
+            // ✕: ask again after REPROMPT_GAP_MS (next time the app is brought back to the front).
+            updateDismissedAt.current = Date.now()
             setUpdatePromptOpen(false)
-            setUpdateDeferred(true)
           }}
         />
       )}

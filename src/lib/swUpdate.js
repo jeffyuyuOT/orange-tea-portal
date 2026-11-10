@@ -42,8 +42,11 @@ export function requestUpdateCheck() {
 //     attached and readyRegistration was never set — so applyUpdate() had nothing to
 //     act on even when a new worker WAS waiting. Same `serviceWorker.ready` fallback
 //     pwaUpdate.js already uses.
-const UPDATE_CHECK_MS = 15 * 60 * 1000
-const MIN_CHECK_GAP_MS = 60 * 1000
+// Jeff, 2026-11-11: no need to look often — an update that shows up a couple of hours late
+// costs nothing. So: when the app opens, when it comes back to the foreground, and every
+// couple of hours while it stays open, but never more than once per CHECK_GAP.
+const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000
+const MIN_CHECK_GAP_MS = 2 * 60 * 60 * 1000
 
 export function watchForUpdate(onReady) {
   if (!('serviceWorker' in navigator)) return () => {}
