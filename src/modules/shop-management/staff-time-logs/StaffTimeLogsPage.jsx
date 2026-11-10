@@ -16,6 +16,7 @@ import {
   DISCREPANCY_WINDOW_DAYS,
 } from '../../../lib/timeDiscrepancy'
 import AttendanceLogTable from '../../dashboard/time-attendance/AttendanceLogTable'
+import AttendanceExceptionsView from './AttendanceExceptionsView'
 
 // Manager-facing view of the same Attendance Logs table each employee sees
 // for themselves under My Dashboard > Time & Attendance — a manager just
@@ -51,6 +52,8 @@ export default function StaffTimeLogsPage() {
   // was clicked, or null; the day object itself (see timeDiscrepancy.js) is
   // enough to render the popup, no extra fetch needed.
   const [rosterDetailDay, setRosterDetailDay] = useState(null)
+  // Jeff, 2026-11-10: Attendance Exceptions — see AttendanceExceptionsView.jsx.
+  const [showExceptions, setShowExceptions] = useState(false)
 
   useEffect(() => {
     if (!currentStoreId) return
@@ -293,9 +296,24 @@ export default function StaffTimeLogsPage() {
     )
   }
 
+  if (showExceptions) {
+    return <AttendanceExceptionsView staff={staff} currentStoreId={currentStoreId} onBack={() => setShowExceptions(false)} />
+  }
+
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-gray-900">Staff Time Logs</h1>
+      <div className="mb-1 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h1 className="text-xl font-semibold text-gray-900">Staff Time Logs</h1>
+        {/* Jeff, 2026-11-10: week-by-week list of every 15+ minute clocked-vs-rostered
+            difference, gathered from what otherwise only shows as a red dot per name. */}
+        <button
+          onClick={() => setShowExceptions(true)}
+          disabled={loading || !staff.length}
+          className="rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+        >
+          Attendance Exceptions
+        </button>
+      </div>
       <p className="mb-4 text-sm text-gray-500">Pick a staff member to view their clock in/out history.</p>
 
       {loading ? (

@@ -1,4 +1,4 @@
-import { addDays, format } from 'date-fns'
+import { addDays, format, parseISO } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { pairEventsIntoSessions, dailyTotals, breakMinutesFromHalfHours } from './attendance'
 import { brisbaneLocalToIso } from './brisbaneTime'
@@ -77,15 +77,25 @@ function shiftEndMinutesOfDay(entry) {
 // Any day where this profile still has an open (no clock-out yet) session
 // is still always skipped — that's someone still genuinely on shift right
 // now, not a discrepancy.
-export async function getStaffTimeDiscrepancies(storeId, profileIds) {
+//
+// Jeff, 2026-11-10 (Attendance Exceptions): `range` ({ from, to }, both 'yyyy-MM-dd') scans
+// that span instead of the default last-DISCREPANCY_WINDOW_DAYS days, so the Attendance
+// Exceptions view can look at any single week. Each returned day also carries what that view
+// needs to show and to sync the roster: the roster entry's id/period, the day's clock sessions
+// and the attendance-side break. Everything else about the check is unchanged.
+export async function getStaffTimeDiscrepancies(storeId, profileIds, range = null) {
   if (!storeId || !profileIds?.length) return {}
 
   const today = todayStr()
   const nowMinutes = nowMinutesOfDay()
-  const fromDate = format(addDays(new Date(), -(DISCREPANCY_WINDOW_DAYS - 1)), 'yyyy-MM-dd')
+  const fromDate = range?.from ?? format(addDays(new Date(), -(DISCREPANCY_WINDOW_DAYS - 1)), 'yyyy-MM-dd')
+  const toDate = range?.to ?? today
   // Periods are weekly (Monday-start) — a period covering the window's start
   // date can begin up to 6 days before it.
   const periodsFrom = format(addDays(new Date(fromDate), -6), 'yyyy-MM-dd')
+  const eventsUpperIso = range
+    ? brisbaneLocalToIso(`${format(addDays(parseISO(toDate), 1), 'yyyy-MM-dd')}T23:59`)
+    : '2100-01-01T00:00:00Z'
 
   const [{ data: periodRows }, { data: eventRows }, { data: changeRows }, { data: breakRows }, { data: hideRows }] = await Promise.all([
     supabase
@@ -94,7 +104,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       .eq('store_id', storeId)
       .eq('status', 'submitted')
       .gte('week_start_date', periodsFrom)
-      .lte('week_start_date', today),
+      .lte('week_start_date', toDate),
     supabase
       .from('attendance_events')
       .select('*')
@@ -118,7 +128,10 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       // Brisbane-wall-clock date/time into a timestamptz boundary) fixes
       // the same class of bug this file already explains for leave
       // requests — just missed here.
-      .gte('occurred_at', brisbaneLocalToIso(`${fromDate}T00:00`)),
+      .gte('occurred_at', brisbaneLocalToIso(`${fromDate}T00:00`))
+      // Only a custom range needs an upper bound (a punch just after midnight at the end of
+      // the last day still belongs to that day's shift); the default window runs to now.
+      .lte('occurred_at', eventsUpperIso),
     supabase
       .from('roster_change_events')
       .select('profile_id, changed_at')
@@ -143,7 +156,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       .eq('store_id', storeId)
       .in('profile_id', profileIds)
       .gte('event_date', fromDate)
-      .lte('event_date', today),
+      .lte('event_date', toDate),
     // Jeff, 2026-10-11: "每一筆的後面都新增Hide prompts，勾取的話此筆紀錄就
     // 不會造成小紅點提示" — a per-(profile, day) dismissal, global across
     // every viewer (see migration 0100's comment for why this is shaped
@@ -157,7 +170,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       .eq('store_id', storeId)
       .in('profile_id', profileIds)
       .gte('work_date', fromDate)
-      .lte('work_date', today),
+      .lte('work_date', toDate),
   ])
 
   const hiddenKeys = new Set((hideRows ?? []).map((h) => `${h.profile_id}|${h.work_date}`))
@@ -167,11 +180,11 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
 
   const { data: entryRows } = await supabase
     .from('roster_entries')
-    .select('profile_id, work_date, start_time, end_time, break_half_hours')
+    .select('id, roster_period_id, profile_id, work_date, start_time, end_time, break_half_hours')
     .in('roster_period_id', periodIds)
     .in('profile_id', profileIds)
     .gte('work_date', fromDate)
-    .lte('work_date', today)
+    .lte('work_date', toDate)
 
   // Per-profile daily worked totals, and which (profile, date) pairs still
   // have an open session — both from the same paired-sessions logic
@@ -183,16 +196,20 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
     eventsByProfile.get(e.profile_id).push(e)
   })
   const totalsByProfile = new Map() // profileId -> { 'yyyy-MM-dd': minutes }
+  const sessionsByProfile = new Map() // profileId -> paired sessions (for the Attendance Exceptions view)
   const openDatesByProfile = new Map() // profileId -> Set('yyyy-MM-dd')
   eventsByProfile.forEach((events, profileId) => {
     const sessions = pairEventsIntoSessions(events)
+    sessionsByProfile.set(profileId, sessions)
     totalsByProfile.set(profileId, dailyTotals(sessions))
     const openDates = new Set(sessions.filter((s) => s.inProgress && s.date).map((s) => s.date))
     openDatesByProfile.set(profileId, openDates)
   })
 
   const breakMinutesByProfileDate = new Map() // `${profileId}|${date}` -> minutes to net out
+  const breakHalfHoursByProfileDate = new Map() // same key -> the raw half-hour units logged
   ;(breakRows ?? []).forEach((b) => {
+    breakHalfHoursByProfileDate.set(`${b.profile_id}|${b.event_date}`, b.break_half_hours)
     breakMinutesByProfileDate.set(`${b.profile_id}|${b.event_date}`, breakMinutesFromHalfHours(b.break_half_hours))
   })
 
@@ -246,6 +263,22 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds) {
       rosterEndTime: entry.end_time,
       rosterBreakHalfHours: entry.break_half_hours,
       hidden: hiddenKeys.has(`${entry.profile_id}|${entry.work_date}`),
+      // Jeff, 2026-11-10 (Attendance Exceptions): what the exceptions list shows and what
+      // "Sync" writes back to — the roster row itself, plus the day's clock sessions
+      // (ISO timestamps) and the break logged on the attendance side.
+      entryId: entry.id,
+      periodId: entry.roster_period_id,
+      sessions: (sessionsByProfile.get(entry.profile_id) ?? [])
+        .filter((sess) => sess.date === entry.work_date)
+        .map((sess) => ({
+          clockIn: sess.clockIn?.occurred_at ?? null,
+          clockOut: sess.clockOut?.occurred_at ?? null,
+          minutes: sess.minutes,
+          inProgress: !!sess.inProgress,
+        })),
+      attendanceBreakHalfHours: breakHalfHoursByProfileDate.has(`${entry.profile_id}|${entry.work_date}`)
+        ? breakHalfHoursByProfileDate.get(`${entry.profile_id}|${entry.work_date}`)
+        : null,
     })
   }
   for (const profileId in result) {
@@ -348,4 +381,74 @@ export async function markTimeDiscrepancySeen(viewerId, subjectProfileId) {
   await supabase
     .from('time_discrepancy_views')
     .upsert({ viewer_id: viewerId, subject_profile_id: subjectProfileId, viewed_at: new Date().toISOString() }, { onConflict: 'viewer_id,subject_profile_id' })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Jeff, 2026-11-10 (Attendance Exceptions > Sync): "校正的依據一般是以15分鐘為一個單位，將15分鐘
+// 除以2，如果打卡時間比較靠近哪裡就將班表校正到那個時間" — the roster's start/end are pulled to
+// the nearest quarter-hour of the actual clock-in / clock-out (more than 7.5 minutes past a
+// quarter-hour goes up to the next one, less goes back to it; exactly halfway goes up).
+export const SYNC_ROUNDING_MINUTES = 15
+
+function localMinutesOfDay(iso) {
+  const d = new Date(iso)
+  return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60
+}
+
+export function roundToQuarterHour(minutes) {
+  return Math.round(minutes / SYNC_ROUNDING_MINUTES) * SYNC_ROUNDING_MINUTES
+}
+
+function minutesToHHMM(minutes) {
+  const m = (((Math.round(minutes) % 1440) + 1440) % 1440)
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+// Same wall-clock label Attendance Logs shows, but 24-hour so it lines up with roster times.
+export function clockLabel(iso) {
+  return iso ? format(new Date(iso), 'HH:mm') : null
+}
+
+// The day's first clock-in and last clock-out, as ISO strings (null when there is none).
+export function dayClockSpan(day) {
+  const ins = (day.sessions ?? []).map((s) => s.clockIn).filter(Boolean).sort((a, b) => new Date(a) - new Date(b))
+  const outs = (day.sessions ?? []).map((s) => s.clockOut).filter(Boolean).sort((a, b) => new Date(a) - new Date(b))
+  return { firstIn: ins[0] ?? null, lastOut: outs[outs.length - 1] ?? null }
+}
+
+// What "Sync" proposes for a flagged day: start/end rounded from the first clock-in / last
+// clock-out (a side with no punch keeps the roster's own value), and the break logged on the
+// attendance side when there is one (otherwise the roster's existing break). Everything is only
+// a starting point — the Sync dialog lets the manager edit all three before applying.
+export function proposeRosterSync(day) {
+  const { firstIn, lastOut } = dayClockSpan(day)
+  const startTime = firstIn ? minutesToHHMM(roundToQuarterHour(localMinutesOfDay(firstIn))) : (day.rosterStartTime ?? '').slice(0, 5)
+  const endTime = lastOut ? minutesToHHMM(roundToQuarterHour(localMinutesOfDay(lastOut))) : (day.rosterEndTime ?? '').slice(0, 5)
+  const attBreak = day.attendanceBreakHalfHours
+  const breakHalfHours = attBreak != null && attBreak !== '' ? Number(attBreak) || 0 : Number(day.rosterBreakHalfHours) || 0
+  return {
+    startTime,
+    endTime,
+    breakHalfHours,
+    startFromClock: firstIn ? clockLabel(firstIn) : null,
+    endFromClock: lastOut ? clockLabel(lastOut) : null,
+    breakFromAttendance: attBreak != null && attBreak !== '',
+  }
+}
+
+// Writes the corrected shift onto the published roster row. `.select('id')` so a row the
+// database silently refused to touch (RLS) comes back as an error instead of looking saved.
+// Deliberately does not log a roster_change_events row: this fixes a past day to match what
+// happened, it isn't a schedule change staff need an "Update" badge for.
+export async function applyRosterSync({ entryId, startTime, endTime, breakHalfHours }) {
+  if (!entryId) return { error: new Error('Missing roster entry') }
+  const breakValue = breakHalfHours === '' || breakHalfHours == null ? null : Number(breakHalfHours)
+  const { data, error } = await supabase
+    .from('roster_entries')
+    .update({ start_time: `${startTime}:00`, end_time: `${endTime}:00`, break_half_hours: breakValue })
+    .eq('id', entryId)
+    .select('id')
+  if (error) return { error }
+  if (!data?.length) return { error: new Error('Not allowed to change this roster row') }
+  return { error: null }
 }
