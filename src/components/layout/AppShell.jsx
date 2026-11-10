@@ -13,6 +13,7 @@ import { useAuditPending } from '../../lib/useAuditPending'
 import { badgeForKeys } from '../../lib/navBadges'
 import QrScannerModal from '../../modules/dashboard/time-attendance/QrScannerModal'
 import ClockFeedbackModal from '../../modules/dashboard/time-attendance/ClockFeedbackModal'
+import MyRosterQuickModal from './MyRosterQuickModal'
 import Modal from '../ui/Modal'
 import { supabase } from '../../lib/supabaseClient'
 import { isIosNonStandalone, isPushSupported, subscribeToPush } from '../../lib/webPush'
@@ -38,6 +39,7 @@ export default function AppShell() {
   } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
+  const [showMyRoster, setShowMyRoster] = useState(false)
   // Jeff, 2026-10-17: used to redirect front-line staff straight to Time &
   // Attendance right after a real password sign-in (RootRedirect, routes.jsx,
   // only covers landing on "/"). Jeff, 2026-10-21 (follow-up): removed —
@@ -234,6 +236,10 @@ export default function AppShell() {
   // guarded by (routes.jsx).
   const canClockInOut = canAccessPage(effectivePages, 'dashboard.time_attendance')
   const canRunBkBackup = canAccessPage(effectivePages, 'developer_tools.bk')
+  // Jeff, 2026-11-10: phone-only header shortcut beside the 📷 button — a one-tap
+  // week view of the signed-in person's own roster (MyRosterQuickModal). Same
+  // permission key as the My Roster page itself (routes.jsx).
+  const canViewMyRoster = canAccessPage(effectivePages, 'roster_hub.my_roster')
   const clockInOut = useClockInOut(profile?.id, accessibleStores)
   // Same "nothing to navigate between" check as Sidebar.jsx (see its
   // 2026-10-01 comment) — hides the hamburger button and drawer too, not
@@ -360,20 +366,37 @@ export default function AppShell() {
               )}
               {isAdminCenter ? <span className="text-sm font-medium text-brand-700">All Stores</span> : <StoreSwitcher />}
             </div>
-            {canClockInOut && (
-              // Jeff, 2026-10-02: disabled while a result modal (below) is
-              // still up for the same "can't scan again until the previous
-              // result is dismissed" reason as TimeAttendancePage's own Scan
-              // button — see ClockFeedbackModal's comment.
-              <button
-                onClick={clockInOut.openScanner}
-                disabled={!!clockInOut.feedback}
-                className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 p-1.5 text-lg leading-none text-brand-600 hover:bg-brand-100 disabled:opacity-40 md:hidden"
-                aria-label={`Scan to ${clockInOut.isClockedIn ? 'Clock Out' : 'Clock In'}`}
-                title={`Scan to ${clockInOut.isClockedIn ? 'Clock Out' : 'Clock In'}`}
-              >
-                📷
-              </button>
+            {(canClockInOut || canViewMyRoster) && (
+              <div className="flex shrink-0 items-center gap-2 md:hidden">
+                {canClockInOut && (
+                  // Jeff, 2026-10-02: disabled while a result modal (below) is
+                  // still up for the same "can't scan again until the previous
+                  // result is dismissed" reason as TimeAttendancePage's own Scan
+                  // button — see ClockFeedbackModal's comment.
+                  <button
+                    onClick={clockInOut.openScanner}
+                    disabled={!!clockInOut.feedback}
+                    className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 p-1.5 text-lg leading-none text-brand-600 hover:bg-brand-100 disabled:opacity-40 md:hidden"
+                    aria-label={`Scan to ${clockInOut.isClockedIn ? 'Clock Out' : 'Clock In'}`}
+                    title={`Scan to ${clockInOut.isClockedIn ? 'Clock Out' : 'Clock In'}`}
+                  >
+                    📷
+                  </button>
+                )}
+                {canViewMyRoster && (
+                  <button
+                    onClick={() => setShowMyRoster(true)}
+                    className="relative shrink-0 rounded-lg border border-brand-200 bg-brand-50 p-1.5 text-lg leading-none text-brand-600 hover:bg-brand-100"
+                    aria-label="My Roster"
+                    title="My Roster"
+                  >
+                    🗓️
+                    {/* Same "My Roster has an update" signal the sidebar/section badges use;
+                        cleared by opening the quick view (MyRosterQuickModal). */}
+                    <NavBadge badge={rosterUpdates?.myRoster ? { dot: true } : null} corner />
+                  </button>
+                )}
+              </div>
             )}
             <div className="flex items-center gap-3">
               <div className="text-right leading-tight">
@@ -426,6 +449,9 @@ export default function AppShell() {
         </Suspense>
       )}
 
+      {canViewMyRoster && (
+        <MyRosterQuickModal open={showMyRoster} onClose={() => setShowMyRoster(false)} />
+      )}
       {canClockInOut && clockInOut.showScanner && (
         <QrScannerModal onScan={clockInOut.handleScan} onClose={clockInOut.closeScanner} />
       )}
