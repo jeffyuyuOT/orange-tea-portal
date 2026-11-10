@@ -69,6 +69,11 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
       date: card.date,
       punches: cell ? cell.sessions.flatMap((s) => [s.clockIn, s.clockOut].filter(Boolean)) : [],
       breakHalfHours: card.attendanceBreakHalfHours ?? 0,
+      // Open on top of the Clocked window (next to the Roster window it is compared with).
+      anchor: (() => {
+        const r = document.querySelector('[data-float-tone="green"]')?.getBoundingClientRect()
+        return r ? { x: r.left, y: r.top } : null
+      })(),
     })
   }
 
@@ -429,6 +434,7 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
           initialBreakHalfHours={editCell.breakHalfHours}
           currentStoreId={currentStoreId}
           side
+          anchor={editCell.anchor}
           editor={editor}
           onClose={() => setEditCell(null)}
           onSaved={() => {
@@ -470,6 +476,7 @@ function FloatCard({ tone, tag, title, subtitle, onClose, children }) {
   }
   return (
     <div
+      data-float-tone={tone}
       style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
       className={`pointer-events-auto w-full rounded-xl border-2 bg-white shadow-2xl sm:w-80 ${t.border}`}
     >

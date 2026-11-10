@@ -69,6 +69,7 @@ export default function AttendanceCellEditModal({
   date,
   currentStoreId,
   side = false,
+  anchor = null,
   punches,
   initialBreakHalfHours,
   profileId,
@@ -265,6 +266,7 @@ export default function AttendanceCellEditModal({
     <Modal
       open
       side={side}
+      anchor={anchor}
       onClose={onClose}
       title={isNewCell ? 'Add attendance record' : `Edit — ${format(parseISO(date), 'EEE, MMM d yyyy')}`}
       footer={
