@@ -100,8 +100,7 @@ export default function StaffTimeLogsPage() {
   }, [currentStoreId, profile?.role])
 
   useEffect(() => {
-    // Jeff, 2026-11-11: admin/developer don't get time-difference prompts here (see AuthContext).
-    if (!currentStoreId || !profile?.id || !staff.length || profile.role === 'admin' || profile.role === 'developer') {
+    if (!currentStoreId || !profile?.id || !staff.length) {
       setDiscrepancies({})
       setViewedAtBySubject(new Map())
       return

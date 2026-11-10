@@ -241,17 +241,21 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
             const key = `${d.profileId}|${d.date}`
             const name = nameById.get(d.profileId)
             const rosterBreak = formatBreakUnits(d.rosterBreakHalfHours)
+            // "Noted" rows are faded — but only their own content, not the whole row: opacity on the
+            // row would also fade the Clocked / Sync windows inside it and trap them under the rows below
+            // (they couldn't be clicked or closed).
+            const fade = d.hidden ? 'opacity-60' : ''
             return (
               <div
                 key={key}
-                className={`relative flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-brand-100 bg-white px-3 py-2.5 ${d.hidden ? 'opacity-60' : ''}`}
+                className={`relative flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-brand-100 bg-white px-3 py-2.5`}
               >
-                <div className="w-full min-w-[8rem] sm:w-40">
+                <div className={`w-full min-w-[8rem] sm:w-40 ${fade}`}>
                   <div className="text-sm font-medium text-gray-800">{name}</div>
                   <div className="text-xs text-gray-500">{format(parseISO(d.date), 'EEE d MMM')}</div>
                 </div>
                 {/* Roster box: plain info (no window) — rostered time, break, and total after break. */}
-                <div className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-left text-sm" title="Rostered shift">
+                <div className={`rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-left text-sm ${fade}`} title="Rostered shift">
                   <span className="block text-[11px] font-bold uppercase tracking-wide text-blue-600">Roster</span>
                   <span className="whitespace-nowrap font-semibold tabular-nums text-blue-900">{rosterText}</span>
                   {rosterBreak && (
@@ -272,7 +276,7 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
                       actualMinutes: d.actualMinutes,
                     })
                   }
-                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-left text-sm hover:bg-emerald-100"
+                  className={`rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-left text-sm hover:bg-emerald-100 ${fade}`}
                   title="Show that day's clock in/out records"
                 >
                   <span className="block text-[11px] font-bold uppercase tracking-wide text-emerald-600">Clocked</span>
@@ -280,7 +284,7 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
                     {clockText}
                   </span>
                 </button>
-                <div className="text-sm font-medium text-red-600">
+                <div className={`text-sm font-medium text-red-600 ${fade}`}>
                   {d.diffMinutes > 0 ? '+' : '−'}
                   {formatMinutes(Math.abs(d.diffMinutes))} {d.diffMinutes > 0 ? 'more' : 'less'}
                 </div>
@@ -289,7 +293,7 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
                   onClick={() => openSync(d)}
                   disabled={!hasClock}
                   title={hasClock ? 'Sync Roster with Attendance' : 'No clock records to sync from'}
-                  className="ml-auto rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  className={`ml-auto rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${fade}`}
                 >
                   Sync
                 </button>

@@ -85,6 +85,13 @@ function shiftEndMinutesOfDay(entry) {
 // and the attendance-side break. Everything else about the check is unchanged.
 export async function getStaffTimeDiscrepancies(storeId, profileIds, range = null) {
   if (!storeId || !profileIds?.length) return {}
+  // Jeff, 2026-11-11: "為什麼admin Jeff chuang還在清單裡" — admin/developer accounts don't clock in
+  // to be checked against a roster, so they are never flagged: not as a red dot, not in a
+  // person's detail, not in Attendance Exceptions.
+  const { data: roleRows } = await supabase.from('profiles').select('id, role').in('id', profileIds)
+  const exempt = new Set((roleRows ?? []).filter((r) => r.role === 'admin' || r.role === 'developer').map((r) => r.id))
+  if (exempt.size) profileIds = profileIds.filter((id) => !exempt.has(id))
+  if (!profileIds.length) return {}
 
   const today = todayStr()
   const nowMinutes = nowMinutesOfDay()
