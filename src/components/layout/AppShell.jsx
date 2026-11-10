@@ -231,7 +231,9 @@ export default function AppShell() {
   // app has been open for 10 seconds (someone who opened it just to clock in isn't held up)
   // and the QR scanner / clock-in result isn't on screen. While the switch is off nothing is
   // shown and nothing is marked as seen, so notes pile up until it's turned on.
-  const [promptDelayDone, setPromptDelayDone] = useState(false)
+  // Jeff, 2026-11-11: no more 10 s wait — the popups appear as soon as the signed-in app is up
+  // (staff in a hurry to clock in can pick "Update when I close the app").
+  const promptDelayDone = true
   const [promptTick, setPromptTick] = useState(0)
   const [whatsNew, setWhatsNew] = useState([])
 
@@ -253,7 +255,6 @@ export default function AppShell() {
       setNewVersion(true)
       if (updateOnHide.current && document.visibilityState === 'hidden') applyUpdate()
     })
-    const delay = setTimeout(() => setPromptDelayDone(true), 10000)
     let cancelled = false
     function checkBuild() {
       isNewBuildAvailable().then((yes) => {
@@ -274,7 +275,6 @@ export default function AppShell() {
     return () => {
       cancelled = true
       cancelWatch()
-      clearTimeout(delay)
       clearInterval(buildTimer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
@@ -344,7 +344,13 @@ export default function AppShell() {
       .select('update_prompt_enabled')
       .maybeSingle()
       .then(({ data }) => {
-        if (active && data?.update_prompt_enabled) setWhatsNew(pending)
+        if (active && data?.update_prompt_enabled) {
+          // Jeff, 2026-11-11: "我好像一直重複看到一樣的更新視窗" — marked as seen the moment it is
+          // shown, not only when closed, so an app reload / swipe-away while it is open
+          // (e.g. right after "Update now") can't bring the same items back.
+          markNotesSeen(profile.id, pending.map((n) => n.id))
+          setWhatsNew(pending)
+        }
       })
     return () => {
       active = false

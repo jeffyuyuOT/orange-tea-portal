@@ -39,8 +39,8 @@ export default function AppUpdatePromptPanel() {
     <section className="rounded-xl border border-brand-100 bg-white p-4">
       <h2 className="mb-1 text-sm font-semibold text-brand-700">Update Popup</h2>
       <p className="mb-3 text-sm text-gray-500">
-        When this is on and a new version of the app is out, staff see a popup about 10 seconds after opening the
-        app (never while scanning to clock in/out) with two choices: "Update now", or "Update when I close the app"
+        When this is on and a new version of the app is out, staff see a popup as soon as they log in / open the
+        app (not while the clock-in scanner or result is on screen) with two choices: "Update now", or "Update when I close the app"
         (applied when they switch away or lock the phone). After updating they also see a "What's new" list of
         changes they haven't seen yet. Keep it off while small changes build up, then turn it on when there is
         enough to announce. While it is off, nobody is prompted — staff can still update themselves from My
