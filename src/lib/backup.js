@@ -25,6 +25,24 @@ const BACKUP_TABLES = [
   'roster_staffing_rules',
 ]
 
+// Jeff, 2026-11-11: PostgREST returns at most 1000 rows per request, so a plain
+// select('*') silently drops every row past the 1000th (formula_item_ingredients was
+// already at ~720). Read page by page, in primary-key order so pages never overlap.
+const PAGE = 1000
+async function fetchAllRows(table) {
+  const order = (CONFLICT_KEYS[table] ?? 'id').split(',')
+  const rows = []
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase.from(table).select('*')
+    for (const col of order) q = q.order(col)
+    const { data, error } = await q.range(from, from + PAGE - 1)
+    if (error) throw new Error(`Failed exporting ${table}: ${error.message}`)
+    rows.push(...data)
+    if (data.length < PAGE) break
+  }
+  return rows
+}
+
 export async function exportBackup() {
   const filename = `orange-tea-portal-backup-${new Date().toISOString().slice(0, 10)}.json`
 
@@ -57,11 +75,7 @@ export async function exportBackup() {
   }
 
   const payload = { exported_at: new Date().toISOString(), tables: {} }
-  for (const table of BACKUP_TABLES) {
-    const { data, error } = await supabase.from(table).select('*')
-    if (error) throw new Error(`Failed exporting ${table}: ${error.message}`)
-    payload.tables[table] = data
-  }
+  for (const table of BACKUP_TABLES) payload.tables[table] = await fetchAllRows(table)
   const json = JSON.stringify(payload, null, 2)
 
   // Chromium browsers (Chrome / Edge) support the File System Access API,
@@ -107,7 +121,12 @@ export async function restoreBackup(file) {
   for (const table of BACKUP_TABLES) {
     const rows = payload.tables?.[table]
     if (!rows?.length) continue
-    const { error } = await supabase.from(table).upsert(rows, { onConflict: CONFLICT_KEYS[table] ?? 'id' })
+    // In chunks so a big table is not sent as one oversized request.
+    let error = null
+    for (let i = 0; i < rows.length && !error; i += 500) {
+      const res = await supabase.from(table).upsert(rows.slice(i, i + 500), { onConflict: CONFLICT_KEYS[table] ?? 'id' })
+      error = res.error
+    }
     results.push({ table, count: rows.length, error: error?.message })
   }
   return results
