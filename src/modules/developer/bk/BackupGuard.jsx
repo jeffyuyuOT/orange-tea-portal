@@ -8,6 +8,7 @@ import {
   brisbaneDayStr,
   getBackupDir,
   backupTimeLabel,
+  dirPermission,
   lastDueDay,
   loadBackupState,
   missedDays,
@@ -15,6 +16,22 @@ import {
 } from './bkBackup'
 
 export const BACKUP_CHANGED_EVENT = 'bk-backup-changed'
+// Fired after the guard itself wrote a backup / log row, so an open 系統設置 › 備份 page can reload.
+export const BACKUP_RAN_EVENT = 'bk-backup-ran'
+
+// Brisbane clock minutes minus the backup time: negative = still before it.
+function minutesFromBackupTime() {
+  const [h, m] = backupTimeLabel().split(':').map(Number)
+  const parts = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Brisbane', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date())
+  const now = (Number(parts.find((p) => p.type === 'hour').value) % 24) * 60 + Number(parts.find((p) => p.type === 'minute').value)
+  return now - (h * 60 + m)
+}
+// The 30 minutes leading up to the backup time (and the minute it is due): the permission
+// reminder is shown again here even if it was dismissed earlier in the day.
+const inReminderWindow = () => {
+  const d = minutesFromBackupTime()
+  return d >= -30 && d <= 0
+}
 
 // True once today's backup time has passed and today's backup is not done yet.
 function backupPending(state) {
@@ -40,8 +57,28 @@ export default function BackupGuard() {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
+  // Jeff, 2026-11-11: warn as soon as the app starts if the backup folder is missing or
+  // needs re-authorising (Chrome/Edge drop the folder permission after a restart), instead
+  // of finding out at backup time. null = fine; 'nodir' | 'prompt' | 'denied' = problem.
+  const [permIssue, setPermIssue] = useState(null)
+  const [permDismissed, setPermDismissed] = useState(false) // false | 'early' | 'late'
+  const [inWindow, setInWindow] = useState(inReminderWindow())
+  const [permBusy, setPermBusy] = useState(false)
   const stateRef = useRef(null)
   const runningRef = useRef(false)
+
+  const checkPerm = useCallback(async () => {
+    if (!stateRef.current?.settings?.enabled) return setPermIssue(null)
+    const handle = await getBackupDir()
+    if (!handle) return setPermIssue('nodir')
+    let p = 'denied'
+    try {
+      p = await dirPermission(handle)
+    } catch {
+      /* handle no longer valid (folder deleted/moved) */
+    }
+    setPermIssue(p === 'granted' ? null : p)
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -58,7 +95,10 @@ export default function BackupGuard() {
     }
     stateRef.current = state
     const { settings, log } = state
-    if (!settings.enabled) return setMissed([])
+    if (!settings.enabled) {
+      setPermIssue(null)
+      return setMissed([])
+    }
 
     // Today's backup is due and not done: try to make it now.
     const due = lastDueDay()
@@ -71,13 +111,15 @@ export default function BackupGuard() {
           await runAutoBackup(handle, due)
           state = await loadBackupState()
           stateRef.current = state
+          window.dispatchEvent(new Event(BACKUP_RAN_EVENT))
         } finally {
           runningRef.current = false
         }
       }
     }
     setMissed(missedDays(state.settings, state.log))
-  }, [])
+    await checkPerm()
+  }, [checkPerm])
 
   useEffect(() => {
     refresh()
@@ -89,7 +131,11 @@ export default function BackupGuard() {
     // a hidden tab's timer to about once a minute), and it also retries while no state has
     // been loaded yet (e.g. the 2FA step was finished after the page opened).
     const id = setInterval(() => {
-      if (stateRef.current && !backupPending(stateRef.current)) return
+      setInWindow(inReminderWindow())
+      if (stateRef.current && !backupPending(stateRef.current)) {
+        if (inReminderWindow()) checkPerm() // local check only, no Supabase reads
+        return
+      }
       refresh()
     }, 30000)
     const onChange = () => refresh()
@@ -97,6 +143,7 @@ export default function BackupGuard() {
     const onVisible = () => {
       if (document.hidden) return
       if (!stateRef.current || backupPending(stateRef.current)) refresh()
+      else checkPerm()
     }
     window.addEventListener(BACKUP_CHANGED_EVENT, onChange)
     document.addEventListener('visibilitychange', onVisible)
@@ -107,7 +154,23 @@ export default function BackupGuard() {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [refresh])
+  }, [refresh, checkPerm])
+
+  async function grantPerm() {
+    setPermBusy(true)
+    try {
+      const handle = await getBackupDir()
+      if (handle) await dirPermission(handle, true) // needs this click
+      await checkPerm()
+    } catch {
+      await checkPerm()
+    } finally {
+      setPermBusy(false)
+    }
+  }
+  function laterPerm() {
+    setPermDismissed(inReminderWindow() ? 'late' : 'early')
+  }
 
   async function backupNow() {
     setBusy(true)
@@ -120,6 +183,7 @@ export default function BackupGuard() {
       if (!r.ok) throw new Error(r.error)
       await acknowledgeMissed(missed.map((m) => m.day))
       setResult(`已備份：${r.fileName}`)
+      window.dispatchEvent(new Event(BACKUP_RAN_EVENT))
       await refresh()
     } catch (e) {
       setError(e.message)
@@ -141,7 +205,36 @@ export default function BackupGuard() {
     }
   }
 
+  // The permission reminder never stacks on top of the "missed backup" window.
+  const showPerm =
+    !!permIssue && missed.length === 0 && (permDismissed === false || (permDismissed === 'early' && inWindow))
+  const permText = {
+    nodir: '自動備份已開啟，但這台電腦的這個瀏覽器還沒有指定備份資料夾，所以今晚不會備份。請到 系統設置 › 備份 選擇資料夾。',
+    prompt: `瀏覽器需要你重新授權備份資料夾的寫入權限（電腦重新開機或關掉所有視窗後都會這樣）。不授權的話，今天 ${backupTimeLabel()} 的自動備份會失敗。`,
+    denied: '備份資料夾的寫入權限被拒絕了，今晚的自動備份會失敗。請到 系統設置 › 備份 重新授權或更換資料夾。',
+  }[permIssue]
+
   return (
+    <>
+    <Modal
+      open={showPerm}
+      onClose={laterPerm}
+      title="⚠ 自動備份資料夾需要授權"
+      footer={
+        <>
+          <Button variant="secondary" onClick={laterPerm} disabled={permBusy}>
+            稍後
+          </Button>
+          {permIssue === 'prompt' && (
+            <Button onClick={grantPerm} disabled={permBusy}>
+              {permBusy ? '授權中…' : '現在授權'}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <p className="text-sm">{permText}</p>
+    </Modal>
     <Modal
       open={missed.length > 0}
       onClose={() => setMissed([])}
@@ -176,5 +269,6 @@ export default function BackupGuard() {
         {result && <Notice kind="ok">{result}</Notice>}
       </div>
     </Modal>
+    </>
   )
 }

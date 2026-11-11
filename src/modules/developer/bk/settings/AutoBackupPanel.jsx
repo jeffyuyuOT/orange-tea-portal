@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Button from '../../../../components/ui/Button'
 import { Notice } from '../bkUi'
-import { BACKUP_CHANGED_EVENT } from '../BackupGuard'
+import { BACKUP_CHANGED_EVENT, BACKUP_RAN_EVENT } from '../BackupGuard'
 import {
   autoBackupSupported,
   backupTimeLabel,
@@ -18,6 +18,7 @@ import {
 } from '../bkBackup'
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane', hour12: false }) : '')
+const fmtKb = (bytes) => `${Math.round(bytes / 1024).toLocaleString('en-AU')} KB`
 
 // 系統設置 › 備份 › 自動備份 (browser version): pick a folder, switch on the
 // nightly backup (time is chosen here), see the last results.
@@ -29,7 +30,27 @@ export default function AutoBackupPanel() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [timeInput, setTimeInput] = useState('22:30')
+  // Jeff, 2026-11-11: the list of backups is read straight from the chosen folder, so manual
+  // backups show up too (they are deliberately not logged in the database). null = not readable.
+  const [files, setFiles] = useState(null)
   const supported = autoBackupSupported()
+
+  const listFiles = useCallback(async (h, p) => {
+    if (!h || p !== 'granted') return setFiles(null)
+    try {
+      const out = []
+      for await (const [name, entry] of h.entries()) {
+        if (entry.kind !== 'file' || !/^bk-backup-.*\.json$/.test(name)) continue
+        const f = await entry.getFile()
+        out.push({ name, size: f.size, modified: f.lastModified, manual: /-manual-/.test(name) })
+      }
+      out.sort((a, b) => b.modified - a.modified)
+      setFiles(out)
+    } catch (e) {
+      setFiles(null)
+      setError(`讀不到資料夾裡的檔案：${e.message}`)
+    }
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -38,13 +59,21 @@ export default function AutoBackupPanel() {
       setTimeInput(backupTimeLabel())
       const h = await getBackupDir()
       setDir(h)
-      setPerm(h ? await dirPermission(h) : '')
+      const p = h ? await dirPermission(h) : ''
+      setPerm(p)
+      await listFiles(h, p)
     } catch (e) {
       setError(e.message)
     }
-  }, [])
+  }, [listFiles])
   useEffect(() => {
     load()
+  }, [load])
+  // BackupGuard (mounted app-wide) tells us when it made a backup in the background.
+  useEffect(() => {
+    const onRan = () => load()
+    window.addEventListener(BACKUP_RAN_EVENT, onRan)
+    return () => window.removeEventListener(BACKUP_RAN_EVENT, onRan)
   }, [load])
 
   const changed = async () => {
@@ -98,6 +127,7 @@ export default function AutoBackupPanel() {
       const r = await runAutoBackup(dir, brisbaneDayStr(), { manual: true })
       if (!r.ok) throw new Error(r.error)
       setMsg(`測試備份成功：${r.fileName}`)
+      await load()
     })
 
   if (!state) return error ? <Notice kind="error">{error}</Notice> : null
@@ -171,6 +201,46 @@ export default function AutoBackupPanel() {
         <Notice kind="error">沒有成功備份的日子：{missed.map((m) => m.day).join('、')}</Notice>
       )}
 
+      {dir && perm === 'granted' && files && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-semibold text-brand-900">資料夾裡的備份檔（含手動備份）</h4>
+            <Button variant="secondary" onClick={() => guarded(load)} disabled={busy}>
+              重新整理
+            </Button>
+          </div>
+          {files.length === 0 ? (
+            <p className="text-sm text-gray-500">資料夾裡還沒有 bk-backup-*.json 檔案。</p>
+          ) : (
+            <div className="max-h-64 overflow-auto rounded-xl border border-brand-100">
+              <table className="min-w-full text-sm">
+                <thead className="bg-brand-100 text-left text-xs text-gray-700">
+                  <tr>
+                    <th className="px-3 py-2">檔名</th>
+                    <th className="px-3 py-2">類型</th>
+                    <th className="px-3 py-2">修改時間（布里斯本）</th>
+                    <th className="px-3 py-2">大小</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {files.slice(0, 30).map((f) => (
+                    <tr key={f.name} className="border-t border-gray-100">
+                      <td className="px-3 py-1.5">{f.name}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{f.manual ? '手動' : '自動'}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{fmtTime(new Date(f.modified).toISOString())}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{fmtKb(f.size)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {state.log.length > 0 && (
+        <h4 className="text-sm font-semibold text-brand-900">每日自動備份紀錄（資料庫）</h4>
+      )}
       {state.log.length > 0 && (
         <div className="max-h-64 overflow-auto rounded-xl border border-brand-100">
           <table className="min-w-full text-sm">
