@@ -25,7 +25,7 @@ import {
   toggleStocked,
   weekdayOf,
 } from '../bkUtils'
-import { listCashDayRows, listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance, stockDaysBefore } from '../bkData'
+import { countUnstockedBefore, listCashDayRows, listEntries, loadCashMonth, loadOpeningBalance, saveCashDays, saveOpeningBalance, stockDaysBefore } from '../bkData'
 import { exportCashXlsx } from '../bkExcel'
 import { Field, MoneyInput, NoteButton, Notice, StoreTabs, YearMonthPicker, inputCls } from '../bkUi'
 import EntryForm from './EntryForm'
@@ -382,7 +382,45 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     setDirty(true)
     setMsg('')
   }
-  function onStockToggle(date, checked) {
+  async function onStockToggle(date, checked) {
+    setMsg('')
+    // Jeff, 2026-11-12: ticking 入庫 ticks the earlier days of EARLIER months right away (no 儲存
+    // needed for those), and the 上月月底 balance is refreshed at once. Asked first, and only when
+    // something earlier is actually still unticked, so the normal daily tick has no prompt.
+    if (checked) {
+      const before = monthStart(year, month)
+      let n = 0
+      try {
+        n = await countUnstockedBefore(store.id, before)
+      } catch (e) {
+        setError(e.message)
+        return
+      }
+      if (n > 0) {
+        const ok = window.confirm(
+          `${year}年${month}月之前還有 ${n} 天沒有勾入庫。勾取後這些日子會一併勾取（立即生效，不用按儲存）。確定要勾取嗎？`
+        )
+        if (!ok) return
+        try {
+          await stockDaysBefore(store.id, before)
+        } catch (e) {
+          setError(e.message)
+          return
+        }
+        // An unsaved draft of an earlier month of this store would write 入庫 = off back on 儲存.
+        const cur = year * 12 + month
+        for (const [key, draft] of Object.entries(drafts?.current ?? {})) {
+          const [sid, y, m] = key.split('|')
+          if (sid !== store.id || Number(y) * 12 + Number(m) >= cur) continue
+          for (const d of Object.keys(draft.cashDays ?? {})) draft.cashDays[d] = { ...draft.cashDays[d], d_stocked: true }
+        }
+        loadCashMonth(store.id, year, month)
+          .then((data) => setOpen(data.open)) // the opening 耗損（未入庫） balance changed
+          .catch(() => {})
+        setError('')
+        setMsg(`已一併勾取 ${year}年${month}月之前 ${n} 天的入庫。`)
+      }
+    }
     setCashDays((prev) => {
       const current = Object.fromEntries(dates.map((d) => [d, !!prev[d]?.d_stocked]))
       const next = toggleStocked(dates, current, date, checked)
@@ -394,7 +432,6 @@ export default function StoreCashPanel({ stores, store, year, month, active, ent
     })
     if (checked) setStockPrior(true)
     setDirty(true)
-    setMsg('')
   }
 
   // 儲存: writes the sheet on screen AND every draft left on other stores / months.

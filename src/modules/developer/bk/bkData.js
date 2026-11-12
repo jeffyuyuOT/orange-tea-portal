@@ -314,6 +314,19 @@ export async function stockDaysBefore(storeId, beforeDay) {
   )
 }
 
+// How many days of the store before `beforeDay` still have 入庫 unticked (Jeff, 2026-11-12: asked
+// before ticking, so the user can confirm that those earlier days get ticked together).
+export async function countUnstockedBefore(storeId, beforeDay) {
+  const { count, error } = await supabase
+    .from('bk_cash_days')
+    .select('day', { count: 'exact', head: true })
+    .eq('store_id', storeId)
+    .lt('day', beforeDay)
+    .eq('d_stocked', false)
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
 export async function saveEntry(storeId, form) {
   const payload = {
     entry_date: form.entry_date,
