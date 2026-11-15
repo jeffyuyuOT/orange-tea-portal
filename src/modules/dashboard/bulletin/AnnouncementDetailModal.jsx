@@ -106,6 +106,15 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
   // boxes is opt-in, so behaviour for anyone who never touches this section
   // (shop_manager, or a single-store admin/developer) is unchanged.
   const [selectedStoreIds, setSelectedStoreIds] = useState(() => [storeId])
+  // Jeff, 2026-11-15: "admin發布多家店的notice時，編輯notice時可以有多家店一起
+  // 編輯的選項" — a multi-store notice is N sibling rows tied by
+  // broadcast_group_id (see save()'s isNew branch). When an admin edits one
+  // of them, these are the OTHER rows of the same broadcast (id + store_id);
+  // applyToIds is which of them get the same edit. Only ever populated for
+  // admin/developer (RLS "admin update announcements" already lets them
+  // update any store's row, so no DB change).
+  const [siblings, setSiblings] = useState([])
+  const [applyToIds, setApplyToIds] = useState([])
   const [createdBy, setCreatedBy] = useState(null)
   const [solved, setSolved] = useState(false)
   // The checkbox itself only edits this draft — nothing is written until
@@ -206,6 +215,25 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           setAnnouncementType(data.announcement_type ?? 'normal')
           setVoteDeadline(toLocalInput(data.vote_deadline))
           setVoteSavedDeadline(data.vote_deadline ?? null)
+          setSiblings([])
+          setApplyToIds([])
+          if (data.broadcast_group_id && isAdmin && data.announcement_type !== 'vote') {
+            supabase
+              .from('announcements')
+              .select('id, store_id')
+              .eq('broadcast_group_id', data.broadcast_group_id)
+              .neq('id', announcementId)
+              .then(({ data: sibRows, error: sibError }) => {
+                if (sibError) {
+                  console.error('Failed to load broadcast sibling announcements:', sibError)
+                  return
+                }
+                setSiblings(sibRows ?? [])
+                // Default: apply to every store of the broadcast; untick to
+                // edit just this store's copy.
+                setApplyToIds((sibRows ?? []).map((s) => s.id))
+              })
+          }
           if (data.announcement_type === 'vote') {
             supabase.rpc('get_vote_results', { p_announcement_id: announcementId }).then(({ data: rows }) => {
               if (!rows?.length) return
@@ -315,6 +343,10 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
 
   function toggleStore(id) {
     setSelectedStoreIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
+  }
+
+  function toggleApplyTo(id) {
+    setApplyToIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
   }
 
   function onCategorySelect(value) {
@@ -463,6 +495,38 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
           .from('announcement_reads')
           .upsert({ profile_id: profile.id, announcement_id: announcementId, read_at: new Date().toISOString() }, { onConflict: 'profile_id,announcement_id' })
         if (readError) console.error('Failed to mark announcement as read:', readError)
+
+        // Jeff, 2026-11-15: same edit applied to the ticked sibling stores
+        // of this broadcast. Not offered for vote notices (each store's
+        // copy has its own question/option ids). Each store's copy still
+        // gets its own history entry and read receipt for the editor.
+        const siblingIds = isAdmin && !isVote ? applyToIds.filter((id) => siblings.some((s) => s.id === id)) : []
+        if (siblingIds.length) {
+          const { error: sibUpdateError } = await supabase
+            .from('announcements')
+            .update({
+              title,
+              content_html: content,
+              is_important: isImportant,
+              category,
+              merge_comments_into_content: mergeComments,
+              updated_by: profile.id,
+              updated_by_name: actorName,
+            })
+            .in('id', siblingIds)
+          if (sibUpdateError) throw sibUpdateError
+          const { error: sibHistoryError } = await supabase
+            .from('announcement_history')
+            .insert(siblingIds.map((id) => ({ announcement_id: id, action: 'edited', actor_id: profile.id, actor_name: actorName })))
+          if (sibHistoryError) console.error('Failed to log edit history for sibling announcements:', sibHistoryError)
+          const { error: sibReadError } = await supabase
+            .from('announcement_reads')
+            .upsert(
+              siblingIds.map((id) => ({ profile_id: profile.id, announcement_id: id, read_at: new Date().toISOString() })),
+              { onConflict: 'profile_id,announcement_id' }
+            )
+          if (sibReadError) console.error('Failed to mark sibling announcements as read:', sibReadError)
+        }
       }
       onSaved()
     } catch (err) {
@@ -855,6 +919,21 @@ export default function AnnouncementDetailModal({ announcementId, storeId, onClo
               <input type="checkbox" checked={mergeComments} onChange={(e) => setMergeComments(e.target.checked)} />
               Merge comments into content (admin only)
             </label>
+          )}
+          {!isNew && isAdmin && !isVote && siblings.length > 0 && (
+            <div>
+              <span className="mb-1 block text-xs font-medium text-gray-500">
+                This notice was published to several stores — apply this edit to (checked stores also get these changes)
+              </span>
+              <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 p-2">
+                {siblings.map((s) => (
+                  <label key={s.id} className="flex items-center gap-1.5 text-sm text-gray-700">
+                    <input type="checkbox" checked={applyToIds.includes(s.id)} onChange={() => toggleApplyTo(s.id)} />
+                    {accessibleStores.find((st) => st.id === s.store_id)?.name ?? 'Other store'}
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
           {canBroadcast && (
             <div>
