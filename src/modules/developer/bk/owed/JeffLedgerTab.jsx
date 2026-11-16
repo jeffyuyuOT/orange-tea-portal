@@ -30,8 +30,9 @@ const KIND_LABEL = Object.fromEntries(KINDS)
 // Jeff, 2026-10-21 (point 3): "積欠Jeff的分店篩選最前面多一個全部分店" —
 // StoreTabs' allowAll puts it first (the shared convention). Viewing 全部分店
 // switches reload() to loadAllJeffOwedEntries() below instead of blocking on
-// "no store selected"; 薪水/payroll still only shows under Sunnybank
-// specifically (isSunnybank below), same existing rule, 全部分店 included.
+// "no store selected"; 薪水/payroll shows under Sunnybank and under 全部分店
+// (Jeff, 2026-11-16: 全部分店 must include Sunnybank's data, so its balance
+// equals the sum of the stores), but not under the other stores.
 // 新增 needs one specific store to attach the new row to, so that button is
 // hidden while viewing 全部分店 (see JSX below) rather than silently writing
 // a null store_id.
@@ -83,7 +84,10 @@ export default function JeffLedgerTab({ stores, topActive = true }) {
   const salaryManual = manual.filter((e) => e.kind === 'salary')
   const advancePay = manual.filter((e) => e.kind === 'advance_pay')
   const advanceDraw = manual.filter((e) => e.kind === 'advance_draw')
-  const visiblePayroll = isSunnybank ? payroll : []
+  // payroll salary is company-wide and belongs to Sunnybank, so it shows under
+  // Sunnybank and under 全部分店 (which must include Sunnybank's data) — never
+  // under Toowong / Brookside.
+  const visiblePayroll = isSunnybank || viewingAll ? payroll : []
 
   const salaryTotal = round2(
     visiblePayroll.reduce((a, p) => a + Number(p.amount), 0) + salaryManual.reduce((a, e) => a + Number(e.amount), 0)
