@@ -373,7 +373,7 @@ export default function AttendanceLogTable({
                               that it's kept instead of silently dropped, this has
                               to render without crashing on a null s.clockIn too. */}
                           {s.clockIn ? format(new Date(s.clockIn.occurred_at), 'h:mm a') : 'no clock-in recorded'} –{' '}
-                          {s.clockOut ? format(new Date(s.clockOut.occurred_at), 'h:mm a') : 'still clocked in'}
+                          {s.clockOut ? format(new Date(s.clockOut.occurred_at), 'h:mm a') : s.missedClockOut ? 'no clock-out' : 'still clocked in'}
                           {!!sessionEdits.length && (
                             <span className="ml-2 text-xs text-amber-600">
                               {editNote(sessionEdits[0])}
@@ -381,7 +381,11 @@ export default function AttendanceLogTable({
                             </span>
                           )}
                         </span>
-                        <span className="text-gray-400">{s.inProgress ? 'In progress' : formatMinutes(s.minutes)}</span>
+                        {s.missedClockOut ? (
+                          <span className="font-medium text-red-600">Missed clock-out</span>
+                        ) : (
+                          <span className="text-gray-400">{s.inProgress ? 'In progress' : formatMinutes(s.minutes)}</span>
+                        )}
                       </div>
                     )
                   })}

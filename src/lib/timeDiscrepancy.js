@@ -282,6 +282,7 @@ export async function getStaffTimeDiscrepancies(storeId, profileIds, range = nul
           clockOut: sess.clockOut?.occurred_at ?? null,
           minutes: sess.minutes,
           inProgress: !!sess.inProgress,
+          missedClockOut: !!sess.missedClockOut,
         })),
       attendanceBreakHalfHours: breakHalfHoursByProfileDate.has(`${entry.profile_id}|${entry.work_date}`)
         ? breakHalfHoursByProfileDate.get(`${entry.profile_id}|${entry.work_date}`)

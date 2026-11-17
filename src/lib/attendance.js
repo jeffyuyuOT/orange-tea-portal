@@ -156,12 +156,25 @@ export async function getLastEvent(profileId) {
   return data ?? null
 }
 
-// A punch always alternates with the person's own last punch, so there's
-// nothing to configure: clock in if they're not currently clocked in
-// anywhere, clock out if they are.
+// Jeff, 2026-11-17: "同一位員工第一次掃碼是上班，下一次是下班。如果上班後超過 16 小時沒打
+// 下班，下一次掃碼視為新的上班，那筆舊班次會顯示為漏打下班" — a clock-in more than this long
+// ago is no longer treated as a shift still running: nobody works 16 h straight, so the person
+// simply forgot to clock out. The next scan is then a NEW clock-in, and the old shift is shown as
+// a missed clock-out (see pairEventsIntoSessions / missedClockOut).
+export const MAX_SHIFT_MS = 16 * 60 * 60 * 1000
+
+// True while `lastEvent` is a clock_in that is recent enough to still be an open shift.
+export function isOpenShift(lastEvent, now = Date.now()) {
+  return lastEvent?.event_type === 'clock_in' && now - new Date(lastEvent.occurred_at).getTime() <= MAX_SHIFT_MS
+}
+
+// A punch alternates with the person's own last punch: the first scan is a clock-in, the next a
+// clock-out — except when the last clock-in is older than MAX_SHIFT_MS (above), in which case
+// the scan starts a new shift. `missedPrevious` tells the caller that happened.
 async function getNextEventType(profileId) {
   const last = await getLastEvent(profileId)
-  return last?.event_type === 'clock_in' ? 'clock_out' : 'clock_in'
+  if (last?.event_type !== 'clock_in') return { eventType: 'clock_in', missedPrevious: false }
+  return isOpenShift(last) ? { eventType: 'clock_out', missedPrevious: false } : { eventType: 'clock_in', missedPrevious: true }
 }
 
 // Records a punch at the store the scanned QR named. `occurred_at` is left
@@ -169,13 +182,13 @@ async function getNextEventType(profileId) {
 // the phone's clock for the record itself — the QR's ts is only ever used
 // for the freshness check above.
 export async function submitClockEvent(profileId, storeId) {
-  const eventType = await getNextEventType(profileId)
+  const { eventType, missedPrevious } = await getNextEventType(profileId)
   const { data, error } = await supabase
     .from('attendance_events')
     .insert({ profile_id: profileId, store_id: storeId, event_type: eventType })
     .select()
     .single()
-  return { data, error, eventType }
+  return { data, error, eventType, missedPrevious }
 }
 
 // Pairs a chronological list of a person's clock_in/clock_out rows into
@@ -189,14 +202,20 @@ export function pairEventsIntoSessions(events) {
   let openIn = null
   for (const ev of sorted) {
     if (ev.event_type === 'clock_in') {
-      if (openIn) sessions.push({ clockIn: openIn, clockOut: null, inProgress: true })
+      // A second clock-in with the first still open: that first shift never got a clock-out
+      // (e.g. the 16-hour rule above) — a missed clock-out, not a shift still in progress.
+      if (openIn) sessions.push({ clockIn: openIn, clockOut: null, inProgress: false, missedClockOut: true })
       openIn = ev
     } else {
       sessions.push({ clockIn: openIn, clockOut: ev, inProgress: false })
       openIn = null
     }
   }
-  if (openIn) sessions.push({ clockIn: openIn, clockOut: null, inProgress: true })
+  if (openIn) {
+    // The last clock-in with nothing after it: still running, unless it is past MAX_SHIFT_MS.
+    const stale = !isOpenShift(openIn)
+    sessions.push({ clockIn: openIn, clockOut: null, inProgress: !stale, missedClockOut: stale })
+  }
   return sessions.map((s) => ({
     ...s,
     // A session is filed under the date it STARTED, even if it runs past

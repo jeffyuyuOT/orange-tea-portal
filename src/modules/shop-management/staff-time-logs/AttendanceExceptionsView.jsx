@@ -310,8 +310,8 @@ export default function AttendanceExceptionsView({ staff, currentStoreId, canEdi
                       >
                         {punchCard.sessions.length ? (
                           punchCard.sessions.map((s, i) => (
-                            <Row key={i} strong label={`${clockLabel(s.clockIn) ?? 'no clock-in'} – ${s.clockOut ? clockLabel(s.clockOut) : 'still clocked in'}`}>
-                              {s.inProgress ? 'In progress' : formatMinutes(s.minutes)}
+                            <Row key={i} strong label={`${clockLabel(s.clockIn) ?? 'no clock-in'} – ${s.clockOut ? clockLabel(s.clockOut) : s.missedClockOut ? 'no clock-out' : 'still clocked in'}`}>
+                              {s.missedClockOut ? <span className="text-red-600">Missed clock-out</span> : s.inProgress ? 'In progress' : formatMinutes(s.minutes)}
                             </Row>
                           ))
                         ) : (

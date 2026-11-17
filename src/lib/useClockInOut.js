@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getLastEvent, parseAndValidateQrPayload, submitClockEvent } from './attendance'
+import { getLastEvent, isOpenShift, parseAndValidateQrPayload, submitClockEvent } from './attendance'
 
 // Jeff, 2026-10-01: "手機版的scan to check in按鈕能再做一個快捷鍵在選擇分店跟
 // 姓名的中間嗎" — the scan-to-clock-in/out flow used to live entirely inside
@@ -71,7 +71,7 @@ export function useClockInOut(profileId, accessibleStores) {
       return
     }
 
-    const { error, eventType } = await submitClockEvent(profileId, parsed.storeId)
+    const { error, eventType, missedPrevious } = await submitClockEvent(profileId, parsed.storeId)
     if (error) {
       setFeedback({ type: 'error', text: 'Something went wrong recording that — please try again.' })
       return
@@ -83,14 +83,17 @@ export function useClockInOut(profileId, accessibleStores) {
       // to color itself; carried as its own field rather than making it
       // re-parse `text` back apart.
       kind: eventType === 'clock_in' ? 'in' : 'out',
-      text: `${eventType === 'clock_in' ? 'Clocked in' : 'Clocked out'} at ${parsed.storeName || 'store'} — ${new Date().toLocaleTimeString()}.`,
+      text:
+        `${eventType === 'clock_in' ? 'Clocked in' : 'Clocked out'} at ${parsed.storeName || 'store'} — ${new Date().toLocaleTimeString()}.` +
+        (missedPrevious ? ' Your previous shift had no clock-out, so it is marked as a missed clock-out.' : ''),
     })
     refreshStatus()
   }
 
   return {
     lastEvent,
-    isClockedIn: lastEvent?.event_type === 'clock_in',
+    // A clock-in older than 16 h no longer counts as "clocked in" (see isOpenShift).
+    isClockedIn: isOpenShift(lastEvent),
     showScanner,
     feedback,
     setFeedback,
