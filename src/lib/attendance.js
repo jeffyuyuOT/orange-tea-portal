@@ -173,16 +173,37 @@ export function isOpenShift(lastEvent, now = Date.now()) {
 // the scan starts a new shift. `missedPrevious` tells the caller that happened.
 async function getNextEventType(profileId) {
   const last = await getLastEvent(profileId)
-  if (last?.event_type !== 'clock_in') return { eventType: 'clock_in', missedPrevious: false }
-  return isOpenShift(last) ? { eventType: 'clock_out', missedPrevious: false } : { eventType: 'clock_in', missedPrevious: true }
+  if (last?.event_type !== 'clock_in') return { eventType: 'clock_in', missedPrevious: false, last }
+  return isOpenShift(last) ? { eventType: 'clock_out', missedPrevious: false, last } : { eventType: 'clock_in', missedPrevious: true, last }
 }
+
+// Jeff, 2026-11-21: "如果員工clock in後要過30秒以上才能在clock out，反之亦然" — after any
+// punch (in OR out) the person has to wait this long before the opposite punch is accepted,
+// which stops an accidental double scan from recording an instant in/out pair.
+export const MIN_PUNCH_GAP_MS = 30 * 1000
 
 // Records a punch at the store the scanned QR named. `occurred_at` is left
 // to the database's own now() default rather than trusting the QR's ts or
 // the phone's clock for the record itself — the QR's ts is only ever used
 // for the freshness check above.
 export async function submitClockEvent(profileId, storeId) {
-  const { eventType, missedPrevious } = await getNextEventType(profileId)
+  const { eventType, missedPrevious, last } = await getNextEventType(profileId)
+  if (last?.occurred_at) {
+    // Only a positive, under-30s gap blocks: a negative gap (phone clock vs database clock
+    // skew, or a manager-entered future time) must never lock someone out of punching.
+    const sinceLastMs = Date.now() - new Date(last.occurred_at).getTime()
+    if (sinceLastMs >= 0 && sinceLastMs < MIN_PUNCH_GAP_MS) {
+      return {
+        data: null,
+        error: null,
+        tooSoon: true,
+        waitSeconds: Math.max(1, Math.ceil((MIN_PUNCH_GAP_MS - sinceLastMs) / 1000)),
+        lastType: last.event_type,
+        eventType,
+        missedPrevious: false,
+      }
+    }
+  }
   const { data, error } = await supabase
     .from('attendance_events')
     .insert({ profile_id: profileId, store_id: storeId, event_type: eventType })

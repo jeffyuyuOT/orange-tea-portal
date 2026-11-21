@@ -71,7 +71,16 @@ export function useClockInOut(profileId, accessibleStores) {
       return
     }
 
-    const { error, eventType, missedPrevious } = await submitClockEvent(profileId, parsed.storeId)
+    const { error, eventType, missedPrevious, tooSoon, waitSeconds, lastType } = await submitClockEvent(profileId, parsed.storeId)
+    if (tooSoon) {
+      // Jeff, 2026-11-21: 30-second gap between a clock-in and the next clock-out (and vice
+      // versa) — nothing was recorded; tell them how long to wait.
+      setFeedback({
+        type: 'error',
+        text: `You just clocked ${lastType === 'clock_in' ? 'in' : 'out'} — please wait ${waitSeconds} more second${waitSeconds === 1 ? '' : 's'} before you clock ${lastType === 'clock_in' ? 'out' : 'in'}.`,
+      })
+      return
+    }
     if (error) {
       setFeedback({ type: 'error', text: 'Something went wrong recording that — please try again.' })
       return
