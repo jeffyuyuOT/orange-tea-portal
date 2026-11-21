@@ -50,6 +50,9 @@ export default function ApplyLeaveTab() {
   // [{ id, name }] — the person's OTHER active shops (not the one selected).
   const [otherStores, setOtherStores] = useState([])
   const [askStores, setAskStores] = useState(false)
+  // Jeff, 2026-11-22: "also apply to shops應該要可以勾選要apply to哪些店" — which of
+  // the other shops are ticked in the popup (ids). Defaults to all of them.
+  const [pickedStoreIds, setPickedStoreIds] = useState([])
 
   useEffect(() => {
     if (!profile?.id) return
@@ -146,13 +149,20 @@ export default function ApplyLeaveTab() {
     }
     // Works at another shop too -> ask first (see otherStores above).
     if (otherStoresExcludingCurrent.length) {
+      setPickedStoreIds(otherStoresExcludingCurrent.map((s) => s.id))
       setAskStores(true)
       return
     }
-    register(false)
+    register([])
   }
 
-  async function register(alsoOthers) {
+  function togglePickedStore(id) {
+    setPickedStoreIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  // `alsoStoreIds` = the other shops (by id) this leave should ALSO be saved to;
+  // empty = the selected shop only.
+  async function register(alsoStoreIds) {
     setAskStores(false)
     setSubmitting(true)
     setMessage('')
@@ -171,8 +181,8 @@ export default function ApplyLeaveTab() {
     }
     const done = [stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop']
     const skipped = []
-    if (alsoOthers) {
-      for (const s of otherStoresExcludingCurrent) {
+    if (alsoStoreIds.length) {
+      for (const s of otherStoresExcludingCurrent.filter((o) => alsoStoreIds.includes(o.id))) {
         // Each shop has its own leave cap — don't push someone past it.
         const blocked = await findBlockedForStore(s.id)
         if (blocked) {
@@ -245,24 +255,32 @@ export default function ApplyLeaveTab() {
       <Modal
         open={askStores}
         onClose={() => setAskStores(false)}
-        title="Also apply to your other shop?"
+        title="Also apply to your other shops?"
         footer={
           <>
             <Button variant="secondary" onClick={() => setAskStores(false)}>
               Back
             </Button>
-            <Button variant="secondary" onClick={() => register(false)}>
-              This shop only
+            <Button onClick={() => register(pickedStoreIds)} disabled={submitting}>
+              {pickedStoreIds.length
+                ? `Apply to ${stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop'} + ${pickedStoreIds.length} other shop${pickedStoreIds.length === 1 ? '' : 's'}`
+                : `${stores.find((s) => s.id === currentStoreId)?.name ?? 'This shop'} only`}
             </Button>
-            <Button onClick={() => register(true)}>Also apply to {otherStoresExcludingCurrent.map((s) => s.name).join(', ')}</Button>
           </>
         }
       >
-        <p className="text-sm text-gray-600">
-          You also work at {otherStoresExcludingCurrent.map((s) => s.name).join(', ')}. Should this leave apply there too, or
-          only to {stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop'}? If it's this shop only, you can still be
-          rostered at your other shop for these dates.
+        <p className="mb-3 text-sm text-gray-600">
+          This leave will be registered at {stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop'}. Tick the other
+          shops it should also apply to. Shops you leave unticked stay open, so you can still be rostered there for these dates.
         </p>
+        <div className="space-y-2 rounded-lg border border-gray-200 p-3">
+          {otherStoresExcludingCurrent.map((s) => (
+            <label key={s.id} className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={pickedStoreIds.includes(s.id)} onChange={() => togglePickedStore(s.id)} />
+              {s.name}
+            </label>
+          ))}
+        </div>
       </Modal>
     </div>
   )
