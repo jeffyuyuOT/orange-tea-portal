@@ -7,7 +7,10 @@ import { brisbaneLocalToIso, isoToBrisbaneLocal } from '../../../lib/brisbaneTim
 import LeaveDateRangeFields from './LeaveDateRangeFields'
 
 export default function EditLeaveTab() {
-  const { profile } = useAuth()
+  const { profile, accessibleStores } = useAuth()
+  // Jeff, 2026-11-21: Apply Leave can now register the same leave at several
+  // shops (one row per shop). They're listed as ONE leave here (same
+  // start/end/reason), and Edit/Cancel act on every copy so shops never drift.
   const [leaves, setLeaves] = useState([])
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState({ start_at: '', end_at: '', reason: '' })
@@ -27,7 +30,16 @@ export default function EditLeaveTab() {
       .eq('status', 'active')
       .gt('end_at', new Date().toISOString())
       .order('start_at')
-    setLeaves(data ?? [])
+    const groups = new Map()
+    ;(data ?? []).forEach((l) => {
+      const key = `${l.start_at}|${l.end_at}|${l.reason ?? ''}`
+      const g = groups.get(key)
+      if (g) {
+        g.ids.push(l.id)
+        g.storeIds.push(l.store_id)
+      } else groups.set(key, { ...l, ids: [l.id], storeIds: [l.store_id] })
+    })
+    setLeaves(Array.from(groups.values()))
   }
 
   useEffect(() => {
@@ -56,13 +68,13 @@ export default function EditLeaveTab() {
     await supabase
       .from('leave_requests')
       .update({ start_at: brisbaneLocalToIso(form.start_at), end_at: brisbaneLocalToIso(form.end_at), reason: form.reason })
-      .eq('id', editingId)
+      .in('id', leaves.find((l) => l.id === editingId)?.ids ?? [editingId])
     setEditingId(null)
     load()
   }
 
-  async function cancel(id) {
-    await supabase.from('leave_requests').update({ status: 'cancelled' }).eq('id', id)
+  async function cancel(ids) {
+    await supabase.from('leave_requests').update({ status: 'cancelled' }).in('id', ids)
     load()
   }
 
@@ -100,12 +112,17 @@ export default function EditLeaveTab() {
                 {new Date(l.start_at).toLocaleString()} – {new Date(l.end_at).toLocaleString()}
               </div>
               {l.reason && <div className="text-xs text-gray-400">{l.reason}</div>}
+              {l.ids.length > 1 && (
+                <div className="text-xs text-gray-400">
+                  Applies to: {l.storeIds.map((id) => (accessibleStores ?? []).find((s) => s.id === id)?.name ?? 'shop').join(', ')}
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => startEdit(l)}>
                 Edit
               </Button>
-              <Button variant="danger" onClick={() => cancel(l.id)}>
+              <Button variant="danger" onClick={() => cancel(l.ids)}>
                 Cancel
               </Button>
             </div>

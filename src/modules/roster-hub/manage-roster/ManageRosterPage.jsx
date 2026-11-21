@@ -423,6 +423,13 @@ export default function ManageRosterPage() {
         .select('*')
         .in('profile_id', profileIds)
         .eq('status', 'active')
+        // Jeff, 2026-11-21: leave is per store — a multi-store staff member
+        // can be on leave at one shop and still work at another (Apply Leave
+        // asks which shops it covers). RLS already hid other shops' leave
+        // from a shop manager, but an admin could read all of it, so Sarah
+        // showed "Unavailable" to the admin and "All day available" to
+        // Angel. Scoping to the store being rostered makes both see the same.
+        .eq('store_id', currentStoreId)
         .lt('start_at', weekEndExclusive.toISOString())
         .gt('end_at', weekStartDate.toISOString()),
     ]).then(([avail, { data: leaves }]) => {
@@ -437,7 +444,7 @@ export default function ManageRosterPage() {
     return () => {
       cancelled = true
     }
-  }, [weekStart, staff])
+  }, [weekStart, staff, currentStoreId])
 
   // Landing on a week with nothing saved yet (picking another week, Last/
   // Next week) drops back to the Input page — Summary only makes sense for a

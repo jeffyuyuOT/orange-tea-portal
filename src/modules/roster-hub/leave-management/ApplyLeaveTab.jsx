@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import { useAuth } from '../../../lib/AuthContext'
 import Button from '../../../components/ui/Button'
+import Modal from '../../../components/ui/Modal'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { findBlockedDate } from '../../../lib/leaveLimits'
 import { brisbaneLocalToIso } from '../../../lib/brisbaneTime'
@@ -25,7 +26,8 @@ function todayAt(hh, mm) {
 }
 
 export default function ApplyLeaveTab() {
-  const { profile, currentStoreId } = useAuth()
+  const { profile, currentStoreId, accessibleStores } = useAuth()
+  const stores = accessibleStores ?? []
   const [startAt, setStartAt] = useState(() => todayAt(0, 0))
   const [endAt, setEndAt] = useState(() => todayAt(23, 59))
   // Jeff, 2026-10-02: "specific time" checkbox — unchecked (the default,
@@ -42,6 +44,36 @@ export default function ApplyLeaveTab() {
   const [limitPeriods, setLimitPeriods] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
+  // Jeff, 2026-11-21: someone who works at more than one shop is asked, on
+  // submit, whether this leave also applies to their other shop(s) — leave is
+  // stored per store, so "this shop only" leaves them schedulable elsewhere.
+  // [{ id, name }] — the person's OTHER active shops (not the one selected).
+  const [otherStores, setOtherStores] = useState([])
+  const [askStores, setAskStores] = useState(false)
+
+  useEffect(() => {
+    if (!profile?.id) return
+    let cancelled = false
+    ;(async () => {
+      const [{ data: us }, { data: primary }] = await Promise.all([
+        supabase.from('user_stores').select('stores ( id, name, is_active )').eq('profile_id', profile.id),
+        profile.primary_store_id
+          ? supabase.from('stores').select('id, name, is_active').eq('id', profile.primary_store_id)
+          : Promise.resolve({ data: [] }),
+      ])
+      if (cancelled) return
+      const byId = new Map()
+      ;[...(primary ?? []), ...(us ?? []).map((r) => r.stores).filter(Boolean)].forEach((s) => {
+        if (s.is_active !== false) byId.set(s.id, { id: s.id, name: s.name })
+      })
+      setOtherStores(Array.from(byId.values()))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.id, profile?.primary_store_id])
+
+  const otherStoresExcludingCurrent = otherStores.filter((s) => s.id !== currentStoreId)
 
   useEffect(() => {
     if (!currentStoreId) return
@@ -84,7 +116,23 @@ export default function ApplyLeaveTab() {
   const blockedDate =
     startAt && endAt ? findBlockedDate(startAt, endAt, limitDefaults, limitPeriods, overlapping) : null
 
-  async function submit() {
+  // Same cap check as above, run for a shop other than the selected one.
+  async function findBlockedForStore(storeId) {
+    const [{ data: d }, { data: p }, { data: others }] = await Promise.all([
+      supabase.from('leave_limit_defaults').select('*').eq('store_id', storeId).maybeSingle(),
+      supabase.from('leave_limit_periods').select('*').eq('store_id', storeId),
+      supabase
+        .from('leave_requests')
+        .select('*')
+        .eq('store_id', storeId)
+        .eq('status', 'active')
+        .lt('start_at', brisbaneLocalToIso(endAt))
+        .gt('end_at', brisbaneLocalToIso(startAt)),
+    ])
+    return findBlockedDate(startAt, endAt, d ?? null, p ?? [], others ?? [])
+  }
+
+  function submit() {
     if (rangeInvalid) {
       setMessage('Error: End date/time can’t be before the start.')
       return
@@ -96,25 +144,54 @@ export default function ApplyLeaveTab() {
       )
       return
     }
+    // Works at another shop too -> ask first (see otherStores above).
+    if (otherStoresExcludingCurrent.length) {
+      setAskStores(true)
+      return
+    }
+    register(false)
+  }
+
+  async function register(alsoOthers) {
+    setAskStores(false)
     setSubmitting(true)
     setMessage('')
-    const { error } = await supabase.from('leave_requests').insert({
+    const row = (storeId) => ({
       profile_id: profile.id,
-      store_id: currentStoreId,
+      store_id: storeId,
       start_at: brisbaneLocalToIso(startAt),
       end_at: brisbaneLocalToIso(endAt),
       reason,
     })
-    setSubmitting(false)
+    const { error } = await supabase.from('leave_requests').insert(row(currentStoreId))
     if (error) {
+      setSubmitting(false)
       setMessage(`Error: ${error.message}`)
-    } else {
-      setMessage('Leave registered.')
-      setStartAt(todayAt(0, 0))
-      setEndAt(todayAt(23, 59))
-      setSpecificTime(false)
-      setReason('')
+      return
     }
+    const done = [stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop']
+    const skipped = []
+    if (alsoOthers) {
+      for (const s of otherStoresExcludingCurrent) {
+        // Each shop has its own leave cap — don't push someone past it.
+        const blocked = await findBlockedForStore(s.id)
+        if (blocked) {
+          skipped.push(`${s.name} (leave is full on ${new Date(`${blocked.dateKey}T00:00:00`).toLocaleDateString()})`)
+          continue
+        }
+        const { error: e2 } = await supabase.from('leave_requests').insert(row(s.id))
+        if (e2) skipped.push(`${s.name} (${e2.message})`)
+        else done.push(s.name)
+      }
+    }
+    setSubmitting(false)
+    setMessage(
+      `Leave registered for ${done.join(', ')}.` + (skipped.length ? ` Not applied to: ${skipped.join('; ')}.` : '')
+    )
+    setStartAt(todayAt(0, 0))
+    setEndAt(todayAt(23, 59))
+    setSpecificTime(false)
+    setReason('')
   }
 
   return (
@@ -164,6 +241,29 @@ export default function ApplyLeaveTab() {
         {submitting ? 'Submitting…' : 'Confirm & Register Leave'}
       </Button>
       {message && <p className="text-sm text-brand-600">{message}</p>}
+
+      <Modal
+        open={askStores}
+        onClose={() => setAskStores(false)}
+        title="Also apply to your other shop?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAskStores(false)}>
+              Back
+            </Button>
+            <Button variant="secondary" onClick={() => register(false)}>
+              This shop only
+            </Button>
+            <Button onClick={() => register(true)}>Also apply to {otherStoresExcludingCurrent.map((s) => s.name).join(', ')}</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">
+          You also work at {otherStoresExcludingCurrent.map((s) => s.name).join(', ')}. Should this leave apply there too, or
+          only to {stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop'}? If it's this shop only, you can still be
+          rostered at your other shop for these dates.
+        </p>
+      </Modal>
     </div>
   )
 }
