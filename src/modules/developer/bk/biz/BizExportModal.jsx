@@ -44,12 +44,12 @@ export default function BizExportModal({ open, mode, stores, year, month, onClos
     setChecked(new Set(stores.map((s) => s.id)))
     setFrom(monthStart(year, month))
     setTo(lastDayOfMonth(year, month))
-    setMonday(lastMonday) // last week's Monday: the usual one to report on
+    setMonday(mondayOnOrBefore(brisbaneTodayStr())) // this week's Monday, recomputed on every open (Jeff, 2026-11-23: default to the current week)
     setError('')
     setBusy(false)
     setPreview(null)
     setCopyState(null)
-  }, [open, stores, year, month, lastMonday])
+  }, [open, stores, year, month])
 
   // A stale preview (from a different week/store selection) would be
   // misleading if left on screen — drop it the moment either changes, so
