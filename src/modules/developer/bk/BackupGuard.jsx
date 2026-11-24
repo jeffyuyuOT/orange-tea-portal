@@ -33,6 +33,36 @@ const inReminderWindow = () => {
   return d >= -30 && d <= 0
 }
 
+// Jeff, 2026-11-24: a missed day with no error text used to say only "browser closed / not
+// signed in / 2FA not done" — no way to tell which. Each browser now notes, in localStorage,
+// when it first looked at today's backup after the backup time and what stopped it. If the
+// popup finds nothing for that day, this browser did not run the check at all then (tab
+// paused/closed, or another computer).
+const DIAG_KEY = 'bk-backup-diag'
+function readDiag() {
+  try {
+    return JSON.parse(localStorage.getItem(DIAG_KEY) ?? 'null')
+  } catch {
+    return null
+  }
+}
+function noteDiag(reason) {
+  if (minutesFromBackupTime() < 0) return // only after today's backup time
+  const day = brisbaneDayStr()
+  try {
+    const prev = readDiag()
+    const base = prev?.day === day ? prev : { day, firstAt: Date.now() }
+    localStorage.setItem(DIAG_KEY, JSON.stringify({ ...base, reason, at: Date.now() }))
+  } catch {
+    /* storage unavailable — diagnostics are best-effort */
+  }
+}
+const brisbaneClock = (ms) =>
+  new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Brisbane', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(ms))
+// The popup stays quiet about TODAY for this many minutes after the backup time, so it cannot
+// appear while the backup is still being written (the row is only logged when it finishes).
+const MISSED_GRACE_MIN = 3
+
 // True once today's backup time has passed and today's backup is not done yet.
 function backupPending(state) {
   if (!state?.settings?.enabled) return false
@@ -67,6 +97,16 @@ export default function BackupGuard() {
   const stateRef = useRef(null)
   const runningRef = useRef(false)
 
+  // Missed days to show: today's no-error entry is held back while a backup is running and for
+  // MISSED_GRACE_MIN minutes after the backup time (a real failure, which has an error, shows at once).
+  const visibleMissed = (state) => {
+    const list = missedDays(state.settings, state.log)
+    const today = brisbaneDayStr()
+    const d = minutesFromBackupTime()
+    const hold = runningRef.current || (d >= 0 && d < MISSED_GRACE_MIN)
+    return hold ? list.filter((m) => !(m.day === today && !m.error)) : list
+  }
+
   const checkPerm = useCallback(async () => {
     if (!stateRef.current?.settings?.enabled) return setPermIssue(null)
     const handle = await getBackupDir()
@@ -81,16 +121,22 @@ export default function BackupGuard() {
   }, [])
 
   const refresh = useCallback(async () => {
+    noteDiag('開始檢查')
     try {
       const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
-      if (data?.currentLevel !== 'aal2') return
-    } catch {
+      if (data?.currentLevel !== 'aal2') {
+        noteDiag(`登入還沒通過兩步驟驗證（目前：${data?.currentLevel ?? '未知'}）`)
+        return
+      }
+    } catch (e) {
+      noteDiag(`讀取登入狀態失敗：${e?.message ?? e}`)
       return
     }
     let state
     try {
       state = await loadBackupState()
-    } catch {
+    } catch (e) {
+      noteDiag(`讀取備份設定失敗：${e?.message ?? e}`)
       return // table missing / offline: stay quiet, the settings page shows errors
     }
     stateRef.current = state
@@ -107,6 +153,7 @@ export default function BackupGuard() {
       const handle = await getBackupDir()
       if (handle) {
         runningRef.current = true
+        noteDiag('已開始自動備份')
         try {
           await runAutoBackup(handle, due)
           state = await loadBackupState()
@@ -115,9 +162,13 @@ export default function BackupGuard() {
         } finally {
           runningRef.current = false
         }
+      } else {
+        noteDiag('這個瀏覽器沒有指定備份資料夾')
       }
+    } else if (runningRef.current) {
+      noteDiag('備份進行中')
     }
-    setMissed(missedDays(state.settings, state.log))
+    setMissed(visibleMissed(state))
     await checkPerm()
   }, [checkPerm])
 
@@ -259,12 +310,27 @@ export default function BackupGuard() {
               <span className="text-gray-500">
                 {m.error ? `（失敗：${m.error}）` : '（那天沒有備份：瀏覽器沒開、沒登入，或還沒完成兩步驟驗證）'}
               </span>
+              {!m.error && (
+                <div className="text-xs text-gray-500">
+                  {(() => {
+                    const dg = readDiag()
+                    return dg?.day === m.day
+                      ? `診斷：這個瀏覽器在 ${brisbaneClock(dg.firstAt)} 第一次檢查，最後狀況：${dg.reason}（${brisbaneClock(dg.at)}）`
+                      : `診斷：這個瀏覽器在備份時間之後沒有執行過檢查（分頁可能被暫停、當時沒有開啟，或備份是在另一台電腦／瀏覽器）`
+                  })()}
+                </div>
+              )}
             </li>
           ))}
         </ul>
         <p className="text-gray-500">
           過去的日子沒辦法補做；「立即備份」會把現在的資料備份到你指定的資料夾，並把這些日子標為已處理。
         </p>
+        {busy && (
+          <p className="text-xs text-gray-500">
+            備份中⋯如果這個瀏覽器的網址列旁跳出「允許編輯」之類的授權提示，請按允許，否則會一直等下去。
+          </p>
+        )}
         {error && <Notice kind="error">{error}</Notice>}
         {result && <Notice kind="ok">{result}</Notice>}
       </div>

@@ -269,8 +269,16 @@ export function missedDays(settings, log, ms = Date.now()) {
   return out
 }
 
+// Jeff, 2026-11-24: a day that already has an 'ok' backup is never overwritten with
+// 'acknowledged'. The missed-backup popup used to appear for "today" while the 23:00
+// backup was still being written, and pressing 知道了 / 立即備份 then replaced the real
+// 'ok' row (11/20 and 11/23 both had a backup file yet showed 'acknowledged').
 export async function acknowledgeMissed(days) {
-  for (const d of days) await writeLog(d, 'acknowledged', null, null)
+  if (!days.length) return
+  const { data, error } = await supabase.from('bk_backup_log').select('day, status').in('day', days)
+  if (error) throw new Error(error.message)
+  const okDays = new Set((data ?? []).filter((r) => r.status === 'ok').map((r) => r.day))
+  for (const d of days) if (!okDays.has(d)) await writeLog(d, 'acknowledged', null, null)
 }
 
 // Writes bk-backup-<day>.json into the chosen folder and logs the result.
