@@ -69,9 +69,18 @@ const MISSED_GRACE_MIN = 3
 // another device is backing up. "Backing up" = the database log has an 'ok' row for the latest
 // due day or the one before it (the log is shared by every device).
 function backedUpRecently(log) {
-  const floor = lastDueDay(Date.now() - 86400000)
+  // 3 days, not 1: a day whose 'ok' row was later overwritten by "acknowledged", or one night that
+  // failed, must not make every other device start nagging.
+  const floor = lastDueDay(Date.now() - 3 * 86400000)
   return (log ?? []).some((r) => r.status === 'ok' && r.day >= floor)
 }
+
+// Phones / tablets: the backup folder is on the desktop, so never nag there, even if the browser
+// happens to expose the folder picker.
+const isTouchDevice = () =>
+  typeof navigator !== 'undefined' &&
+  (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') ||
+    (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches))
 
 // True once today's backup time has passed and today's backup is not done yet.
 function backupPending(state) {
@@ -111,7 +120,7 @@ export default function BackupGuard() {
   // MISSED_GRACE_MIN minutes after the backup time (a real failure, which has an error, shows at once).
   const visibleMissed = (state) => {
     // A device that cannot make backups (phone/tablet) can do nothing about a missed day.
-    if (!autoBackupSupported()) return []
+    if (!autoBackupSupported() || isTouchDevice()) return []
     const list = missedDays(state.settings, state.log)
     const today = brisbaneDayStr()
     const d = minutesFromBackupTime()
@@ -121,7 +130,7 @@ export default function BackupGuard() {
 
   const checkPerm = useCallback(async () => {
     if (!stateRef.current?.settings?.enabled) return setPermIssue(null)
-    if (!autoBackupSupported()) return setPermIssue(null)
+    if (!autoBackupSupported() || isTouchDevice()) return setPermIssue(null)
     const handle = await getBackupDir()
     if (!handle) {
       // No folder in THIS browser: only worth a reminder if no other device is backing up.
