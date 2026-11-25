@@ -41,6 +41,7 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
   const [error, setError] = useState('')
   const [cell, setCell] = useState(null) // { item, month } being edited
   const [warn, setWarn] = useState(null) // item whose ⚠ was clicked
+  const [detailId, setDetailId] = useState(null) // phone: service whose full-year dates are shown
   const shiftMonth = (delta) => {
     const total = year * 12 + month + delta
     setYear(Math.floor(total / 12))
@@ -218,7 +219,13 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
                   return (
                     <tr key={it.id} className="border-b border-brand-100 align-top">
                       <td className="border-r border-brand-100 px-2 py-2">
-                        <span className="break-words text-[13px] font-semibold leading-tight text-gray-900">{it.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setDetailId(it.id)}
+                          className="break-words text-left text-[13px] font-semibold leading-tight text-brand-700 underline decoration-dotted underline-offset-2"
+                        >
+                          {it.name}
+                        </button>
                         {info.overdue && (
                           <button onClick={() => setWarn(it)} className="ml-1 text-amber-500" aria-label="Overdue">
                             ⚠️
@@ -331,6 +338,66 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
         </div>
         </>
       )}
+
+      {/* Phone: tap a service name to see its last schedule and every month of the chosen year. */}
+      {(() => {
+        const it = detailId ? (items ?? []).find((x) => x.id === detailId) : null
+        if (!it) return null
+        const info = dueInfo(it, logs, today)
+        const lastBefore = lastYear.get(it.id)
+        const doneCount = MONTHS.reduce((n, _m, mi) => n + (byCell.get(`${it.id}:${mi}`)?.length ?? 0), 0)
+        return (
+          <Modal open onClose={() => setDetailId(null)} title={it.name} footer={<Button onClick={() => setDetailId(null)}>Close</Button>}>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm font-medium text-gray-700">
+                <button className="rounded px-3 py-1 text-lg hover:bg-brand-50" onClick={() => setYear((y) => y - 1)} aria-label="Previous year">
+                  ‹
+                </button>
+                Year {year}
+                <button className="rounded px-3 py-1 text-lg hover:bg-brand-50" onClick={() => setYear((y) => y + 1)} aria-label="Next year">
+                  ›
+                </button>
+              </div>
+              <div className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-gray-600">
+                <div>
+                  {frequencyLabel(it.frequency_months)} · Last schedule: {lastBefore ? formatDate(lastBefore) : '—'}
+                  <span className="ml-2 text-brand-700">· {doneCount} in {year}</span>
+                </div>
+                {info.overdue && <div className="mt-1 text-amber-600">⚠️ Due {formatDate(info.due)}</div>}
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {MONTHS.map((m, mi) => {
+                  const entries = byCell.get(`${it.id}:${mi}`) ?? []
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        setDetailId(null)
+                        setMonth(mi)
+                        setCell({ item: it, month: mi })
+                      }}
+                      className={`min-h-[52px] rounded-lg border px-1 py-1 text-center ${entries.length ? 'border-green-200 bg-green-50' : 'border-brand-100 bg-white'}`}
+                      aria-label={`${it.name} ${m}`}
+                    >
+                      <span className="block text-[10px] font-semibold uppercase text-gray-400">{m}</span>
+                      {entries.length === 0 ? (
+                        <span className="block text-gray-300">+</span>
+                      ) : (
+                        entries.map((e) => (
+                          <span key={e.id} className="block leading-tight">
+                            <span className="block text-xs font-medium text-green-700">{formatDayMonth(e.done_date)}</span>
+                            <span className="block truncate text-[10px] text-gray-500">{e.done_by_name}</span>
+                          </span>
+                        ))
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </Modal>
+        )
+      })()}
 
       {cell && (
         <RecordModal
