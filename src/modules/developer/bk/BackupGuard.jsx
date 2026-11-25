@@ -5,6 +5,7 @@ import Modal from '../../../components/ui/Modal'
 import { Notice } from './bkUi'
 import {
   acknowledgeMissed,
+  autoBackupSupported,
   brisbaneDayStr,
   getBackupDir,
   backupTimeLabel,
@@ -63,6 +64,15 @@ const brisbaneClock = (ms) =>
 // appear while the backup is still being written (the row is only logged when it finishes).
 const MISSED_GRACE_MIN = 3
 
+// Jeff, 2026-11-25: the backup folder lives on the desktop, so a phone (or any browser that
+// cannot pick a folder) must never nag about it, and a browser with no folder stays quiet while
+// another device is backing up. "Backing up" = the database log has an 'ok' row for the latest
+// due day or the one before it (the log is shared by every device).
+function backedUpRecently(log) {
+  const floor = lastDueDay(Date.now() - 86400000)
+  return (log ?? []).some((r) => r.status === 'ok' && r.day >= floor)
+}
+
 // True once today's backup time has passed and today's backup is not done yet.
 function backupPending(state) {
   if (!state?.settings?.enabled) return false
@@ -100,6 +110,8 @@ export default function BackupGuard() {
   // Missed days to show: today's no-error entry is held back while a backup is running and for
   // MISSED_GRACE_MIN minutes after the backup time (a real failure, which has an error, shows at once).
   const visibleMissed = (state) => {
+    // A device that cannot make backups (phone/tablet) can do nothing about a missed day.
+    if (!autoBackupSupported()) return []
     const list = missedDays(state.settings, state.log)
     const today = brisbaneDayStr()
     const d = minutesFromBackupTime()
@@ -109,8 +121,12 @@ export default function BackupGuard() {
 
   const checkPerm = useCallback(async () => {
     if (!stateRef.current?.settings?.enabled) return setPermIssue(null)
+    if (!autoBackupSupported()) return setPermIssue(null)
     const handle = await getBackupDir()
-    if (!handle) return setPermIssue('nodir')
+    if (!handle) {
+      // No folder in THIS browser: only worth a reminder if no other device is backing up.
+      return setPermIssue(backedUpRecently(stateRef.current.log) ? null : 'nodir')
+    }
     let p = 'denied'
     try {
       p = await dirPermission(handle)
