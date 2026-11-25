@@ -22,6 +22,12 @@ import {
 // recorded it. "Last schedule" = the last time the service was done in the
 // previous year. A ⚠ after the service name means last-done + frequency has
 // passed without it being done again; clicking it says by when it was due.
+//
+// Jeff, 2026-11-25: on the phone the page now opens on the CURRENT MONTH and shows every service at
+// once — service name, "Last schedule" (the last time it was done before the chosen month) and a
+// cell for the chosen month — in three columns that fit the screen width (only up/down scrolling
+// when there are many services). ‹ › change the month, the year is picked from a list. Tapping the
+// month cell opens the same record dialog as the desktop grid.
 export default function MaintenanceLogPage({ logType = 'general' }) {
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const storeName = accessibleStores.find((s) => s.id === currentStoreId)?.name ?? ''
@@ -29,19 +35,17 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
   const today = brisbaneToday()
 
   const [year, setYear] = useState(Number(today.slice(0, 4)))
+  const [month, setMonth] = useState(Number(today.slice(5, 7)) - 1) // phone view: 0-11
   const [items, setItems] = useState(null) // null = loading
   const [logs, setLogs] = useState([])
   const [error, setError] = useState('')
   const [cell, setCell] = useState(null) // { item, month } being edited
   const [warn, setWarn] = useState(null) // item whose ⚠ was clicked
-  const [open, setOpen] = useState(() => new Set()) // phone cards whose month dates are expanded
-  const toggleOpen = (id) =>
-    setOpen((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const shiftMonth = (delta) => {
+    const total = year * 12 + month + delta
+    setYear(Math.floor(total / 12))
+    setMonth(((total % 12) + 12) % 12)
+  }
 
   const load = useCallback(async () => {
     if (!currentStoreId) return
@@ -89,6 +93,25 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
     return map
   }, [logs, year])
 
+  // Phone view: item_id -> most recent date done BEFORE the first day of the chosen month.
+  const lastBeforeMonth = useMemo(() => {
+    const monthStart = `${year}-${String(month + 1).padStart(2, '0')}-01`
+    const map = new Map()
+    for (const l of logs) {
+      if (l.done_date >= monthStart) continue
+      if (!map.has(l.item_id) || l.done_date > map.get(l.item_id)) map.set(l.item_id, l.done_date)
+    }
+    return map
+  }, [logs, year, month])
+
+  const yearOptions = useMemo(() => {
+    const thisYear = Number(today.slice(0, 4))
+    const earliest = logs.reduce((m, l) => Math.min(m, Number(l.done_date.slice(0, 4))), thisYear)
+    const from = Math.min(thisYear - 2, earliest, year)
+    const to = Math.max(thisYear + 1, year)
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i)
+  }, [logs, year, today])
+
   if (!currentStoreId) return <EmptyState label="Choose a store first." />
 
   return (
@@ -97,7 +120,7 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
         <p className="text-sm text-gray-500">
           {storeName && <span className="font-medium text-gray-800">{storeName}</span>} · Click a month to record the date a service was done.
         </p>
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        <div className="hidden items-center gap-2 text-sm font-medium text-gray-700 md:flex">
           <button className="rounded px-2 py-1 hover:bg-brand-50" onClick={() => setYear((y) => y - 1)} aria-label="Previous year">
             ‹
           </button>
@@ -115,67 +138,103 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
         <EmptyState label={logType === 'manager' ? "No Manager's Log items for this store yet. Add them in Setting." : 'No maintenance items for this store yet.'} />
       ) : (
         <>
-        {/* Phone: one card per service with a 4x3 month grid — no sideways scrolling. */}
-        <div className="space-y-3 md:hidden">
-          {rows.map((r) => {
-            if (r.type === 'category') {
-              return (
-                <div key={`mcat-${r.name}`} className="rounded-lg border-l-4 border-l-brand-500 bg-brand-100 px-3 py-2 text-sm font-bold text-brand-800">
-                  {r.name}
-                </div>
-              )
-            }
-            const it = r.item
-            const info = dueInfo(it, logs, today)
-            const last = lastYear.get(it.id)
-            const isOpen = open.has(it.id)
-            const doneCount = MONTHS.reduce((n, _m, mi) => n + (byCell.get(`${it.id}:${mi}`)?.length ?? 0), 0)
-            return (
-              <div key={it.id} className="rounded-xl border border-brand-100 bg-white p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 text-sm font-semibold text-gray-900">
-                    {it.name}
-                    {info.overdue && (
-                      <button onClick={() => setWarn(it)} className="ml-1.5 text-amber-500" aria-label="Overdue">
-                        ⚠️
-                      </button>
-                    )}
-                  </div>
-                  <div className="shrink-0 text-xs text-gray-500">{frequencyLabel(it.frequency_months)}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => toggleOpen(it.id)}
-                  aria-expanded={isOpen}
-                  className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg bg-brand-50 px-2.5 py-1.5 text-left text-xs text-gray-600"
-                >
-                  <span>
-                    Last schedule: {last ? formatDate(last) : '—'}
-                    <span className="ml-2 text-brand-700">· {doneCount} in {year}</span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1 font-medium text-brand-700">
-                    {isOpen ? 'Hide dates' : 'Dates'}
-                    <svg className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                    </svg>
-                  </span>
-                </button>
-                {isOpen && (
-                  <div className="mt-2 grid grid-cols-4 gap-1.5">
-                    {MONTHS.map((m, mi) => {
-                      const entries = byCell.get(`${it.id}:${mi}`) ?? []
-                      return (
+        {/* Phone: the chosen month for every service, 3 columns that fit the width. */}
+        <div className="md:hidden">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => shiftMonth(-1)}
+              className="rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-lg leading-none text-brand-700"
+              aria-label="Previous month"
+            >
+              ‹
+            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+                className="rounded-lg border border-brand-200 bg-white px-2 py-1.5 text-sm font-semibold text-gray-800"
+                aria-label="Month"
+              >
+                {MONTHS.map((m, mi) => (
+                  <option key={m} value={mi}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                className="rounded-lg border border-brand-200 bg-white px-2 py-1.5 text-sm font-semibold text-gray-800"
+                aria-label="Year"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => shiftMonth(1)}
+              className="rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-lg leading-none text-brand-700"
+              aria-label="Next month"
+            >
+              ›
+            </button>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-brand-100 bg-white">
+            <table className="w-full table-fixed border-collapse text-xs">
+              <colgroup>
+                <col className="w-[42%]" />
+                <col className="w-[28%]" />
+                <col className="w-[30%]" />
+              </colgroup>
+              <thead>
+                <tr className="bg-brand-50 text-[11px] font-semibold uppercase tracking-wide text-brand-700">
+                  <th className="border-b border-r border-brand-100 px-2 py-2 text-left">Service</th>
+                  <th className="border-b border-r border-brand-100 px-2 py-2 text-left">Last schedule</th>
+                  <th className="border-b border-brand-100 px-2 py-2 text-center">
+                    {MONTHS[month]} {year}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  if (r.type === 'category') {
+                    return (
+                      <tr key={`mcat-${r.name}`}>
+                        <td colSpan={3} className="border-b border-l-4 border-b-brand-200 border-l-brand-500 bg-brand-100 px-2 py-1.5 text-sm font-bold text-brand-800">
+                          {r.name}
+                        </td>
+                      </tr>
+                    )
+                  }
+                  const it = r.item
+                  const info = dueInfo(it, logs, today)
+                  const last = lastBeforeMonth.get(it.id)
+                  const entries = byCell.get(`${it.id}:${month}`) ?? []
+                  return (
+                    <tr key={it.id} className="border-b border-brand-100 align-top">
+                      <td className="border-r border-brand-100 px-2 py-2">
+                        <span className="break-words text-[13px] font-semibold leading-tight text-gray-900">{it.name}</span>
+                        {info.overdue && (
+                          <button onClick={() => setWarn(it)} className="ml-1 text-amber-500" aria-label="Overdue">
+                            ⚠️
+                          </button>
+                        )}
+                        <span className="mt-0.5 block text-[10px] text-gray-400">{frequencyLabel(it.frequency_months)}</span>
+                      </td>
+                      <td className="border-r border-brand-100 px-2 py-2 text-gray-600">{last ? formatDate(last) : '—'}</td>
+                      <td className="p-0">
                         <button
-                          key={m}
-                          onClick={() => setCell({ item: it, month: mi })}
-                          className={`min-h-[52px] rounded-lg border px-1 py-1 text-center ${
-                            entries.length ? 'border-green-200 bg-green-50' : 'border-brand-100 bg-white'
-                          }`}
-                          aria-label={`${it.name} ${m}`}
+                          onClick={() => setCell({ item: it, month })}
+                          className={`block h-full min-h-[48px] w-full px-1 py-1.5 text-center ${entries.length ? 'bg-green-50' : 'text-gray-300'}`}
+                          aria-label={`${it.name} ${MONTHS[month]}`}
                         >
-                          <span className="block text-[10px] font-semibold uppercase text-gray-400">{m}</span>
                           {entries.length === 0 ? (
-                            <span className="block text-gray-300">+</span>
+                            <span className="text-base">+</span>
                           ) : (
                             entries.map((e) => (
                               <span key={e.id} className="block leading-tight">
@@ -185,13 +244,13 @@ export default function MaintenanceLogPage({ logType = 'general' }) {
                             ))
                           )}
                         </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="hidden overflow-x-auto rounded-xl border border-brand-100 bg-white md:block">
