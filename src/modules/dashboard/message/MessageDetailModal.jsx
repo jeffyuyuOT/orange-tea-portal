@@ -5,6 +5,7 @@ import Button from '../../../components/ui/Button'
 import Badge from '../../../components/ui/Badge'
 import RichTextViewer from '../../../components/ui/RichTextViewer'
 import ComposeMessageModal from './ComposeMessageModal'
+import ScheduleRequestPanel from './ScheduleRequestPanel'
 import { rosterDisplayName } from '../../../lib/excelRoster'
 
 // Jeff, 2026-09: same per-store Name Display setting as everywhere else on
@@ -237,6 +238,9 @@ export default function MessageDetailModal({ messageId, profile, onClose, onChan
             </div>
           </div>
         )}
+
+        {/* Jeff, 2026-11-28: availability / leave approval requests can be approved right here. */}
+        <ScheduleRequestPanel messageId={message.id} profile={profile} onDecided={() => onChanged?.()} />
 
         <RichTextViewer html={message.content_html} />
       </Modal>

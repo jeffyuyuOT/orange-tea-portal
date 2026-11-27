@@ -107,9 +107,15 @@ export default function MyAvailabilityPage() {
         "All day — Available" — you only need to change the days that are actually different.
       </p>
 
-      {!isApprovalExempt(profile) && (
+      {(
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           <b>When can I change my availability?</b>
+          {isApprovalExempt(profile) && (
+            <p className="mt-1 text-xs text-amber-700">
+              Your role (manager / admin / developer) isn't held up by this — you can always change your own availability.
+              Staff are restricted as follows:
+            </p>
+          )}
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
             <li>
               Next week's availability can be changed by yourself until{' '}

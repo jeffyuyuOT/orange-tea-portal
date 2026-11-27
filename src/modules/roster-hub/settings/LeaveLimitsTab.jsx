@@ -145,18 +145,6 @@ export default function LeaveLimitsTab() {
           {savingDefaults ? 'Saving…' : 'Save defaults'}
         </Button>
         <span className="text-xs text-gray-400">Leave blank for no limit on that kind of day.</span>
-        {/* Jeff, 2026-11-27: "leave limit那邊新增勾選員工變更或申請leave收到通知...Availability
-            Cut-off Settings裡指定批准變更時間的人會收到訊息通知" */}
-        <label className="flex basis-full items-center gap-2 pt-1 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-            checked={defaults.notify_approver_on_leave}
-            onChange={(e) => setDefaults({ ...defaults, notify_approver_on_leave: e.target.checked })}
-          />
-          Notify the approver when staff apply for or change leave
-          <span className="text-xs text-gray-400">(approver is chosen in Availability Cut-off Settings; remember to press Save defaults)</span>
-        </label>
       </div>
 
       <h3 className="mb-2 text-sm font-semibold text-brand-700">Custom periods</h3>
@@ -198,6 +186,24 @@ export default function LeaveLimitsTab() {
           ))}
         </div>
       )}
+
+      {/* Jeff, 2026-11-27: "leave limit那邊新增勾選員工變更或申請leave收到通知...Availability
+          Cut-off Settings裡指定批准變更時間的人會收到訊息通知" — kept at the very bottom, with its own Save. */}
+      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-brand-100 bg-white p-4">
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+            checked={defaults.notify_approver_on_leave}
+            onChange={(e) => setDefaults({ ...defaults, notify_approver_on_leave: e.target.checked })}
+          />
+          Notify the approver when staff apply for or change leave
+        </label>
+        <span className="text-xs text-gray-400">(approver is chosen in Availability Cut-off Settings)</span>
+        <Button variant="secondary" onClick={saveDefaults} disabled={savingDefaults}>
+          {savingDefaults ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
     </div>
   )
 }

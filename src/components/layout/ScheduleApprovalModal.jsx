@@ -8,7 +8,7 @@ import Button from '../ui/Button'
 // leave changes waiting for them: who wants to change what, to what. Approve applies the change
 // (decide_schedule_change(), migration 0170); Reject leaves everything as it was. Either way the
 // staff member gets a Message.
-const RECHECK_GAP_MS = 10 * 60 * 1000
+const RECHECK_GAP_MS = 2 * 60 * 1000
 
 export default function ScheduleApprovalModal({ profile }) {
   const [items, setItems] = useState([])

@@ -133,14 +133,15 @@ export function buildAvailabilityDetails(weekStartStr, oldByDate, newEditState) 
 // Sends a System message (no real sender) to `recipientIds`.
 export async function sendSystemMessage({ storeId, senderId, recipientIds, subject, html }) {
   const ids = Array.from(new Set((recipientIds ?? []).filter(Boolean)))
-  if (!storeId || !ids.length) return
+  if (!storeId || !ids.length) return null
   const { data: msg, error } = await supabase
     .from('messages')
     .insert({ store_id: storeId, sender_id: senderId, sender_name: 'System', subject, content_html: html })
     .select()
     .single()
-  if (error || !msg) return
+  if (error || !msg) return null
   await supabase.from('message_recipients').insert(ids.map((id) => ({ message_id: msg.id, profile_id: id })))
+  return msg.id
 }
 
 // Creates a pending request and messages the approver. Returns { error } like the other helpers here.
@@ -156,7 +157,9 @@ export async function createChangeRequest({ profile, storeId, approverId, kind, 
       .eq('status', 'pending')
   }
   const requesterName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email || 'A staff member'
-  const { error } = await supabase.from('schedule_change_requests').insert({
+  const { data: created, error } = await supabase
+    .from('schedule_change_requests')
+    .insert({
     store_id: storeId,
     profile_id: profile.id,
     requester_name: requesterName,
@@ -168,15 +171,22 @@ export async function createChangeRequest({ profile, storeId, approverId, kind, 
     details,
     payload,
   })
+    .select('id')
+    .single()
   if (error) return { error }
   if (approverId && approverId !== profile.id) {
-    await sendSystemMessage({
+    // Jeff, 2026-11-28: the Message itself carries Approve / Reject (ScheduleRequestPanel in
+    // MessageDetailModal), linked via message_id (migration 0171).
+    const messageId = await sendSystemMessage({
       storeId,
       senderId: profile.id,
       recipientIds: [approverId],
       subject: `Approval needed: ${requesterName} — ${title}`.slice(0, 200),
-      html: `<p>${esc(requesterName)} wants to change: ${esc(title)}.</p>${(details ?? []).map((l) => `<p>${esc(l)}</p>`).join('')}<p>You will also see a pop-up with Approve / Reject when you open the app.</p>`,
+      html: `<p>${esc(requesterName)} wants to change: ${esc(title)}.</p>${(details ?? []).map((l) => `<p>${esc(l)}</p>`).join('')}<p>Open this message to Approve or Reject it.</p>`,
     })
+    if (messageId && created?.id) {
+      await supabase.from('schedule_change_requests').update({ message_id: messageId }).eq('id', created.id)
+    }
   }
   return { error: null }
 }
