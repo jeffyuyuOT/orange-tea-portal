@@ -15,6 +15,7 @@ import {
   findLeaveConflicts,
   rowToEditDay,
   editDayToRowShape,
+  describeDay,
   loadWeekLocks,
   setWeekLock,
   findMostRecentLockedWeek,
@@ -212,6 +213,11 @@ function AvailabilityWeekSection({
   const { profile, currentStoreId, accessibleStores } = useAuth()
   const [lock, setLock] = useState(null)
   const [pending, setPending] = useState(null)
+  // Jeff, 2026-11-28: days whose new times are still waiting for the approver — shown faded with a
+  // red "Waiting for approval" note, and the popup explaining that nothing changes until approval.
+  const [pendingDates, setPendingDates] = useState(() => new Set())
+  const [showApprovalNotice, setShowApprovalNotice] = useState(false)
+  const [reloadTick, setReloadTick] = useState(0)
   const storeIdsKey = (accessibleStores ?? []).map((s) => s.id).join(',')
 
   useEffect(() => {
@@ -237,12 +243,24 @@ function AvailabilityWeekSection({
     setEditState(null)
     setMessage('')
     if (!profileId) return
-    loadWeekAvailability(profileId, weekStart).then((byDate) => {
+    Promise.all([loadWeekAvailability(profileId, weekStart), loadPendingAvailability(profileId, weekStart)]).then(([byDate, pend]) => {
       if (cancelled) return
       const next = {}
       dates.forEach((d) => {
         next[d] = rowToEditDay(byDate[d])
       })
+      // A change still waiting for the approver: show its proposed times (faded) on the days it touches.
+      const waiting = new Set()
+      if (pend) {
+        ;(pend.payload?.changedDates ?? []).forEach((d) => {
+          const proposed = pend.payload?.days?.[d]
+          if (next[d] && proposed) {
+            next[d] = { mode: proposed.mode, boundaryTime: proposed.boundaryTime || '', windows: proposed.windows ?? [] }
+            waiting.add(d)
+          }
+        })
+      }
+      setPendingDates(waiting)
       setEditState(next)
     })
     return () => {
@@ -252,10 +270,16 @@ function AvailabilityWeekSection({
     // Next Week, a bump of refreshToken right after This Week's sync writes new rows for this
     // same week) should re-trigger the fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId, weekStart, refreshToken])
+  }, [profileId, weekStart, refreshToken, reloadTick])
 
   function updateDay(dateStr, patch) {
     setEditState((prev) => ({ ...prev, [dateStr]: { ...prev[dateStr], ...patch } }))
+    setPendingDates((prev) => {
+      if (!prev.has(dateStr)) return prev
+      const next = new Set(prev)
+      next.delete(dateStr)
+      return next
+    })
   }
 
   async function copyLastWeek() {
@@ -333,6 +357,10 @@ function AvailabilityWeekSection({
         setMessage('Nothing to send — your availability is the same as what is already saved.')
         return
       }
+      const changedDates = dates.filter((d) => {
+        const nd = editDayToRowShape(editState[d])
+        return describeDay(oldByDate?.[d]?.dayRow, oldByDate?.[d]?.windows) !== describeDay(nd.dayRow, nd.windows)
+      })
       const days = {}
       dates.forEach((d) => {
         days[d] = { mode: editState[d].mode, boundaryTime: editState[d].boundaryTime || '', windows: editState[d].windows ?? [] }
@@ -346,7 +374,7 @@ function AvailabilityWeekSection({
         weekStart,
         title: `Availability for the week of ${format(parseISO(weekStart), 'd MMM')}`,
         details,
-        payload: { days },
+        payload: { days, changedDates },
       })
       if (reqError) {
         setSaving(false)
@@ -354,8 +382,10 @@ function AvailabilityWeekSection({
         return
       }
       setPending(await loadPendingAvailability(profileId, weekStart))
+      setPendingDates(new Set(changedDates))
       setSaving(false)
       setMessage(`Sent to ${lock.cutoff.approverName} for approval — it takes effect once they approve.`)
+      setShowApprovalNotice(true)
       return
     }
 
@@ -492,6 +522,8 @@ function AvailabilityWeekSection({
               onClick={async () => {
                 await cancelChangeRequest(pending.id)
                 setPending(null)
+                setPendingDates(new Set())
+                setReloadTick((t) => t + 1)
                 setMessage('Your request was withdrawn.')
               }}
             >
@@ -518,6 +550,7 @@ function AvailabilityWeekSection({
                 day={editState[dateStr]}
                 onChange={(patch) => updateDay(dateStr, patch)}
                 disabled={locked}
+                pendingApproval={pendingDates.has(dateStr)}
               />
             ))}
           </div>
@@ -560,6 +593,20 @@ function AvailabilityWeekSection({
       </Modal>
 
       <Modal
+        open={showApprovalNotice}
+        onClose={() => setShowApprovalNotice(false)}
+        title="Waiting for manager approval"
+        footer={<Button onClick={() => setShowApprovalNotice(false)}>OK</Button>}
+      >
+        <p className="text-sm text-gray-700">
+          This change needs approval — {lockReasonText(lock?.reason, lock?.cutoff)}. Your new times{' '}
+          <b>only take effect once {lock?.cutoff?.approverName ?? 'your manager'} approves them</b>. Until then your current
+          availability stays as it is, and the times you asked for are shown faded with a red "Waiting for approval" note.
+        </p>
+        <p className="mt-2 text-xs text-gray-500">You'll get a Message when it's approved or not approved. You can withdraw the request any time.</p>
+      </Modal>
+
+      <Modal
         open={showLockInfo}
         onClose={() => setShowLockInfo(false)}
         title="Lock Time Pattern"
@@ -586,7 +633,7 @@ function AvailabilityWeekSection({
 // section's own `locked`) greys out every control here so the displayed
 // pattern can't be touched while locked; unchecking the lock is what
 // re-enables editing.
-function DayEditor({ label, day, onChange, disabled = false }) {
+function DayEditor({ label, day, onChange, disabled = false, pendingApproval = false }) {
   function updateWindow(idx, patch) {
     onChange({ windows: day.windows.map((w, i) => (i === idx ? { ...w, ...patch } : w)) })
   }
@@ -598,7 +645,11 @@ function DayEditor({ label, day, onChange, disabled = false }) {
   }
 
   return (
-    <div className="flex flex-wrap items-start gap-3 px-3 py-2.5">
+    <div
+      className={`flex flex-wrap items-start gap-3 px-3 py-2.5 ${
+        pendingApproval ? 'bg-amber-50/70 [&_select]:border-dashed [&_select]:opacity-60' : ''
+      }`}
+    >
       <div className="w-20 shrink-0 pt-1.5 text-sm font-medium text-gray-700">{label}</div>
 
       <select
@@ -660,6 +711,7 @@ function DayEditor({ label, day, onChange, disabled = false }) {
           </button>
         </div>
       )}
+      {pendingApproval && <span className="self-center text-xs font-medium text-red-600">Waiting for approval</span>}
     </div>
   )
 }
