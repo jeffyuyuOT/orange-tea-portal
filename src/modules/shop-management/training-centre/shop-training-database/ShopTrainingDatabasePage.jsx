@@ -498,6 +498,10 @@ function EditModal({
   // Database's videos use, since a brand-new item has no id yet for a
   // shop_training_item_files row to point at until it's actually inserted.
   const [files, setFiles] = useState([])
+  // Jeff, 2026-11-27: "training centre的新增item裡也要有新增video的選項(像formula一樣)，
+  // 可以新增標題跟網址" — titled video links, same as Formula's Videos section
+  // (formula_item_videos); stored in shop_training_item_videos (migration 0169).
+  const [videos, setVideos] = useState([])
   const [uploadingFile, setUploadingFile] = useState(false)
   const [pickingFile, setPickingFile] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -510,7 +514,23 @@ function EditModal({
       .eq('shop_training_item_id', item.id)
       .order('sort_order')
       .then(({ data }) => setFiles(data ?? []))
+    supabase
+      .from('shop_training_item_videos')
+      .select('*')
+      .eq('shop_training_item_id', item.id)
+      .order('sort_order')
+      .then(({ data }) => setVideos(data ?? []))
   }, [isNew, item.id])
+
+  function addVideo() {
+    setVideos((prev) => [...prev, { _key: Math.random(), title: '', url: '' }])
+  }
+  function updateVideo(key, patch) {
+    setVideos((prev) => prev.map((v) => ((v._key ?? v.id) === key ? { ...v, ...patch } : v)))
+  }
+  function removeVideo(key) {
+    setVideos((prev) => prev.filter((v) => (v._key ?? v.id) !== key))
+  }
 
   async function addFiles(fileList) {
     setUploadingFile(true)
@@ -583,6 +603,7 @@ function EditModal({
         })
         .eq('id', item.id)
       await supabase.from('shop_training_item_files').delete().eq('shop_training_item_id', itemId)
+      await supabase.from('shop_training_item_videos').delete().eq('shop_training_item_id', itemId)
     }
     // Jeff, 2026-10-26 (fourth follow-up): a linked item's category follows
     // it to every linked copy too — no-ops instantly for a brand-new item
@@ -597,6 +618,17 @@ function EditModal({
           file_path: f.file_path,
           sort_order: idx,
           uploaded_by: profileId,
+        }))
+      )
+    }
+    const nonEmptyVideos = videos.filter((v) => v.url?.trim())
+    if (nonEmptyVideos.length) {
+      await supabase.from('shop_training_item_videos').insert(
+        nonEmptyVideos.map((v, idx) => ({
+          shop_training_item_id: itemId,
+          title: v.title?.trim() || null,
+          url: v.url.trim(),
+          sort_order: idx,
         }))
       )
     }
@@ -672,6 +704,7 @@ function EditModal({
     }
 
     const nonEmptyFiles = files.filter((f) => f.file_path)
+    const nonEmptyVideos = videos.filter((v) => v.url?.trim())
     for (const row of group) {
       const destCategoryId = categoryId
         ? await resolveLinkedCategoryAtStore(categoryName, categoryGroupId, row.store_id)
@@ -700,6 +733,17 @@ function EditModal({
             uploaded_by: profileId,
           }))
         )
+      }
+      await supabase.from('shop_training_item_videos').delete().eq('shop_training_item_id', row.id)
+      if (nonEmptyVideos.length) {
+        await supabase.from('shop_training_item_videos').insert(
+        nonEmptyVideos.map((v, idx) => ({
+          shop_training_item_id: row.id,
+          title: v.title?.trim() || null,
+          url: v.url.trim(),
+          sort_order: idx,
+        }))
+      )
       }
     }
     setSaving(false)
@@ -840,6 +884,53 @@ function EditModal({
             </div>
           )}
         </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-500">Videos (optional)</span>
+            <button type="button" onClick={addVideo} className="text-xs text-brand-600 hover:underline">
+              + Add video
+            </button>
+          </div>
+          <p className="mb-1 text-xs text-gray-400">
+            Each video has its own title and link (YouTube, File Repository link, etc.). Shown as ▶ buttons below the
+            content on the staff-facing Shop Training page.
+          </p>
+          {videos.length > 0 && (
+            <div className="space-y-1.5">
+              {videos.map((v) => {
+                const key = v._key ?? v.id
+                return (
+                  <div key={key} className="rounded-lg border border-gray-200 p-2">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <input
+                        className="input flex-1"
+                        placeholder="Title (e.g. How to disassemble the sealing die)"
+                        value={v.title || ''}
+                        onChange={(e) => updateVideo(key, { title: e.target.value })}
+                      />
+                      <button type="button" onClick={() => removeVideo(key)} className="shrink-0 text-gray-400 hover:text-red-500">
+                        ✕
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      className="input w-full"
+                      placeholder="https://... (paste the video link)"
+                      value={v.url || ''}
+                      onChange={(e) => updateVideo(key, { url: e.target.value })}
+                    />
+                    {v.url && (
+                      <a href={v.url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-brand-600 hover:underline">
+                        ▶ Test link
+                      </a>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
     {pickingFile && (
@@ -906,10 +997,17 @@ async function findDivergedCopies(group, selfId) {
   if (!self) return []
   const ids = group.map((r) => r.id)
   const catIds = [...new Set(group.map((r) => r.category_id).filter(Boolean))]
-  const [{ data: files }, { data: cats }] = await Promise.all([
+  const [{ data: files }, { data: cats }, { data: vids }] = await Promise.all([
     supabase.from('shop_training_item_files').select('shop_training_item_id, file_path').in('shop_training_item_id', ids),
     catIds.length ? supabase.from('shop_training_categories').select('id, name').in('id', catIds) : Promise.resolve({ data: [] }),
+    supabase.from('shop_training_item_videos').select('shop_training_item_id, title, url').in('shop_training_item_id', ids),
   ])
+  const videoSig = (id) =>
+    (vids ?? [])
+      .filter((v) => v.shop_training_item_id === id)
+      .map((v) => `${(v.title ?? '').trim()}=${(v.url ?? '').trim()}`)
+      .sort()
+      .join('|')
   const catName = (id) => (id ? (cats ?? []).find((c) => c.id === id)?.name?.trim().toLowerCase() ?? '' : '')
   const fileSig = (id) =>
     (files ?? [])
@@ -929,6 +1027,7 @@ async function findDivergedCopies(group, selfId) {
     if ((r.training_journey_phase ?? null) !== (self.training_journey_phase ?? null)) fields.push('training journey phase')
     if (catName(r.category_id) !== catName(self.category_id)) fields.push('category')
     if (fileSig(r.id) !== fileSig(self.id)) fields.push('files')
+    if (videoSig(r.id) !== videoSig(self.id)) fields.push('videos')
     if (fields.length) out.push({ storeId: r.store_id, fields })
   }
   return out
@@ -1012,6 +1111,17 @@ async function copyItemToStore(item, groupId, storeId, destCategoryId, existingI
     .select('*')
     .eq('shop_training_item_id', item.id)
     .order('sort_order')
+  const { data: sourceVideos } = await supabase
+    .from('shop_training_item_videos')
+    .select('*')
+    .eq('shop_training_item_id', item.id)
+    .order('sort_order')
+  const copyVideos = async (destId) => {
+    if (!sourceVideos?.length) return
+    await supabase.from('shop_training_item_videos').insert(
+      sourceVideos.map((v) => ({ shop_training_item_id: destId, title: v.title, url: v.url, sort_order: v.sort_order }))
+    )
+  }
 
   if (existingId) {
     const { error } = await supabase
@@ -1038,6 +1148,8 @@ async function copyItemToStore(item, groupId, storeId, destCategoryId, existingI
         }))
       )
     }
+    await supabase.from('shop_training_item_videos').delete().eq('shop_training_item_id', existingId)
+    await copyVideos(existingId)
     return 'overwritten'
   }
 
@@ -1077,6 +1189,7 @@ async function copyItemToStore(item, groupId, storeId, destCategoryId, existingI
       }))
     )
   }
+  await copyVideos(newItem.id)
   return 'copied'
 }
 

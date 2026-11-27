@@ -21,6 +21,7 @@ export default function ShopTrainingPage() {
   const [openCategoryId, setOpenCategoryId] = useState(null)
   const [openItem, setOpenItem] = useState(null)
   const [openItemFiles, setOpenItemFiles] = useState([])
+  const [openItemVideos, setOpenItemVideos] = useState([])
 
   useEffect(() => {
     let active = true
@@ -65,6 +66,7 @@ export default function ShopTrainingPage() {
   useEffect(() => {
     if (!openItem) {
       setOpenItemFiles([])
+      setOpenItemVideos([])
       return
     }
     let active = true
@@ -75,6 +77,14 @@ export default function ShopTrainingPage() {
       .order('sort_order')
       .then(({ data }) => {
         if (active) setOpenItemFiles(data ?? [])
+      })
+    supabase
+      .from('shop_training_item_videos')
+      .select('*')
+      .eq('shop_training_item_id', openItem.id)
+      .order('sort_order')
+      .then(({ data }) => {
+        if (active) setOpenItemVideos(data ?? [])
       })
     return () => {
       active = false
@@ -135,6 +145,24 @@ export default function ShopTrainingPage() {
 
       <Modal open={!!openItem} onClose={() => setOpenItem(null)} title={openItem?.title} wide>
         <RichTextViewer html={openItem?.content_html} />
+        {openItemVideos.length > 0 && (
+          <div className="mt-4 space-y-1.5 border-t border-brand-100 pt-3">
+            {openItemVideos.map((v) => (
+              <div key={v.id} className="flex items-center gap-2">
+                <span className="text-sm text-gray-700">{v.title || 'Video'}</span>
+                <a
+                  href={v.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Watch video"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500 text-xs text-white hover:bg-brand-600"
+                >
+                  ▶
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
         {openItemFiles.length > 0 && (
           <div className="mt-4 border-t border-brand-100 pt-3">
             <div className="mb-1.5 text-xs font-semibold text-gray-500">Attached files</div>
