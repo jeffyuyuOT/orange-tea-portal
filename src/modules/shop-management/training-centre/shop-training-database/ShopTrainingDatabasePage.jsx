@@ -623,7 +623,7 @@ function EditModal({
     }
     const nonEmptyVideos = videos.filter((v) => v.url?.trim())
     if (nonEmptyVideos.length) {
-      await supabase.from('shop_training_item_videos').insert(
+      const { error: videoErr } = await supabase.from('shop_training_item_videos').insert(
         nonEmptyVideos.map((v, idx) => ({
           shop_training_item_id: itemId,
           title: v.title?.trim() || null,
@@ -631,6 +631,7 @@ function EditModal({
           sort_order: idx,
         }))
       )
+      if (videoErr) alert(`Item saved, but the videos could not be saved: ${videoErr.message}`)
     }
     setSaving(false)
     onSaved()
@@ -736,7 +737,7 @@ function EditModal({
       }
       await supabase.from('shop_training_item_videos').delete().eq('shop_training_item_id', row.id)
       if (nonEmptyVideos.length) {
-        await supabase.from('shop_training_item_videos').insert(
+        const { error: videoErr } = await supabase.from('shop_training_item_videos').insert(
         nonEmptyVideos.map((v, idx) => ({
           shop_training_item_id: row.id,
           title: v.title?.trim() || null,
@@ -744,6 +745,7 @@ function EditModal({
           sort_order: idx,
         }))
       )
+        if (videoErr) alert(`Videos could not be saved: ${videoErr.message}`)
       }
     }
     setSaving(false)
