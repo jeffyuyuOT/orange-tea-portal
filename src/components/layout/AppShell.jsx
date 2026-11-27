@@ -23,6 +23,7 @@ import { isNewBuildAvailable } from '../../lib/appVersion'
 import UpdatePromptModal from './UpdatePromptModal'
 import { pendingReleaseNotes, markNotesSeen } from '../../lib/releaseNotes'
 import WhatsNewModal from './WhatsNewModal'
+import ScheduleApprovalModal from './ScheduleApprovalModal'
 
 // Jeff, 2026-10-26: BK's nightly backup has to run from anywhere in the app, not only
 // while the BK page is open, so the guard lives here (loaded only for people who can open BK).
@@ -613,6 +614,12 @@ export default function AppShell() {
             setWhatsNew([])
           }}
         />
+      )}
+
+      {/* Jeff, 2026-11-27: availability / leave changes waiting for this person (the store's designated
+          approver) to approve — see ScheduleApprovalModal.jsx. */}
+      {!!profile?.id && ['admin', 'shop_manager', 'developer'].includes(profile.role) && !updatePromptOpen && whatsNew.length === 0 && (
+        <ScheduleApprovalModal profile={profile} />
       )}
 
       {showQualifiedPopup && (

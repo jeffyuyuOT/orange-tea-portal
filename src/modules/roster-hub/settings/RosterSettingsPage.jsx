@@ -5,7 +5,7 @@ import Button from '../../../components/ui/Button'
 import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import LeaveLimitsTab from './LeaveLimitsTab'
 import RosterStaffOrderTab from './RosterStaffOrderTab'
-import MessageReminderTab from './MessageReminderTab'
+import AvailabilityCutoffTab from './AvailabilityCutoffTab'
 // Jeff, 2026-10-27: these five used to live only here — pulled out into
 // their own file (lib/timelineBar.js) so StaffAvailabilityModal's new "By
 // Date" tab can reuse the exact same timeline mechanics ("其操作方法跟
@@ -166,8 +166,8 @@ export default function RosterSettingsPage() {
         <TabButton active={tab === 'staffOrder'} onClick={() => setTab('staffOrder')}>
           Roster Staff Order
         </TabButton>
-        <TabButton active={tab === 'messageReminder'} onClick={() => setTab('messageReminder')}>
-          Message reminder
+        <TabButton active={tab === 'cutoff'} onClick={() => setTab('cutoff')}>
+          Availability Cut-off Settings
         </TabButton>
       </div>
 
@@ -175,8 +175,8 @@ export default function RosterSettingsPage() {
         <LeaveLimitsTab />
       ) : tab === 'staffOrder' ? (
         <RosterStaffOrderTab />
-      ) : tab === 'messageReminder' ? (
-        <MessageReminderTab />
+      ) : tab === 'cutoff' ? (
+        <AvailabilityCutoffTab />
       ) : (
         <>
           <p className="mb-4 text-sm text-gray-500">

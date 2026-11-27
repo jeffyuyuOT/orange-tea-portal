@@ -20,6 +20,17 @@ import {
   findMostRecentLockedWeek,
 } from '../../../lib/availability'
 import TimeOfDaySelect from './TimeOfDaySelect'
+import {
+  loadStoreCutoff,
+  formatCutoff,
+  isApprovalExempt,
+  getAvailabilityWeekLock,
+  lockReasonText,
+  buildAvailabilityDetails,
+  createChangeRequest,
+  loadPendingAvailability,
+  cancelChangeRequest,
+} from '../../../lib/scheduleLock'
 
 // Jeff, 2026-09: "在roster hub新增my availability...裡面像my roster一樣顯示
 // this week...跟next week...兩個區塊" — same This Week / Next Week shape as
@@ -27,8 +38,21 @@ import TimeOfDaySelect from './TimeOfDaySelect'
 // own Copy-last-week, own Save) rather than one shared form, since a save on
 // one week has no bearing on the other.
 export default function MyAvailabilityPage() {
-  const { profile } = useAuth()
+  const { profile, currentStoreId } = useAuth()
   const thisWeekStr = thisWeekStart()
+  // Jeff, 2026-11-27: always-visible explanation of when staff can no longer change availability
+  // themselves (cut-off passed / roster submitted -> needs manager approval).
+  const [pageCutoff, setPageCutoff] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!currentStoreId) return
+    loadStoreCutoff(currentStoreId).then((c) => {
+      if (!cancelled) setPageCutoff(c)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [currentStoreId])
   const nextWeekStr = nextWeekStart()
   // Jeff, 2026-10-28: "這禮拜跟下禮拜的lock time pattern可以各自勾取(不用同時
   // 勾取跟取消)" — migration 0087's single profile-level
@@ -82,6 +106,25 @@ export default function MyAvailabilityPage() {
         Let your manager know which hours you're available to work each day. Leave a day untouched and it stays
         "All day — Available" — you only need to change the days that are actually different.
       </p>
+
+      {!isApprovalExempt(profile) && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <b>When can I change my availability?</b>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+            <li>
+              Next week's availability can be changed by yourself until{' '}
+              <b>{pageCutoff && pageCutoff.weekday != null ? formatCutoff(pageCutoff.weekday, pageCutoff.time) : 'the weekly cut-off'}</b>{' '}
+              (Brisbane time) this week.
+            </li>
+            <li>Once the roster for a week has been submitted, that week can't be changed by yourself either.</li>
+            <li>
+              After either of these, press "Submit for approval" — your change only takes effect once{' '}
+              {pageCutoff?.approverId ? pageCutoff.approverName : 'your manager'} approves it. Until then it shows as
+              "Waiting for manager approval".
+            </li>
+          </ul>
+        </div>
+      )}
 
       <div className="space-y-8">
         <AvailabilityWeekSection
@@ -157,6 +200,31 @@ function AvailabilityWeekSection({
   // submit, naming which slot overlaps which leave).
   const [conflicts, setConflicts] = useState(null)
   const [showLockInfo, setShowLockInfo] = useState(false)
+  // Jeff, 2026-11-27 (Availability Cut-off Settings): `lock` says whether THIS week can still be
+  // changed directly — { needsApproval, reason: 'cutoff' | 'roster_submitted', cutoff } — and
+  // `pending` is this person's change for this week that's still waiting for the approver.
+  const { profile, currentStoreId, accessibleStores } = useAuth()
+  const [lock, setLock] = useState(null)
+  const [pending, setPending] = useState(null)
+  const storeIdsKey = (accessibleStores ?? []).map((s) => s.id).join(',')
+
+  useEffect(() => {
+    let cancelled = false
+    if (!profileId || !currentStoreId) return
+    ;(async () => {
+      const storeIds = Array.from(new Set([currentStoreId, ...(accessibleStores ?? []).map((s) => s.id)]))
+      const cutoff = await loadStoreCutoff(currentStoreId)
+      const lk = await getAvailabilityWeekLock({ profile, storeIds, cutoff, weekStart })
+      const pend = await loadPendingAvailability(profileId, weekStart)
+      if (cancelled) return
+      setLock({ ...lk, cutoff })
+      setPending(pend)
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, weekStart, currentStoreId, storeIdsKey, profile?.role, refreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -243,6 +311,48 @@ function AvailabilityWeekSection({
       setSaving(false)
       return
     }
+    // Past the cut-off, or this week's roster is already submitted: the change goes to the approver
+    // instead of being written straight away (nothing changes until they approve).
+    if (lock?.needsApproval) {
+      const approverId = lock.cutoff?.approverId
+      if (!approverId) {
+        setSaving(false)
+        setMessage('Error: no approver has been set for this shop yet — please ask your manager.')
+        return
+      }
+      const oldByDate = await loadWeekAvailability(profileId, weekStart)
+      const details = buildAvailabilityDetails(weekStart, oldByDate, editState)
+      if (!details.length) {
+        setSaving(false)
+        setMessage('Nothing to send — your availability is the same as what is already saved.')
+        return
+      }
+      const days = {}
+      dates.forEach((d) => {
+        days[d] = { mode: editState[d].mode, boundaryTime: editState[d].boundaryTime || '', windows: editState[d].windows ?? [] }
+      })
+      const { error: reqError } = await createChangeRequest({
+        profile,
+        storeId: currentStoreId,
+        approverId,
+        kind: 'availability',
+        reasonCode: lock.reason,
+        weekStart,
+        title: `Availability for the week of ${format(parseISO(weekStart), 'd MMM')}`,
+        details,
+        payload: { days },
+      })
+      if (reqError) {
+        setSaving(false)
+        setMessage(`Error: ${reqError.message}`)
+        return
+      }
+      setPending(await loadPendingAvailability(profileId, weekStart))
+      setSaving(false)
+      setMessage(`Sent to ${lock.cutoff.approverName} for approval — it takes effect once they approve.`)
+      return
+    }
+
     const { error } = await saveWeekAvailability(profileId, weekStart, editState)
     if (error) {
       setSaving(false)
@@ -278,6 +388,13 @@ function AvailabilityWeekSection({
     // locked pattern forward for someone who never touches This Week again
     // after it's already been auto-copied once.
     const nextWeekStartStr = format(addDays(parseISO(weekStart), 7), 'yyyy-MM-dd')
+    const syncStoreIds = Array.from(new Set([currentStoreId, ...(accessibleStores ?? []).map((s) => s.id)]))
+    const nextLock = await getAvailabilityWeekLock({ profile, storeIds: syncStoreIds, cutoff: lock?.cutoff, weekStart: nextWeekStartStr })
+    if (nextLock.needsApproval) {
+      setSaving(false)
+      setMessage('Availability saved. Next Week was not updated — its cut-off has passed or its roster is submitted, so changes there need manager approval.')
+      return
+    }
     const nextDates = weekDatesFrom(nextWeekStartStr)
     const proposedNextByDate = {}
     dates.forEach((d, i) => {
@@ -351,6 +468,38 @@ function AvailabilityWeekSection({
         <p className="mb-2 text-xs text-gray-400">Saving This Week will also copy it into Next Week.</p>
       )}
 
+      {lock?.needsApproval && (
+        <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+          You can't change this week yourself — {lockReasonText(lock.reason, lock.cutoff)}.{' '}
+          {lock.cutoff?.approverId
+            ? `Edit below and press "Submit for approval"; it takes effect once ${lock.cutoff.approverName} approves.`
+            : 'No approver is set for this shop yet — please ask your manager.'}
+        </div>
+      )}
+      {pending && (
+        <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-800">
+          <div className="flex items-center justify-between gap-2">
+            <b>Waiting for manager approval</b>
+            <button
+              type="button"
+              className="font-medium text-blue-700 underline"
+              onClick={async () => {
+                await cancelChangeRequest(pending.id)
+                setPending(null)
+                setMessage('Your request was withdrawn.')
+              }}
+            >
+              Withdraw
+            </button>
+          </div>
+          <ul className="mt-1 space-y-0.5">
+            {(pending.details ?? []).map((l, i) => (
+              <li key={i}>{l}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!editState ? (
         <LoadingSpinner />
       ) : (
@@ -370,8 +519,8 @@ function AvailabilityWeekSection({
       )}
 
       <div className="mt-3 flex items-center gap-3">
-        <Button onClick={save} disabled={!editState || saving}>
-          {saving ? 'Saving…' : `Save ${title}`}
+        <Button onClick={save} disabled={!editState || saving || !lock}>
+          {saving ? 'Saving…' : lock?.needsApproval ? 'Submit for approval' : `Save ${title}`}
         </Button>
         {message && <p className="text-sm text-brand-600">{message}</p>}
       </div>

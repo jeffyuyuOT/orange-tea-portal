@@ -7,6 +7,13 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 import { findBlockedDate } from '../../../lib/leaveLimits'
 import { brisbaneLocalToIso } from '../../../lib/brisbaneTime'
 import LeaveDateRangeFields from './LeaveDateRangeFields'
+import {
+  isApprovalExempt,
+  storesWithSubmittedRoster,
+  loadStoreCutoff,
+  createChangeRequest,
+  notifyLeaveChange,
+} from '../../../lib/scheduleLock'
 
 // Jeff, 2026-09-30: "Leave申請的時候，start的時間預設是一天的開始(12am)，End
 // 的時間預設是一天的最後,而不是當下的時間，因為通常leave是請一整天，除非有特定
@@ -173,30 +180,85 @@ export default function ApplyLeaveTab() {
       end_at: brisbaneLocalToIso(endAt),
       reason,
     })
-    const { error } = await supabase.from('leave_requests').insert(row(currentStoreId))
-    if (error) {
-      setSubmitting(false)
-      setMessage(`Error: ${error.message}`)
-      return
-    }
-    const done = [stores.find((s) => s.id === currentStoreId)?.name ?? 'this shop']
+    const nameOf = (id) =>
+      stores.find((s) => s.id === id)?.name ?? otherStores.find((s) => s.id === id)?.name ?? 'this shop'
+    // Jeff, 2026-11-27: leave inside a week whose roster is already SUBMITTED can't be registered by
+    // the staff member alone — it waits for the store's approver (Availability Cut-off Settings).
+    const chosenOthers = otherStoresExcludingCurrent.filter((o) => alsoStoreIds.includes(o.id))
+    const targetIds = [currentStoreId, ...chosenOthers.map((o) => o.id)]
+    const needApproval = isApprovalExempt(profile) ? new Set() : await storesWithSubmittedRoster(targetIds, startAt, endAt)
+
+    const done = []
+    const doneIds = []
+    const waitingIds = []
     const skipped = []
-    if (alsoStoreIds.length) {
-      for (const s of otherStoresExcludingCurrent.filter((o) => alsoStoreIds.includes(o.id))) {
-        // Each shop has its own leave cap — don't push someone past it.
-        const blocked = await findBlockedForStore(s.id)
-        if (blocked) {
-          skipped.push(`${s.name} (leave is full on ${new Date(`${blocked.dateKey}T00:00:00`).toLocaleDateString()})`)
-          continue
-        }
-        const { error: e2 } = await supabase.from('leave_requests').insert(row(s.id))
-        if (e2) skipped.push(`${s.name} (${e2.message})`)
-        else done.push(s.name)
+
+    if (needApproval.has(currentStoreId)) {
+      waitingIds.push(currentStoreId)
+    } else {
+      const { error } = await supabase.from('leave_requests').insert(row(currentStoreId))
+      if (error) {
+        setSubmitting(false)
+        setMessage(`Error: ${error.message}`)
+        return
       }
+      done.push(nameOf(currentStoreId))
+      doneIds.push(currentStoreId)
+    }
+    for (const s of chosenOthers) {
+      // Each shop has its own leave cap — don't push someone past it.
+      const blocked = await findBlockedForStore(s.id)
+      if (blocked) {
+        skipped.push(`${s.name} (leave is full on ${new Date(`${blocked.dateKey}T00:00:00`).toLocaleDateString()})`)
+        continue
+      }
+      if (needApproval.has(s.id)) {
+        waitingIds.push(s.id)
+        continue
+      }
+      const { error: e2 } = await supabase.from('leave_requests').insert(row(s.id))
+      if (e2) skipped.push(`${s.name} (${e2.message})`)
+      else {
+        done.push(s.name)
+        doneIds.push(s.id)
+      }
+    }
+
+    const waiting = []
+    for (const sid of waitingIds) {
+      const cutoff = await loadStoreCutoff(sid)
+      if (!cutoff?.approverId) {
+        skipped.push(`${nameOf(sid)} (its roster is already submitted and no approver is set — ask your manager)`)
+        continue
+      }
+      const { error: reqErr } = await createChangeRequest({
+        profile,
+        storeId: sid,
+        approverId: cutoff.approverId,
+        kind: 'leave_new',
+        reasonCode: 'roster_submitted',
+        title: `Leave ${startAt.slice(0, 10)} to ${endAt.slice(0, 10)}`,
+        details: [`${startAt.replace('T', ' ')} – ${endAt.replace('T', ' ')}`, ...(reason ? [`Reason: ${reason}`] : []), `Shop: ${nameOf(sid)}`],
+        payload: { storeIds: [sid], startAt: brisbaneLocalToIso(startAt), endAt: brisbaneLocalToIso(endAt), reason },
+      })
+      if (reqErr) skipped.push(`${nameOf(sid)} (${reqErr.message})`)
+      else waiting.push(`${nameOf(sid)} — waiting for ${cutoff.approverName}`)
+    }
+
+    if (doneIds.length) {
+      notifyLeaveChange({
+        profile,
+        storeIds: doneIds,
+        text: `applied for leave: ${startAt.replace('T', ' ')} – ${endAt.replace('T', ' ')}${reason ? ` (${reason})` : ''}.`,
+      })
     }
     setSubmitting(false)
     setMessage(
-      `Leave registered for ${done.join(', ')}.` + (skipped.length ? ` Not applied to: ${skipped.join('; ')}.` : '')
+      (
+        (done.length ? `Leave registered for ${done.join(', ')}.` : '') +
+        (waiting.length ? ` Roster already submitted — needs approval: ${waiting.join('; ')}.` : '') +
+        (skipped.length ? ` Not applied to: ${skipped.join('; ')}.` : '')
+      ).trim()
     )
     setStartAt(todayAt(0, 0))
     setEndAt(todayAt(23, 59))

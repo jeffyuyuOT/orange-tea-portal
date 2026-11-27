@@ -11,7 +11,7 @@ import { EmptyState } from '../../../components/ui/LoadingSpinner'
 // tab only edits the settings themselves.
 export default function LeaveLimitsTab() {
   const { profile, currentStoreId } = useAuth()
-  const [defaults, setDefaults] = useState({ weekday_max: '', weekend_max: '' })
+  const [defaults, setDefaults] = useState({ weekday_max: '', weekend_max: '', notify_approver_on_leave: false })
   const [savingDefaults, setSavingDefaults] = useState(false)
   const [periods, setPeriods] = useState([])
   const [form, setForm] = useState({ label: '', start: '', end: '', max: '' })
@@ -24,7 +24,11 @@ export default function LeaveLimitsTab() {
       supabase.from('leave_limit_defaults').select('*').eq('store_id', currentStoreId).maybeSingle(),
       supabase.from('leave_limit_periods').select('*').eq('store_id', currentStoreId).order('start_date'),
     ])
-    setDefaults({ weekday_max: d?.weekday_max ?? '', weekend_max: d?.weekend_max ?? '' })
+    setDefaults({
+      weekday_max: d?.weekday_max ?? '',
+      weekend_max: d?.weekend_max ?? '',
+      notify_approver_on_leave: !!d?.notify_approver_on_leave,
+    })
     setPeriods(p ?? [])
   }
 
@@ -39,6 +43,7 @@ export default function LeaveLimitsTab() {
         store_id: currentStoreId,
         weekday_max: defaults.weekday_max === '' ? null : Number(defaults.weekday_max),
         weekend_max: defaults.weekend_max === '' ? null : Number(defaults.weekend_max),
+        notify_approver_on_leave: !!defaults.notify_approver_on_leave,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'store_id' }
@@ -140,6 +145,18 @@ export default function LeaveLimitsTab() {
           {savingDefaults ? 'Saving…' : 'Save defaults'}
         </Button>
         <span className="text-xs text-gray-400">Leave blank for no limit on that kind of day.</span>
+        {/* Jeff, 2026-11-27: "leave limit那邊新增勾選員工變更或申請leave收到通知...Availability
+            Cut-off Settings裡指定批准變更時間的人會收到訊息通知" */}
+        <label className="flex basis-full items-center gap-2 pt-1 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+            checked={defaults.notify_approver_on_leave}
+            onChange={(e) => setDefaults({ ...defaults, notify_approver_on_leave: e.target.checked })}
+          />
+          Notify the approver when staff apply for or change leave
+          <span className="text-xs text-gray-400">(approver is chosen in Availability Cut-off Settings; remember to press Save defaults)</span>
+        </label>
       </div>
 
       <h3 className="mb-2 text-sm font-semibold text-brand-700">Custom periods</h3>

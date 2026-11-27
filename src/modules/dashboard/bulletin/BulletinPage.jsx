@@ -334,6 +334,11 @@ export default function BulletinPage() {
             // — this is what stops the same crossing being re-sent every
             // time a manager happens to reopen Bulletin.
             if (!info || info.band <= (s.training_hours_notified_band ?? 0)) return null
+            // Jeff, 2026-11-27: "員工離formal剩幾小時的通知manager不用收到 (員工自己收到就好了)，
+            // manager收到時間過了還沒進行formal exam的通知就好" — the "N hours left" bands are the
+            // staff member's own login popup only; managers hear about it once the target is
+            // reached / passed. A skipped band isn't claimed, so the first overdue band still sends.
+            if (info.remaining > 0) return null
             return { staff: s, info }
           })
           .filter(Boolean)
