@@ -157,6 +157,9 @@ export default function ManageRosterPage() {
   // warning above or the Clear-then-Submit confirm below, both of which are
   // fine to save/publish through once acknowledged.
   const [publishedDraftBlocked, setPublishedDraftBlocked] = useState(false)
+  // Jeff, 2026-11-28: "做Unpublish（退回草稿)按鈕" — a published week can be pulled back to a draft
+  // (e.g. Submit & Publish clicked by mistake). `unpublishConfirm` is the confirm modal's open state.
+  const [unpublishConfirm, setUnpublishConfirm] = useState(false)
   // Jeff, 2026-10-30: an outright block, same shape as publishedDraftBlocked
   // above (a plain OK modal, no "do it anyway" escape hatch) — see
   // findInvalidTimeEntries' own comment for why this exists. Holds the list
@@ -858,6 +861,34 @@ export default function ManageRosterPage() {
   // question about the SAVE ITSELF (overwriting a live published roster),
   // separate from and upstream of the understaffed-slots warning further
   // down, which is about staffing levels, not about publish-safety.
+  // Pulls this week's published roster back to a draft: status -> 'draft', submitted_at cleared. The
+  // entries themselves are left exactly as they are (so nothing is lost and it can be published again),
+  // but staff can no longer see them (drafts aren't visible to staff), and the week no longer counts as
+  // "submitted" for the availability / leave approval rule. No notification is sent for this.
+  async function doUnpublish() {
+    setUnpublishConfirm(false)
+    setSaving(true)
+    setMessage('')
+    try {
+      const { error } = await supabase
+        .from('roster_periods')
+        .update({ status: 'draft', submitted_at: null })
+        .eq('store_id', currentStoreId)
+        .eq('week_start_date', weekStart)
+        .eq('status', 'submitted')
+      if (error) throw error
+      setLoadedPeriodStatus('draft')
+      setClearedFromPublished(false)
+      setMessage('Roster unpublished — it is back to a draft. Staff can no longer see it until you Submit & Publish again.')
+      await refreshRosterUpdates?.()
+      await refreshBulletinUpdates?.()
+    } catch (err) {
+      setMessage(`Error: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function handleSaveOrSubmit(status) {
     // Checked first, ahead of every other Save/Submit gate below — bad
     // time values should never reach persist() regardless of publish
@@ -998,6 +1029,16 @@ export default function ManageRosterPage() {
             <span className="sm:hidden">Submit</span>
             <span className="hidden sm:inline">Submit & Publish</span>
           </Button>
+          {loadedPeriodStatus === 'submitted' && (
+            <Button
+              variant="secondary"
+              disabled={saving || !!importReview || loadingPeriod}
+              onClick={() => setUnpublishConfirm(true)}
+              title="Pull this published roster back to a draft"
+            >
+              Unpublish
+            </Button>
+          )}
           <button
             type="button"
             onClick={() => setShowInstructions(true)}
@@ -1368,6 +1409,31 @@ export default function ManageRosterPage() {
               ))}
             </ul>
           </div>
+        </Modal>
+      )}
+
+      {unpublishConfirm && (
+        <Modal
+          open
+          onClose={() => setUnpublishConfirm(false)}
+          title="Unpublish this roster?"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setUnpublishConfirm(false)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={doUnpublish}>
+                Unpublish
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-700">
+            This week's roster goes back to a <b>draft</b>. Staff won't be able to see it any more, and the week no
+            longer counts as submitted — so staff can change their own availability and leave for it again without
+            approval. Nothing on the grid is deleted, and no notification is sent. Submit &amp; Publish again whenever
+            it's ready.
+          </p>
         </Modal>
       )}
 
